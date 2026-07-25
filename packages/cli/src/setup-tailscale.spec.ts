@@ -105,4 +105,30 @@ describe('configureTailscaleServe', () => {
     expect(() => configureTailscaleServe('/usr/bin/tailscale', 'http://127.0.0.1:8137', () => 'no serve config'))
       .toThrow(/did not report a private HTTPS origin/);
   });
+
+  it('includes stdout in the diagnostic when serve --bg times out waiting for consent', () => {
+    // A tailnet with no HTTPS certificates enabled makes `serve --bg` block on an
+    // interactive consent prompt instead of failing; Tailscale prints that prompt,
+    // including the consent URL, to stdout rather than stderr.
+    const error = Object.assign(new Error('Command failed: /usr/bin/tailscale serve --bg http://127.0.0.1:8137'), {
+      stdout: 'To enable HTTPS Certificates for your tailnet, visit:\nhttps://login.tailscale.com/f/https',
+      killed: true,
+      signal: 'SIGTERM',
+    });
+    expect(() => configureTailscaleServe('/usr/bin/tailscale', 'http://127.0.0.1:8137', (_command, args) => {
+      if (args[0] === 'serve' && args[1] === '--bg') throw error;
+      return '';
+    })).toThrow(/https:\/\/login\.tailscale\.com\/f\/https/);
+  });
+
+  it('bounds the serve --bg call with a timeout but leaves serve status unbounded', () => {
+    const calls: Array<{ args: string[]; options: { timeoutMs?: number } | undefined }> = [];
+    configureTailscaleServe('/usr/bin/tailscale', 'http://127.0.0.1:8137', (_command, args, options) => {
+      calls.push({ args, options });
+      if (args.join(' ') === 'serve status') return 'https://host.tail-abc.ts.net (tailnet only)';
+      return '';
+    });
+    expect(calls[0]).toEqual({ args: ['serve', '--bg', 'http://127.0.0.1:8137'], options: { timeoutMs: 20_000 } });
+    expect(calls[1]).toEqual({ args: ['serve', 'status'], options: undefined });
+  });
 });

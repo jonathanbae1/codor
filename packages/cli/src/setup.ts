@@ -37,7 +37,7 @@ const HARNESSES = ['claude', 'codex', 'opencode', 'gemini', 'copilot', 'cursor-a
 const LAUNCH_AGENT_LABEL = 'app.codor.switchboard';
 
 export interface SetupOverrides {
-  exec?(command: string, args: string[]): string;
+  exec?(command: string, args: string[], options?: { timeoutMs?: number }): string;
   exists?(path: string): boolean;
   home?: string;
   kernelRelease?: string;
@@ -67,9 +67,14 @@ export interface SetupOptions {
   yes?: boolean;
 }
 
-const defaultExec = (command: string, args: string[]): string => execFileSync(command, args, {
+const defaultExec = (
+  command: string,
+  args: string[],
+  options: { timeoutMs?: number } = {},
+): string => execFileSync(command, args, {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
+  ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
 }).trim();
 
 const defaultWhich = (command: string): string | undefined => {
@@ -381,23 +386,29 @@ export function tailscaleServeSupported(
 export function configureTailscaleServe(
   tailscalePath: string,
   localEndpoint: string,
-  exec: (command: string, args: string[]) => string,
+  exec: (command: string, args: string[], options?: { timeoutMs?: number }) => string,
 ): string {
-  // Preserve the full message and stderr: real permission/operator guidance often
-  // lands on a later line (the same class of bug fixed for launchctl). Node's
-  // command error often already embeds stderr in `message`, so never append the
-  // same block twice.
+  // Preserve the full message, stdout, and stderr: real permission/operator
+  // guidance often lands on a later line (the same class of bug fixed for
+  // launchctl), and Tailscale's own consent/admin-console prompt for Serve is
+  // printed to stdout rather than stderr. Node's command error often already
+  // embeds stderr in `message`, so never append the same block twice.
   const diagnostic = (error: unknown): string => {
-    const err = error as { message?: string; stderr?: string | Buffer };
+    const err = error as { message?: string; stderr?: string | Buffer; stdout?: string | Buffer };
     const message = err.message?.trim();
     const stderr = err.stderr?.toString().trim();
+    const stdout = err.stdout?.toString().trim();
     const parts = message === undefined || message === '' ? [] : [message];
     if (stderr !== undefined && stderr !== '' && message?.includes(stderr) !== true) parts.push(stderr);
+    if (stdout !== undefined && stdout !== '' && message?.includes(stdout) !== true) parts.push(stdout);
     return parts.join('\n').trim() || String(error);
   };
   let status: string;
   try {
-    exec(tailscalePath, ['serve', '--bg', localEndpoint]);
+    // Bounded: when the tailnet has no HTTPS certificates enabled, `serve --bg`
+    // does not fail — it blocks waiting for interactive consent in a browser.
+    // `serve status` never blocks this way, so only the first call gets a budget.
+    exec(tailscalePath, ['serve', '--bg', localEndpoint], { timeoutMs: 20_000 });
     status = exec(tailscalePath, ['serve', 'status']);
   } catch (error) {
     throw new Error(`Tailscale Serve command failed: ${diagnostic(error)}`);
