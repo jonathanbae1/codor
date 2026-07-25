@@ -34,6 +34,12 @@ The interactive setup checks this computer, prepares private files, asks how the
 connect, starts Codor, verifies the daemon, and prints a QR, URL, eight-character pairing code, and
 expiry. It never sends channel data through a Codor-hosted service.
 
+> [!NOTE]
+> On pnpm, install into a project rather than running `pnpm dlx @richhardry/codor install`. A tested
+> `pnpm dlx` install did not pick up the workspace `packageExtensions` and native build-approval
+> settings this install needs—see [Self-host: Prerequisites](docs/SELF-HOST.md#prerequisites) for
+> the settings.
+
 Preview without changing the host:
 
 ```sh
@@ -116,6 +122,17 @@ Install and sign in to at least one supported agent:
 Tailscale lets you open Codor privately from your phone, tablet, or another computer—without
 putting it on the public internet. [Install Tailscale](https://tailscale.com/download) and sign in
 on both devices with the same account.
+
+> [!IMPORTANT]
+> Before this works, HTTPS certificates must be enabled for your tailnet at
+> [the admin console](https://console.tailscale.com/admin/dns). Until then, `tailscale serve` waits
+> for you to complete that setup in a browser instead of returning—if `codor install` looks frozen
+> at "configuring Tailscale", this is why. Enabling HTTPS only authorizes certificate issuance;
+> running `tailscale serve` (as `codor install` does) then issues one, which publishes this
+> machine's `*.ts.net` name to the public
+> [Certificate Transparency](https://tailscale.com/docs/how-to/set-up-https-certificates) log—a
+> disclosure that can't be undone, even if you disable HTTPS again later. If you'd rather skip this,
+> choose "On this computer only" during setup—you can add Tailscale access later.
 
 `codor install` can publish Codor privately over Tailscale automatically. If you skipped that step,
 run:
