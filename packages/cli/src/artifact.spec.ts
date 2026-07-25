@@ -154,7 +154,12 @@ describe('built public artifact', () => {
     expect(readFileSync(join(cliRoot, 'runtime', 'web', 'index.html'), 'utf8')).toContain('<!doctype html>');
     expect(readFileSync(join(cliRoot, 'packaging', 'systemd', 'codor.service'), 'utf8'))
       .toContain('ExecStart=');
-    expect(statSync(join(outDir, 'bin', 'codor.mjs')).mode & 0o111).not.toBe(0);
+    // Windows has no POSIX executable permission bit — writeFileSync's `mode`
+    // option cannot set one there, so this property only exists to check on
+    // platforms where the filesystem tracks it.
+    if (process.platform !== 'win32') {
+      expect(statSync(join(outDir, 'bin', 'codor.mjs')).mode & 0o111).not.toBe(0);
+    }
   });
 
   it('contains no source, specs, fixtures, symlinks, or workspace protocols', () => {

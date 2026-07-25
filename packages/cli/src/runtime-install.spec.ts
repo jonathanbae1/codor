@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -12,7 +12,10 @@ import {
 } from './runtime-install.js';
 import { type RuntimePaths } from './runtime-paths.js';
 
-const HOME = '/home/u';
+// Built through `resolve()`, the same call the code under test makes on a
+// durable install root, so this fixture already carries a Windows drive
+// prefix where the implementation's own normalization would add one.
+const HOME = resolve(sep, 'home', 'u');
 const DATA = join(HOME, '.codor');
 const LOCATION = join(DATA, 'runtime');
 

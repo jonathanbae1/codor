@@ -1264,12 +1264,14 @@ describe('@codor/cli', () => {
     const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url));
     const claudeTranscript = join(dir, 'claude-transcript.jsonl');
     writeFileSync(
-      JSON.stringify(claudeTranscript).slice(1, -1),
+      claudeTranscript,
       readFileSync(join(fixtures, 'claude-transcript.jsonl'), 'utf8'),
     );
+    // JSON-escape the path before embedding it in a JSON string value — a raw
+    // Windows path's single backslashes are not valid JSON escape sequences.
     const claudeRaw = readFileSync(join(fixtures, 'claude-stop.json'), 'utf8').replace(
       'CLAUDE_TRANSCRIPT_PATH',
-      claudeTranscript,
+      JSON.stringify(claudeTranscript).slice(1, -1),
     );
     expect(parseMirrorHook('claude', claudeRaw)).toMatchObject({
       type: 'mirror_turn',
@@ -1314,6 +1316,9 @@ describe('@codor/cli', () => {
 
   // harn:assume empty-database-desk-uses-service-home ref=bootstrap-service-home-regression
   // harn:assume empty-database-desk-seeds-tutorial-atomically ref=bootstrap-tutorial-regression
+  // Two full startCodor/close cycles plus native module load routinely exceed
+  // vitest's 5s default on Windows, where process and filesystem overhead is
+  // higher than on POSIX; this does not indicate a hang (observed ~6s).
   it('bootstraps one home-rooted Desk and one durable Tutorial message', async () => {
     const homeDir = join(dir, 'service-home');
     mkdirSync(homeDir);
@@ -1407,7 +1412,7 @@ describe('@codor/cli', () => {
     } finally {
       await restarted.close();
     }
-  });
+  }, 15000);
   // harn:end empty-database-desk-seeds-tutorial-atomically
   // harn:end empty-database-desk-uses-service-home
 
