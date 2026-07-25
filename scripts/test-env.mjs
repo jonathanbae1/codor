@@ -12,18 +12,25 @@ if (command === undefined) {
   process.exit(2);
 }
 
-// Resolve a bare package bin name (e.g. "vitest") to its real entrypoint and
-// run it under `node` directly, bypassing the platform-specific
+// Resolve a bare package bin name (e.g. "vitest") to its real entrypoint so
+// it can run under `node` directly, bypassing the platform-specific
 // node_modules/.bin shim (a .CMD file on Windows, which child_process.spawn
-// refuses to execute without `shell: true`). A command that already looks
-// like a path (e.g. an absolute executable path a caller resolved itself) is
-// spawned unchanged below.
+// refuses to execute without `shell: true`). Returns undefined for a bare
+// command that names no such package (e.g. a system executable like `node`
+// or `git`) — the caller falls back to spawning it directly, exactly as
+// before this resolution existed. A command that already looks like a path
+// (e.g. an absolute executable path a caller resolved itself) is spawned
+// unchanged below and never reaches this function.
 function resolveBinEntry(name) {
-  const packageJsonPath = require.resolve(`${name}/package.json`);
+  let packageJsonPath;
+  try {
+    packageJsonPath = require.resolve(`${name}/package.json`);
+  } catch {
+    return undefined;
+  }
   const pkg = require(packageJsonPath);
   const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[name];
-  if (bin === undefined) throw new Error(`"${name}" declares no "${name}" bin entry (${packageJsonPath})`);
-  return join(dirname(packageJsonPath), bin);
+  return bin === undefined ? undefined : join(dirname(packageJsonPath), bin);
 }
 
 // harn:assume cli-tests-delete-inherited-codor-environment ref=cli-test-environment-wrapper
@@ -35,17 +42,10 @@ if (removed.length > 0) {
 }
 
 const looksLikePath = command.includes('/') || command.includes('\\') || isAbsolute(command);
-let spawnCommand = command;
-let spawnArgs = args;
-if (!looksLikePath) {
-  try {
-    spawnCommand = process.execPath;
-    spawnArgs = [resolveBinEntry(command), ...args];
-  } catch (error) {
-    process.stderr.write(`test-env: failed to resolve ${command}: ${error.message}\n`);
-    process.exit(1);
-  }
-}
+const binEntry = looksLikePath ? undefined : resolveBinEntry(command);
+const [spawnCommand, spawnArgs] = binEntry === undefined
+  ? [command, args]
+  : [process.execPath, [binEntry, ...args]];
 const child = spawn(spawnCommand, spawnArgs, { stdio: 'inherit', env });
 child.on('error', (error) => {
   process.stderr.write(`test-env: failed to spawn ${command}: ${error.message}\n`);
