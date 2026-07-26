@@ -70,7 +70,8 @@ function installedWrapperPackageJson(location: string): string {
 // harn:assume setup-installs-durable-per-user-runtime-atomically ref=durable-runtime-install
 /** The self-contained module tree the running CLI resolves against, and whether
  *  it is already durable (a source checkout or a stable install) or ephemeral
- *  (an npx cache / temp dir that must be copied before a service points at it). */
+ *  (an npx cache, a pnpm dlx cache, or a temp dir that must be copied before a
+ *  service points at it). */
 export function resolveInstallSource(runtime: RuntimePaths): { installRoot: string; nodeModules: string; durable: boolean } {
   if (runtime.layout === 'source-checkout') {
     return { installRoot: runtime.root, nodeModules: join(runtime.root, 'node_modules'), durable: true };
