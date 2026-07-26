@@ -599,8 +599,33 @@ describe('@codor/cli', () => {
       'http://127.0.0.1:65535',
       async () => false,
       async (milliseconds) => { sleeps.push(milliseconds); },
+    )).rejects.toThrow('if the port is listening, the service started');
+    expect(sleeps.length).toBeGreaterThan(19);
+    expect(sleeps.reduce((total, ms) => total + ms, 0)).toBe(60_000);
+  });
+
+  it('backs off progressively and resolves past the old 20-attempt limit', async () => {
+    let attempts = 0;
+    await expect(waitForCodor(
+      'http://127.0.0.1:65535',
+      async () => {
+        attempts += 1;
+        return attempts >= 25;
+      },
+      async () => {},
+    )).resolves.toBeUndefined();
+    expect(attempts).toBe(25);
+  });
+
+  it('caps readiness backoff at 1s after doubling from 250ms', async () => {
+    const sleeps: number[] = [];
+    await expect(waitForCodor(
+      'http://127.0.0.1:65535',
+      async () => false,
+      async (milliseconds) => { sleeps.push(milliseconds); },
     )).rejects.toThrow('did not become ready');
-    expect(sleeps).toEqual(Array.from({ length: 19 }, () => 250));
+    expect(sleeps.slice(0, 3)).toEqual([250, 500, 1_000]);
+    expect(sleeps.slice(2, -1).every((ms) => ms === 1_000)).toBe(true);
   });
 
   posixHostIt('writes private setup files, runs confirmed host steps, and pairs against the Serve origin', async () => {

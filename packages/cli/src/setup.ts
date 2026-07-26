@@ -606,17 +606,29 @@ export async function probeCodorStatus(endpoint: string): Promise<boolean> {
 const defaultSleep = async (milliseconds: number): Promise<void> =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
 
+const READINESS_BUDGET_MS = 60_000;
+const READINESS_INITIAL_DELAY_MS = 250;
+const READINESS_MAX_DELAY_MS = 1_000;
+
 // harn:assume setup-verifies-codor-before-creating-pairing-code ref=setup-readiness-and-pairing
 export async function waitForCodor(
   endpoint: string,
   probe: (value: string) => Promise<boolean>,
   sleep: (milliseconds: number) => Promise<void>,
 ): Promise<void> {
-  for (let attempt = 1; attempt <= 20; attempt += 1) {
+  let elapsedMs = 0;
+  let delayMs = READINESS_INITIAL_DELAY_MS;
+  for (;;) {
     if (await probe(endpoint)) return;
-    if (attempt < 20) await sleep(250);
+    const wait = Math.min(delayMs, READINESS_BUDGET_MS - elapsedMs);
+    if (wait <= 0) break;
+    await sleep(wait);
+    elapsedMs += wait;
+    delayMs = Math.min(delayMs * 2, READINESS_MAX_DELAY_MS);
   }
-  throw new Error(`Codor did not become ready at ${endpoint}; inspect the user-service logs`);
+  throw new Error(
+    `Codor did not become ready at ${endpoint}; if the port is listening, the service started — verify with \`codor channels\``,
+  );
 }
 // harn:end setup-verifies-codor-before-creating-pairing-code
 
