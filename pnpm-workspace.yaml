@@ -6,3 +6,13 @@ packages:
   - website
   - relay
 # harn:end workspace-gates-cover-all-buildable-projects
+
+# pnpm >= 10.26 reads allowBuilds instead of the package.json "pnpm.onlyBuiltDependencies"
+# field below, which pnpm 11 ignores outright (see docs/issues/codor-install-issues.md, Issue E).
+# Kept in addition to that field, not in place of it: the packageManager pin stays at
+# pnpm@10.9.0, which predates allowBuilds and only reads the package.json field.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  sodium-native: true
+  udx-native: true
