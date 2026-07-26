@@ -25,6 +25,18 @@ const ephemeral: RuntimePaths = {
   serviceTemplate: join(npxCli, 'packaging/systemd/codor.service'),
 };
 
+const dlxCli = join(
+  HOME,
+  '.local/share/pnpm/pnpm-cache/dlx/abcd1234ef567890/1706000000000/node_modules/@richhardry/codor/node_modules/@codor/cli',
+);
+const dlxEphemeral: RuntimePaths = {
+  root: dlxCli,
+  layout: 'installed-package',
+  cliEntrypoint: join(dlxCli, 'dist/index.js'),
+  staticRoot: join(dlxCli, 'runtime/web'),
+  serviceTemplate: join(dlxCli, 'packaging/systemd/codor.service'),
+};
+
 const checkoutRoot = join(HOME, 'git/codor');
 const checkout: RuntimePaths = {
   root: checkoutRoot,
@@ -95,8 +107,9 @@ function fakeIo(options: { existing?: string; failCopy?: boolean; incompleteCopy
 
 // harn:assume setup-installs-durable-per-user-runtime-atomically ref=durable-runtime-install-regression
 describe('isEphemeralRuntime', () => {
-  it('flags npx cache and temp paths, not stable locations', () => {
+  it('flags npx cache, pnpm dlx cache, and temp paths, not stable locations', () => {
     expect(isEphemeralRuntime(join(HOME, '.npm/_npx/abcd1234'))).toBe(true);
+    expect(isEphemeralRuntime(join(HOME, '.local/share/pnpm/pnpm-cache/dlx/abcd1234ef567890/1706000000000'))).toBe(true);
     expect(isEphemeralRuntime(join(tmpdir(), 'x'))).toBe(true);
     expect(isEphemeralRuntime('/opt/codor')).toBe(false);
     expect(isEphemeralRuntime(checkoutRoot)).toBe(false);
@@ -115,6 +128,17 @@ describe('installDurableRuntime', () => {
     expect(result.runtime.cliEntrypoint)
       .toBe(join(LOCATION, 'node_modules/@richhardry/codor/node_modules/@codor/cli/dist/index.js'));
     expect(result.runtime.cliEntrypoint).not.toContain('_npx');
+  });
+
+  it('stages, validates, and swaps an ephemeral pnpm dlx runtime into ~/.codor/runtime', () => {
+    const { io, moves } = fakeIo();
+    const result = installDurableRuntime({ runtime: dlxEphemeral, dataDir: DATA, version: '0.10.0', io });
+    expect(result.action).toBe('installed');
+    expect(result.location).toBe(LOCATION);
+    expect(moves).toContainEqual([`${LOCATION}.staging`, LOCATION]);
+    // Rooted at the durable location, not the dlx cache the source runtime lived in.
+    expect(result.runtime.cliEntrypoint).toContain(LOCATION);
+    expect(result.runtime.cliEntrypoint).not.toContain('dlx');
   });
 
   it('uses a source checkout in place without copying', () => {

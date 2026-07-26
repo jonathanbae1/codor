@@ -52,10 +52,15 @@ export function durableRuntimeLocation(dataDir: string): string {
   return join(dataDir, 'runtime');
 }
 
-/** A path is ephemeral when it lives in an npx cache or the OS temp directory. */
+/** A path is ephemeral when it lives in an npx cache, a pnpm dlx cache, or the OS temp directory. */
 export function isEphemeralRuntime(path: string): boolean {
   const temp = tmpdir();
-  return path.includes(`${sep}_npx${sep}`) || path === temp || path.startsWith(temp + sep);
+  return (
+    path.includes(`${sep}_npx${sep}`) ||
+    path.includes(`${sep}dlx${sep}`) ||
+    path === temp ||
+    path.startsWith(temp + sep)
+  );
 }
 
 function installedWrapperPackageJson(location: string): string {
