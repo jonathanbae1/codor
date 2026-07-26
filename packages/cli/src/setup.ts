@@ -177,6 +177,7 @@ function xml(value: string): string {
 interface LaunchAgentOptions {
   dataDir: string;
   logDir: string;
+  nodeModulePath?: string;
   nodePath: string;
   runtime: RuntimePaths;
   servicePath: string;
@@ -196,6 +197,9 @@ function renderLaunchAgent(options: LaunchAgentOptions): string {
     staticRoot: xml(options.runtime.staticRoot),
     token: xml(options.token),
   };
+  const nodeModulePathEntry = options.nodeModulePath === undefined
+    ? ''
+    : `\n    <key>NODE_PATH</key>\n    <string>${xml(options.nodeModulePath)}</string>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -223,7 +227,7 @@ function renderLaunchAgent(options: LaunchAgentOptions): string {
     <key>CODOR_TOKEN</key>
     <string>${values.token}</string>
     <key>PATH</key>
-    <string>${values.servicePath}</string>
+    <string>${values.servicePath}</string>${nodeModulePathEntry}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -557,6 +561,7 @@ export async function runRemoteAccess(deps: RemoteAccessDeps): Promise<RemoteAcc
 export function renderWindowsServiceScript(options: {
   dataDir: string;
   logDir: string;
+  nodeModulePath?: string;
   nodePath: string;
   runtime: RuntimePaths;
   servicePath: string;
@@ -568,6 +573,7 @@ export function renderWindowsServiceScript(options: {
   return [
     `$env:CODOR_TOKEN = (Get-Content -Raw -Path '${quote(options.tokenPath)}').Trim()`,
     `$env:PATH = '${quote(options.servicePath)}'`,
+    ...(options.nodeModulePath === undefined ? [] : [`$env:NODE_PATH = '${quote(options.nodeModulePath)}'`]),
     `Set-Location -Path '${quote(options.runtime.root)}'`,
     `& '${quote(options.nodePath)}' '${quote(entrypoint)}' --data-dir '${quote(options.dataDir)}' up --static-root '${quote(staticRoot)}' --channel desk --channel-name Desk >> '${quote(join(options.logDir, 'codor.out.log'))}' 2>> '${quote(join(options.logDir, 'codor.err.log'))}'`,
     'exit $LASTEXITCODE',
@@ -666,6 +672,14 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   const installSource = resolveInstallSource(runtime);
   const serviceLocation = installSource.durable ? installSource.installRoot : durableRuntimeLocation(dataDir);
   const serviceRuntime = installSource.durable ? runtime : packageRuntimePaths(installedCliRoot(serviceLocation));
+  // pnpm's hidden hoist directory sits at a fixed offset inside a pnpm-linked
+  // tree and survives installDurableRuntime's wholesale node_modules copy.
+  // Probe the source root, which exists now, and emit the destination path,
+  // which is where the service will actually run once installed.
+  const hoistDirRelative = join('node_modules', '.pnpm', 'node_modules');
+  const nodeModulePath = installIo.exists(join(installSource.installRoot, hoistDirRelative))
+    ? join(serviceLocation, hoistDirRelative)
+    : undefined;
   const windowsScriptPath = join(configDir, 'codor-service.ps1');
   const windowsTaskPath = join(configDir, 'codor-task.xml');
   const windowsUser = options.env.USERNAME ?? options.env.USER;
@@ -710,7 +724,7 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   const launchDomain = launchUid === undefined ? undefined : `gui/${String(launchUid)}`;
   const launchTarget = launchDomain === undefined ? undefined : `${launchDomain}/${LAUNCH_AGENT_LABEL}`;
   const windowsScript = platform === 'win32'
-    ? renderWindowsServiceScript({ dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath, tokenPath })
+    ? renderWindowsServiceScript({ dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath, tokenPath })
     : undefined;
   const windowsTask = platform === 'win32'
     ? renderWindowsScheduledTask({ scriptPath: windowsScriptPath, user: windowsUser! })
@@ -750,11 +764,12 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       options.out(`[dry-run] write ${envPath} mode 600`);
       options.out('CODOR_TOKEN=<redacted generated-or-existing token>');
       options.out(`PATH=${servicePath}`);
+      if (nodeModulePath !== undefined) options.out(`NODE_PATH=${nodeModulePath}`);
       options.out('[dry-run] systemctl --user daemon-reload');
       options.out('[dry-run] systemctl --user enable --now codor.service');
     } else if (platform === 'darwin') {
       const launchAgent = renderLaunchAgent({
-        dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath,
+        dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath,
         token: '<redacted generated-or-existing token>',
       });
       options.out(`[dry-run] create ${logDir} mode 700`);
@@ -891,7 +906,8 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       mkdirSync(userUnitDir, { recursive: true, mode: 0o700 });
       writeFileSync(userUnitPath, unitContent!, { encoding: 'utf8', mode: 0o600 });
       chmodSync(userUnitPath, 0o600);
-      writeFileSync(envPath, `CODOR_TOKEN=${token}\nPATH=${servicePath}\n`, { encoding: 'utf8', mode: 0o600 });
+      const nodePathEnvLine = nodeModulePath === undefined ? '' : `NODE_PATH=${nodeModulePath}\n`;
+      writeFileSync(envPath, `CODOR_TOKEN=${token}\nPATH=${servicePath}\n${nodePathEnvLine}`, { encoding: 'utf8', mode: 0o600 });
       chmodSync(envPath, 0o600);
       exec('systemctl', ['--user', 'daemon-reload']);
       exec('systemctl', ['--user', 'enable', '--now', 'codor.service']);
@@ -907,7 +923,7 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       mkdirSync(logDir, { recursive: true, mode: 0o700 });
       chmodSync(logDir, 0o700);
       writeFileSync(launchAgentPath, renderLaunchAgent({
-        dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath, token,
+        dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath, token,
       }), { encoding: 'utf8', mode: 0o600 });
       chmodSync(launchAgentPath, 0o600);
       await bootstrapLaunchAgent({

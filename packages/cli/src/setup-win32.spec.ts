@@ -55,6 +55,7 @@ describe('codor setup on Windows', () => {
       expect(rendered).toContain('<Hidden>true</Hidden>');
       expect(rendered).toContain('schtasks /Create');
       expect(rendered).not.toContain('a'.repeat(64));
+      expect(rendered).not.toContain('NODE_PATH');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -89,6 +90,32 @@ describe('codor setup on Windows', () => {
       expect(commands).toContain(`schtasks /Create /TN Codor Switchboard /XML ${taskPath} /F`);
       expect(commands).toContain('schtasks /Run /TN Codor Switchboard');
       expect(output.join('\n')).not.toContain('a'.repeat(64));
+      expect(readFileSync(scriptPath, 'utf8')).not.toContain('NODE_PATH');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('emits NODE_PATH pointing at the pnpm hoist dir when the invoking runtime is pnpm-linked', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-win32-nodepath-'));
+    const commands: string[] = [];
+    const output: string[] = [];
+    const home = join(root, 'home');
+    try {
+      const overrides = winOptions(root, commands, output);
+      const hoistDir = join(overrides.repoRoot, 'node_modules', '.pnpm', 'node_modules');
+      mkdirSync(hoistDir, { recursive: true });
+      await runSetup({
+        access: 'localhost',
+        dryRun: false,
+        env: { USERNAME: 'test-user', PATH: 'C:\\Windows\\System32' },
+        out: (line) => output.push(line),
+        overrides,
+        yes: true,
+      });
+      const scriptPath = join(home, '.config', 'codor', 'codor-service.ps1');
+      const script = readFileSync(scriptPath, 'utf8');
+      expect(script).toContain(`$env:NODE_PATH = '${hoistDir}'`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
