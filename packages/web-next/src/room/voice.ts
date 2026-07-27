@@ -95,9 +95,22 @@ export interface RecordingHandle {
   cancel(): void;
 }
 
-/** Open the mic and capture mono PCM until stop()/cancel(). Prefers a 24 kHz
- *  context, else captures at the device rate and resamples on encode. */
-export async function startRecording(): Promise<RecordingHandle> {
+/** Live input level in 0..1 (RMS of the latest capture buffer). */
+export type LevelListener = (level: number) => void;
+export type StartRecording = (onLevel?: LevelListener) => Promise<RecordingHandle>;
+
+/** Root-mean-square amplitude of a PCM buffer, clamped to 0..1. */
+function rms(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) sum += samples[i]! * samples[i]!;
+  return Math.min(1, Math.sqrt(sum / samples.length));
+}
+
+/** Open the mic and capture mono PCM until stop()/cancel(), emitting a live RMS
+ *  level per buffer (~12–23 Hz) for the waveform. Prefers a 24 kHz context, else
+ *  captures at the device rate and resamples on encode. */
+export const startRecording: StartRecording = async (onLevel) => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const Ctor = window.AudioContext
     ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -108,10 +121,13 @@ export async function startRecording(): Promise<RecordingHandle> {
     context = new Ctor();
   }
   const source = context.createMediaStreamSource(stream);
-  const processor = context.createScriptProcessor(4096, 1, 1);
+  // A 2048-sample buffer keeps the level cadence lively (~12 Hz at 24 kHz).
+  const processor = context.createScriptProcessor(2048, 1, 1);
   const chunks: Float32Array[] = [];
   processor.onaudioprocess = (event) => {
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    const frame = new Float32Array(event.inputBuffer.getChannelData(0));
+    chunks.push(frame);
+    onLevel?.(rms(frame));
   };
   source.connect(processor);
   processor.connect(context.destination);
@@ -271,4 +287,218 @@ export class DictationController {
 export function formatElapsed(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export type DictationTakeState = 'recording' | 'transcribing' | 'done' | 'failed';
+
+export interface DictationTake {
+  id: string;
+  state: DictationTakeState;
+  text?: string;
+  error?: string;
+  durationSeconds: number;
+}
+
+export interface DictationSessionOptions {
+  transcribe: (wav: Uint8Array) => Promise<string>;
+  onChange: (takes: DictationTake[]) => void;
+  startRecording?: StartRecording;
+  onLevel?: LevelListener;
+  timers?: DictationTimers;
+  now?: () => number;
+}
+
+const EMPTY_TRANSCRIPT_MESSAGE = 'Nothing was transcribed';
+
+/**
+ * The multi-take dictation layer: record → Add a take → it transcribes in a
+ * strict serial queue while you record the next, then Send resolves every done
+ * text in take order. Framework-free and fully injectable; the React panel
+ * renders from each onChange snapshot.
+ */
+export class DictationSession {
+  private takes: DictationTake[] = [];
+  private recordingId: string | undefined;
+  private recordingHandle: RecordingHandle | undefined;
+  private recordingStartedAt = 0;
+  private autoAdd: unknown;
+  private queue: { id: string; wav: Uint8Array }[] = [];
+  private processing = false;
+  private generation = 0;
+  private seq = 0;
+  private pendingSend: { resolve: (texts: string[]) => void; reject: (error: Error) => void } | undefined;
+  private readonly begin: StartRecording;
+  private readonly timers: DictationTimers;
+  private readonly now: () => number;
+
+  constructor(private readonly options: DictationSessionOptions) {
+    this.begin = options.startRecording ?? startRecording;
+    this.timers = options.timers ?? defaultTimers;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  /** A stable ordered snapshot; callers never see internal mutation. */
+  snapshot(): DictationTake[] {
+    return this.takes.map((take) => ({ ...take }));
+  }
+
+  private emit(): void {
+    this.options.onChange(this.snapshot());
+  }
+
+  private update(id: string, patch: Partial<DictationTake>): void {
+    const take = this.takes.find((candidate) => candidate.id === id);
+    if (!take) return;
+    Object.assign(take, patch);
+    this.emit();
+  }
+
+  private clearAutoAdd(): void {
+    if (this.autoAdd !== undefined) {
+      this.timers.clear(this.autoAdd);
+      this.autoAdd = undefined;
+    }
+  }
+
+  /** Begin a new take. No-op while one is already recording (earlier takes may
+   *  still be transcribing). */
+  async startTake(): Promise<void> {
+    if (this.recordingId !== undefined) return;
+    const id = `take-${String(++this.seq)}`;
+    this.recordingId = id;
+    this.takes.push({ id, state: 'recording', durationSeconds: 0 });
+    this.emit();
+    let handle: RecordingHandle;
+    try {
+      handle = await this.begin(this.options.onLevel);
+    } catch (error) {
+      this.recordingId = undefined;
+      this.update(id, { state: 'failed', error: captureErrorMessage(error) });
+      this.maybeResolveSend();
+      return;
+    }
+    // A cancel/discardAll during the await must not leave a live handle.
+    if (this.recordingId !== id) {
+      handle.cancel();
+      return;
+    }
+    this.recordingHandle = handle;
+    this.recordingStartedAt = this.now();
+    this.autoAdd = this.timers.set(() => { void this.addTake(); }, MAX_RECORDING_MS);
+  }
+
+  /** Stop the current recording and enqueue it for transcription. */
+  async addTake(): Promise<void> {
+    const id = this.recordingId;
+    const handle = this.recordingHandle;
+    if (id === undefined || !handle) return;
+    this.clearAutoAdd();
+    this.recordingId = undefined;
+    this.recordingHandle = undefined;
+    const durationSeconds = Math.max(0, (this.now() - this.recordingStartedAt) / 1000);
+    let wav: Uint8Array;
+    try {
+      wav = await handle.stop();
+    } catch (error) {
+      this.update(id, { state: 'failed', error: captureErrorMessage(error), durationSeconds });
+      this.maybeResolveSend();
+      return;
+    }
+    this.update(id, { state: 'transcribing', durationSeconds });
+    this.queue.push({ id, wav });
+    void this.pump();
+  }
+
+  /** Discard the in-progress recording only; added takes are untouched. */
+  cancelTake(): void {
+    const id = this.recordingId;
+    if (id === undefined) return;
+    this.clearAutoAdd();
+    this.recordingHandle?.cancel();
+    this.recordingHandle = undefined;
+    this.recordingId = undefined;
+    this.takes = this.takes.filter((take) => take.id !== id);
+    this.emit();
+    this.maybeResolveSend();
+  }
+
+  /** Remove any take; a late transcription result for it is ignored. */
+  removeTake(id: string): void {
+    if (id === this.recordingId) {
+      this.cancelTake();
+      return;
+    }
+    this.takes = this.takes.filter((take) => take.id !== id);
+    this.emit();
+    this.maybeResolveSend();
+  }
+
+  /** Stop everything and drop all takes; every late result is ignored. */
+  discardAll(): void {
+    this.clearAutoAdd();
+    this.recordingHandle?.cancel();
+    this.recordingHandle = undefined;
+    this.recordingId = undefined;
+    this.queue = [];
+    this.generation += 1;
+    this.takes = [];
+    this.emit();
+    this.maybeResolveSend();
+  }
+
+  /** Resolve with the done texts in take order once nothing is recording or
+   *  transcribing; reject if nothing succeeded. Finalizes an in-progress
+   *  recording first so Send can never hang on it. */
+  sendWhenReady(): Promise<string[]> {
+    if (this.recordingId !== undefined) void this.addTake();
+    return new Promise((resolve, reject) => {
+      this.pendingSend = { resolve, reject };
+      this.maybeResolveSend();
+    });
+  }
+
+  private async pump(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+    while (this.queue.length > 0) {
+      const next = this.queue.shift()!;
+      const gen = this.generation;
+      try {
+        const text = await this.options.transcribe(next.wav);
+        this.applyResult(gen, next.id, text.trim());
+      } catch (error) {
+        this.applyResult(gen, next.id, undefined, error);
+      }
+    }
+    this.processing = false;
+    this.maybeResolveSend();
+  }
+
+  private applyResult(gen: number, id: string, text?: string, error?: unknown): void {
+    if (gen !== this.generation) return; // discarded since this upload started
+    if (!this.takes.some((take) => take.id === id)) return; // removed
+    if (error !== undefined) {
+      this.update(id, {
+        state: 'failed',
+        error: error instanceof Error ? error.message : 'Transcription failed.',
+      });
+    } else if (text === undefined || text === '') {
+      this.update(id, { state: 'failed', error: EMPTY_TRANSCRIPT_MESSAGE });
+    } else {
+      this.update(id, { state: 'done', text });
+    }
+    this.maybeResolveSend();
+  }
+
+  private maybeResolveSend(): void {
+    if (!this.pendingSend) return;
+    if (this.takes.some((take) => take.state === 'recording' || take.state === 'transcribing')) return;
+    const texts = this.takes
+      .filter((take) => take.state === 'done' && take.text !== undefined)
+      .map((take) => take.text!);
+    const pending = this.pendingSend;
+    this.pendingSend = undefined;
+    if (texts.length === 0) pending.reject(new Error('No dictation to send.'));
+    else pending.resolve(texts);
+  }
 }
