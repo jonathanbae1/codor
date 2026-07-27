@@ -1514,6 +1514,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
                 author: actor.id,
                 reply_to: frame.reply_to,
                 attachments,
+                voice: frame.voice,
               });
             }
           } else if (frame.type === 'act') {

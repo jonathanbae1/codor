@@ -3105,6 +3105,51 @@ describe('voice provider selection is operator config', () => {
 });
 // harn:end voice-provider-selection-is-operator-config
 
+// harn:assume voice-message-metadata-is-bounded-and-additive ref=voice-post-regression
+describe('voice message post', () => {
+  it('fans out bounded voice metadata verbatim on a human post', async () => {
+    const client = await connect(); // owner
+    client.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await client.next((frame) => frame.type === 'self');
+
+    const voice = { duration_seconds: 3.5, levels: [0, 40, 80, 100] };
+    client.ws.send(JSON.stringify({ type: 'post', room: 'eng', body: '🎤 "hi there"', voice }));
+    const posted = await client.next((frame) =>
+      frame.type === 'message' && frame.message.kind === 'chat' && frame.message.body === '🎤 "hi there"');
+    expect(posted.type === 'message' && posted.message.voice).toEqual(voice);
+    client.ws.close();
+  });
+
+  it('refuses an out-of-bounds voice frame with a clean error', async () => {
+    const client = await connect();
+    client.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await client.next((frame) => frame.type === 'self');
+
+    client.ws.send(JSON.stringify({
+      type: 'post', room: 'eng', body: 'x', voice: { duration_seconds: 999, levels: [] },
+    }));
+    const error = await client.next((frame) => frame.type === 'error');
+    expect(error.type === 'error' && error.message).toMatch(/invalid frame/);
+    client.ws.close();
+  });
+
+  it('carries no voice on the agent post path even when the frame includes it', async () => {
+    const { agent, token } = spawnAgentWithToken('voicer');
+    const client = await connectAs(token);
+    client.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await client.next((frame) => frame.type === 'self');
+
+    client.ws.send(JSON.stringify({
+      type: 'post', room: 'eng', body: '@richard update', voice: { duration_seconds: 2, levels: [1, 2] },
+    }));
+    const posted = await client.next((frame) =>
+      frame.type === 'message' && frame.message.author === agent.id);
+    expect(posted.type === 'message' && posted.message.voice).toBeUndefined();
+    client.ws.close();
+  });
+});
+// harn:end voice-message-metadata-is-bounded-and-additive
+
 describe('named ACP providers over REST', () => {
   let dir: string;
   let daemon: Daemon;
