@@ -1,8 +1,6 @@
-import {
-  type ChildProcessWithoutNullStreams,
-  spawn,
-} from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
+import spawn from 'cross-spawn';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STDERR_LIMIT = 8 * 1024;
@@ -48,6 +46,7 @@ export function spawnCodexAppServer(
   context: CodexAppServerSpawnContext,
 ): Promise<ChildProcessWithoutNullStreams> {
   return new Promise((resolve, reject) => {
+    // harn:assume codex-app-server-resolves-windows-command-shims ref=codex-app-server-portable-spawn-provider
     const child = spawn(context.command, ['app-server'], {
       cwd: context.cwd,
       env: context.env,
@@ -55,7 +54,8 @@ export function spawnCodexAppServer(
       // stdin EOF on daemon exit is the final ownership boundary. Unlike the
       // old per-turn driver, interruption is an RPC and needs no process group.
       detached: false,
-    });
+    }) as ChildProcessWithoutNullStreams;
+    // harn:end codex-app-server-resolves-windows-command-shims
     const onError = (error: Error) => {
       child.off('spawn', onSpawn);
       reject(error);

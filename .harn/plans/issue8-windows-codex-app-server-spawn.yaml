@@ -1,0 +1,70 @@
+id: issue8-windows-codex-app-server-spawn
+title: Resolve Windows command shims for the Codex app-server launcher
+notes: "Issue #8 is implemented only at the persistent Codex app-server
+  launcher. The native child_process spawn provider is replaced with cross-spawn
+  while the command, app-server argv, cwd, environment, piped stdio, detached
+  setting, spawn/error settlement, returned child type, JSON-RPC transport,
+  ownership, and lifecycle remain unchanged. This plan does not use shell:true
+  and does not touch interactive attach, custody, other adapters, synchronous
+  discovery, or a broader launch abstraction."
+assumptions:
+  create:
+    - id: codex-app-server-resolves-windows-command-shims
+      title: The Codex app-server launcher resolves Windows command shims
+      statement: The persistent Codex app-server launcher must use cross-spawn for the
+        exact command and app-server argument while preserving cwd, inherited
+        member environment, piped stdio, detached false, spawn-or-error
+        settlement, returned child ownership, and all later lifecycle behavior,
+        because Windows installations commonly expose Codex through a .cmd shim
+        that native Node spawn does not consistently resolve.
+      reason: "Issue #8 reports spawn codex ENOENT on Windows even though the
+        installed codex.cmd is available on PATH."
+      depends_on:
+        - codex-app-server-is-the-member-runtime
+        - codex-app-server-contract-is-pinned-to-0-144-5
+        - adapter-children-inherit-session-env
+        - adapter-process-lifecycle-supervised
+  reviewed:
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: Persistent-child ownership, reuse, replacement, interruption, and member
+        environment semantics remain unchanged.
+    - id: codex-app-server-contract-is-pinned-to-0-144-5
+      outcome: unchanged
+      reason: Only the spawn provider changes; app-server argv, JSONL JSON-RPC,
+        protocol version, transport, and fake-server contract remain unchanged.
+    - id: adapter-children-inherit-session-env
+      outcome: unchanged
+      reason: The launcher continues to receive the exact environment already merged
+        by the Codex adapter.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: Spawn/error observation, retained-child shutdown, active-turn failure,
+        and interruption behavior remain unchanged.
+files:
+  - packages/adapters/codex/package.json
+  - packages/adapters/codex/src/app-server-transport.ts
+  - packages/adapters/codex/src/app-server-transport.spec.ts
+  - packages/adapters/codex/src/app-server-transport.windows.spec.ts
+  - pnpm-lock.yaml
+anchors:
+  codex-app-server-resolves-windows-command-shims:
+    codex-app-server-portable-spawn-provider:
+      action: change
+      reason: Anchor the cross-spawn call with the exact existing command, argv, and
+        options.
+    codex-app-server-portable-spawn-regression:
+      action: change
+      reason: Anchor focused mocked-provider coverage for exact launch inputs and
+        spawn/error settlement.
+    codex-app-server-windows-shim-regression:
+      action: change
+      reason: Anchor a Windows-only real codex.cmd resolution and piped lifecycle
+        regression.
+  codex-app-server-contract-is-pinned-to-0-144-5:
+    codex-app-server-transport:
+      action: change
+      reason: Add the nested portable-launcher anchor and swap only its provider
+        inside the existing transport contract.
+applied:
+  applied_at: 2026-07-27T08:43:17.781Z

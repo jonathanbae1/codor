@@ -1,0 +1,16 @@
+id: codex-app-server-resolves-windows-command-shims
+hash: a-00e8c4af7df6
+title: The Codex app-server launcher resolves Windows command shims
+state: active
+statement: The persistent Codex app-server launcher must use cross-spawn for the
+  exact command and app-server argument while preserving cwd, inherited member
+  environment, piped stdio, detached false, spawn-or-error settlement, returned
+  child ownership, and all later lifecycle behavior, because Windows
+  installations commonly expose Codex through a .cmd shim that native Node spawn
+  does not consistently resolve.
+depends_on:
+  - codex-app-server-is-the-member-runtime
+  - codex-app-server-contract-is-pinned-to-0-144-5
+  - adapter-children-inherit-session-env
+  - adapter-process-lifecycle-supervised
+created_by: issue8-windows-codex-app-server-spawn
