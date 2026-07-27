@@ -199,6 +199,9 @@ importers:
       '@codor/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@codor/tunnel':
+        specifier: workspace:*
+        version: link:../tunnel
       '@fastify/static':
         specifier: ^9.3.0
         version: 9.3.0

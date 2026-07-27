@@ -35,6 +35,15 @@ import { listLocalDirectories, LocalDirectoryError } from './local-dirs.js';
 import { isPipePath } from './local-socket.js';
 import type { PushSubscriptionStore } from './push/subscriptions.js';
 
+/** Loopback admin surface for the tunnel relay (implemented by the CLI composition). */
+export interface RelayAdmin {
+  status(): { enabled: boolean; relay_url: string; session_id: string; devices: number };
+  enable(url?: string): void;
+  disable(): void;
+  rotate(): string;
+  pair(): Promise<{ code: string; expires_at: string }>;
+}
+
 export interface ServerOptions {
   daemon: Daemon;
   /** Single pairing token — the authenticated principal IS the room owner. */
@@ -63,6 +72,8 @@ export interface ServerOptions {
   minimumBrowserProtocol?: number;
   /** Test/operations hook fired when a browser reports a positive protocol epoch. */
   onBrowserProtocolObserved?: (protocol: number) => void;
+  /** Loopback tunnel-relay administration (codor relay …). */
+  relay?: RelayAdmin;
 }
 
 export interface RunningServer {
@@ -513,6 +524,49 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     return reply.send({ revoked });
   });
   // harn:end unpair-purges-all-browser-state
+
+  // Loopback tunnel-relay admin (codor relay …). Owner-scoped device management.
+  app.get('/api/relay/status', (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal || !authorizeGlobal(principal, 'read', reply)) return;
+    if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
+    return reply.header('cache-control', 'no-store').send(options.relay.status());
+  });
+  app.post('/api/relay/enable', (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
+    if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
+    try {
+      const body = (req.body ?? {}) as { url?: string };
+      options.relay.enable(typeof body.url === 'string' ? body.url : undefined);
+      return reply.send(options.relay.status());
+    } catch (error) {
+      return reply.code(400).send({ error: String(error) });
+    }
+  });
+  app.post('/api/relay/disable', (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
+    if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
+    options.relay.disable();
+    return reply.send(options.relay.status());
+  });
+  app.post('/api/relay/rotate', (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
+    if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
+    return reply.send({ session_id: options.relay.rotate() });
+  });
+  app.post('/api/relay/pair', async (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
+    if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
+    try {
+      return reply.send(await options.relay.pair());
+    } catch (error) {
+      return reply.code(502).send({ error: String(error) });
+    }
+  });
 
   app.get('/api/rooms', (req, reply) => {
     const principal = authed(req, reply);

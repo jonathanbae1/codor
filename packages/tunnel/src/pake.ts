@@ -124,6 +124,8 @@ export class PakeHost {
   private keys?: ChannelKeys;
   private established = false;
   private cachedChannel?: AeadChannel;
+  private started = false;
+  private msgBReceived = false;
 
   constructor(params: { nameplate: string; secret: string; randomBytes?: RandomBytes }) {
     this.nameplate = params.nameplate;
@@ -131,8 +133,10 @@ export class PakeHost {
     this.randomBytes = params.randomBytes ?? defaultRandomBytes;
   }
 
-  /** Produce MSG_A = sid(16) ‖ Ya(32). */
+  /** Produce MSG_A = sid(16) ‖ Ya(32). Callable once — a fresh claimant needs a fresh PakeHost. */
   start(): Uint8Array {
+    if (this.started) throw new PakeError('start already called');
+    this.started = true;
     const sid = this.randomBytes(SID_LENGTH);
     const generator = deriveGenerator(this.secret, this.nameplate, sid);
     const ya = randomScalar(this.randomBytes);
@@ -148,6 +152,8 @@ export class PakeHost {
     if (this.ya === undefined || this.sid === undefined || this.yaPublic === undefined) {
       throw new PakeError('receiveMsgB called before start');
     }
+    if (this.msgBReceived) throw new PakeError('receiveMsgB already called');
+    this.msgBReceived = true;
     if (msgB.length !== POINT_LENGTH) throw new PakeError('MSG_B must be 32 bytes');
     const k = computeSharedPoint(msgB, this.ya);
     this.isk = deriveIsk(this.sid, k, this.yaPublic, msgB);
@@ -198,6 +204,7 @@ export class PakeClaimant {
   private keys?: ChannelKeys;
   private established = false;
   private cachedChannel?: AeadChannel;
+  private msgAReceived = false;
 
   constructor(params: { nameplate: string; secret: string; randomBytes?: RandomBytes }) {
     this.nameplate = params.nameplate;
@@ -205,8 +212,10 @@ export class PakeClaimant {
     this.randomBytes = params.randomBytes ?? defaultRandomBytes;
   }
 
-  /** Consume MSG_A; return { msgB, tagC } to send (MSG_B = Yb, then confirmation tag). */
+  /** Consume MSG_A; return { msgB, tagC } to send (MSG_B = Yb, then confirmation tag). Callable once. */
   receiveMsgA(msgA: Uint8Array): { msgB: Uint8Array; tagC: Uint8Array } {
+    if (this.msgAReceived) throw new PakeError('receiveMsgA already called');
+    this.msgAReceived = true;
     if (msgA.length !== MSG_A_LENGTH) throw new PakeError('MSG_A must be 48 bytes');
     const sid = msgA.slice(0, SID_LENGTH);
     const yaPublic = msgA.slice(SID_LENGTH);

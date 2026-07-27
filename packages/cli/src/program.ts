@@ -382,6 +382,25 @@ export function createProgram(context: CliContext = {}): Command {
   };
   // harn:end cli-observability-uses-scoped-rest
 
+  const postJson = async (path: string, body?: unknown): Promise<unknown> => {
+    const token = program.opts<GlobalOptions>().token;
+    if (!token) throw new Error('--token, CODOR_TOKEN, or CODOR_MEMBER_TOKEN is required');
+    const response = await fetch(restUrl(path), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const value = (await response.json()) as unknown;
+    if (!response.ok) {
+      const detail =
+        typeof value === 'object' && value !== null && 'error' in value
+          ? String((value as { error: unknown }).error)
+          : `${response.status} ${response.statusText}`;
+      throw new Error(detail);
+    }
+    return value;
+  };
+
   const withCrypto = <T>(fn: (crypto: CryptoVault) => T): T => {
     const crypto = new CryptoVault(program.opts<GlobalOptions>().dataDir);
     try {
@@ -401,6 +420,7 @@ export function createProgram(context: CliContext = {}): Command {
     .option('--channel-name <name>', 'initial channel name', 'Default')
     .option('--owner <handle>', 'initial owner handle')
     .option('--relay-url <url>', 'optional sealed push relay URL', env.CODOR_RELAY_URL)
+    .addOption(new Option('--tunnel-url <url>', 'tunnel (blind) relay URL override').default(env.CODOR_TUNNEL_URL).hideHelp())
     .option('--push-vapid-public-key <key>', 'Web Push VAPID public key', env.CODOR_VAPID_PUBLIC_KEY)
     .option('--join <line>', 'join a private home/outpost line as name:secret')
     // harn:assume tailnet-auto-pairing-explicit-trust ref=trusted-tailnet-up-option
@@ -419,6 +439,7 @@ export function createProgram(context: CliContext = {}): Command {
       channelName: string;
       owner?: string;
       relayUrl?: string;
+      tunnelUrl?: string;
       pushVapidPublicKey?: string;
       join?: string;
       trustTailscaleServe: boolean;
@@ -435,6 +456,7 @@ export function createProgram(context: CliContext = {}): Command {
         roomName: options.channelName,
         owner: options.owner,
         relayUrl: options.relayUrl,
+        tunnelUrl: options.tunnelUrl,
         pushVapidPublicKey: options.pushVapidPublicKey,
         line: options.join ? parseLine(options.join) : undefined,
         trustTailscaleServe: options.trustTailscaleServe,
@@ -1183,6 +1205,42 @@ export function createProgram(context: CliContext = {}): Command {
       out(new LedgerVault(program.opts<GlobalOptions>().dataDir, options.channel).pull(options.destination));
     });
 
+  const relay = program.command('relay').description('manage the codor.app tunnel relay');
+  relay
+    .command('status')
+    .description('show tunnel relay status')
+    .action(async () => {
+      out(JSON.stringify(await fetchJson(restUrl('/api/relay/status')), null, 2));
+    });
+  relay
+    .command('pair')
+    .description('pair a browser through the tunnel relay')
+    .action(async () => {
+      const result = (await postJson('/api/relay/pair')) as { code: string; expires_at: string };
+      out(`pairing code ${result.code} (expires ${result.expires_at})`);
+    });
+  relay
+    .command('enable')
+    .description('enable the tunnel relay')
+    .argument('[url]', 'relay URL override')
+    .action(async (url?: string) => {
+      await postJson('/api/relay/enable', url ? { url } : {});
+      out('tunnel relay enabled');
+    });
+  relay
+    .command('disable')
+    .description('disable the tunnel relay')
+    .action(async () => {
+      await postJson('/api/relay/disable');
+      out('tunnel relay disabled');
+    });
+  relay
+    .command('rotate')
+    .description('rotate the tunnel session id (paired devices must re-pair)')
+    .action(async () => {
+      const result = (await postJson('/api/relay/rotate')) as { session_id: string };
+      out(`rotated; new session ${result.session_id}`);
+    });
   // harn:end human-facing-surfaces-call-rooms-channels
   return program;
 }

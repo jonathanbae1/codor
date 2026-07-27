@@ -11,6 +11,9 @@ import {
   LedgerManager,
   PushProducer,
   PushSubscriptionStore,
+  RelayLink,
+  RelayPairingHost,
+  RelayStore,
   ResidencyCoordinator,
   loadAdapterRegistry,
   localSocketPath,
@@ -37,6 +40,8 @@ export interface UpOptions {
   roomName?: string;
   owner?: string;
   relayUrl?: string;
+  /** Tunnel (blind) relay URL override — CODOR_TUNNEL_URL / --tunnel-url. */
+  tunnelUrl?: string;
   pushVapidPublicKey?: string;
   adapters?: AdapterModuleConfig;
   adapterBaseDir?: string;
@@ -118,6 +123,26 @@ export async function startCodor(options: UpOptions): Promise<RunningCodor> {
     journalPath: join(dataDir, 'resident.sqlite'),
     blobRoot: join(dataDir, 'resident-blobs'),
   }) : undefined;
+  const relayStore = new RelayStore(dataDir);
+  if (options.tunnelUrl) relayStore.setRelayUrl(options.tunnelUrl);
+  let relayLink: RelayLink | undefined;
+  const relayAdmin = {
+    status: () => ({ enabled: relayStore.enabled, relay_url: relayStore.relayUrl, session_id: relayStore.sessionId, devices: relayStore.listDevices().length }),
+    enable: (url?: string) => {
+      relayStore.enable(url);
+      relayLink?.restart();
+    },
+    disable: () => {
+      relayStore.disable();
+      relayLink?.restart();
+    },
+    rotate: () => {
+      const id = relayStore.rotate();
+      relayLink?.restart();
+      return id;
+    },
+    pair: () => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(),
+  };
   const pushSubscriptions = new PushSubscriptionStore(dataDir, crypto.keys);
   const pushProducer = new PushProducer({
     relayUrl: options.relayUrl,
@@ -176,8 +201,20 @@ export async function startCodor(options: UpOptions): Promise<RunningCodor> {
       pushRelayEnabled: pushProducer.enabled,
       trustTailscaleServe: options.trustTailscaleServe,
       minimumBrowserProtocol: BROWSER_PROTOCOL_EPOCH,
+      relay: relayAdmin,
     });
     // harn:end browser-protocol-epoch-blocks-only-stale-browser-ui
+    relayLink = new RelayLink({
+      store: relayStore,
+      loopbackPort: server.port,
+      isDeviceActive: (deviceId) => crypto.keys.getPeer(deviceId) !== undefined,
+      onError: (error) => console.error(`[codor] relay link error: ${String(error)}`),
+    });
+    const stopRelayRevocation = crypto.keys.onPeerRevoked((deviceId) => {
+      relayLink?.dropDevice(deviceId);
+      relayStore.removeDevice(deviceId);
+    });
+    relayLink.start();
     return {
       daemon,
       crypto,
@@ -186,6 +223,8 @@ export async function startCodor(options: UpOptions): Promise<RunningCodor> {
       transport,
       residency,
       close: async () => {
+        stopRelayRevocation();
+        relayLink?.stop();
         await server.close();
         // harn:assume residency-closes-before-daemon-settlement ref=residency-first-shutdown
         await residency?.close();

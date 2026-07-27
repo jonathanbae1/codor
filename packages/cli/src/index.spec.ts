@@ -164,6 +164,7 @@ describe('@codor/cli', () => {
       'peers',
       'revoke',
       'ledger',
+      'relay',
     ]);
     const program = createProgram();
     expect(program.commands.find((command) => command.name() === 'spawn')?.options.map((option) => option.long))

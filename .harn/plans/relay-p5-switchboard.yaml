@@ -179,8 +179,5 @@ files:
   - packages/cli/src/up.ts
   - packages/cli/src/program.ts
   - packages/switchboard/src/server.ts
-lock:
-  locked_at: 2026-07-27T12:01:25.966Z
-  base_commit: 7d76dca66e68b2c953c8ce6883794cfc45ebcb2d
-  hash: 92af3ff61c40bb6a94a6277d46da154726f824ae35dc9c524a0e866d379784c3
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T13:46:07.415Z

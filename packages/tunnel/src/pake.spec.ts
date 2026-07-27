@@ -141,6 +141,17 @@ describe('PAKE channel lifecycle (nonce-reuse / pre-confirmation guards)', () =>
     expect(bytesToHex(first)).not.toBe(bytesToHex(second)); // counter advanced across calls
   });
 
+  it('rejects re-driving a transition after it has run (one-shot guards)', () => {
+    const host = new PakeHost({ nameplate: '7Q', secret: '9KMNPQ' });
+    const claimant = new PakeClaimant({ nameplate: '7Q', secret: '9KMNPQ' });
+    const msgA = host.start();
+    expect(() => host.start()).toThrow(PakeError); // no second start
+    const { msgB } = claimant.receiveMsgA(msgA);
+    expect(() => claimant.receiveMsgA(msgA)).toThrow(PakeError); // no second MSG_A
+    host.receiveMsgB(msgB);
+    expect(() => host.receiveMsgB(msgB)).toThrow(PakeError); // no second MSG_B
+  });
+
   it('a failed claimant confirmation is terminal — the channel never opens', () => {
     const host = new PakeHost({ nameplate: '7Q', secret: '9KMNPQ' });
     const claimant = new PakeClaimant({ nameplate: '7Q', secret: 'ZZZZZZ' });
