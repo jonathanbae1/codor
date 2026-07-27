@@ -1,0 +1,13 @@
+id: tailscale-serve-docs-disclose-certificate-transparency
+hash: a-3ed3f05350e7
+title: Tailscale Serve docs disclose HTTPS authorization and public CT issuance
+state: active
+statement: Public and privacy documentation must explain that tailnet HTTPS
+  enablement authorizes certificate issuance, running tailscale serve issues a
+  certificate whose device ts.net name enters the irreversible public
+  Certificate Transparency record, and localhost avoids that disclosure, because
+  disabling Serve or HTTPS later cannot withdraw an already published
+  certificate record.
+depends_on:
+  - setup-resolves-and-capability-probes-tailscale-serve
+created_by: reconcile-pr9-install-tailscale-disclosure
