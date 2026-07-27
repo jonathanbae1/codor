@@ -17,6 +17,7 @@ import {
   type BridgeOrigin,
   type Member,
   type Policy,
+  VoiceTranscribeError,
   type ServerFrame,
   type ThinkingLevel,
 } from '@codor/protocol';
@@ -34,6 +35,18 @@ import { type Daemon, MAX_ATTACHMENT_BYTES } from './daemon.js';
 import { listLocalDirectories, LocalDirectoryError } from './local-dirs.js';
 import { isPipePath } from './local-socket.js';
 import type { PushSubscriptionStore } from './push/subscriptions.js';
+import {
+  VOICE_PROVIDER_DEFINITIONS,
+  resolveVoiceProvider,
+  voiceProviderCatalog,
+  type VoiceProviderDefinition,
+} from './voice-providers.js';
+
+/** Sentinel so the transcribe handler distinguishes its own timeout from provider errors. */
+class VoiceTimeout extends Error {}
+
+/** Hard cap on uploaded audio bytes; the audio lives only in process memory. */
+const MAX_VOICE_BYTES = 8 * 1024 * 1024;
 
 export interface ServerOptions {
   daemon: Daemon;
@@ -63,6 +76,12 @@ export interface ServerOptions {
   minimumBrowserProtocol?: number;
   /** Test/operations hook fired when a browser reports a positive protocol epoch. */
   onBrowserProtocolObserved?: (protocol: number) => void;
+  /** Web dictation provider id; `'none'` disables dictation. Default `'codex'`. */
+  voiceProvider?: string;
+  /** Test-only injection of the voice provider catalog; defaults to the curated set. */
+  voiceProviders?: readonly VoiceProviderDefinition[];
+  /** Transcription provider-call timeout in ms. Default 60000. */
+  voiceTimeoutMs?: number;
 }
 
 export interface RunningServer {
@@ -289,6 +308,15 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     return daemon.store.getMember(room.id, principal.memberId)?.kind === 'human';
   });
   // harn:end agent-network-authority-is-narrow
+
+  // harn:assume voice-provider-selection-is-operator-config ref=voice-selection-server-option
+  // The active provider is operator config only — a browser never names it.
+  const voiceSelected = options.voiceProvider ?? 'codex';
+  const voiceEnabled = voiceSelected !== 'none';
+  const voiceDefinitions = options.voiceProviders ?? VOICE_PROVIDER_DEFINITIONS;
+  const voiceTimeoutMs = options.voiceTimeoutMs ?? 60_000;
+  let voiceInFlight = false;
+  // harn:end voice-provider-selection-is-operator-config
 
   // harn:assume browser-protocol-epoch-blocks-only-stale-browser-ui ref=browser-protocol-compatibility-rest
   const observedBrowserProtocols = new Set<number>();
@@ -913,6 +941,79 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       .send(createReadStream(path));
   });
   // harn:end attachments-are-capped-files-served-inert
+
+  // harn:assume voice-provider-catalog-is-named-and-safe ref=voice-catalog-rest
+  // Safe public catalog: browsers discover whether dictation is offered without
+  // the response ever becoming a credential or filesystem oracle.
+  app.get('/api/voice/providers', async (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal) return;
+    if (!authorizeGlobal(principal, 'read', reply)) return;
+    const providers = await voiceProviderCatalog(voiceDefinitions);
+    return reply.send({ enabled: voiceEnabled, selected: voiceSelected, providers });
+  });
+  // harn:end voice-provider-catalog-is-named-and-safe
+
+  // harn:assume voice-transcribe-endpoint-is-authorized-and-bounded ref=voice-transcribe-rest
+  // Authed, size-capped, single-in-flight, time-bounded. Audio bytes live only
+  // in process memory for the request and are never written to disk.
+  app.post('/api/voice/transcribe', { bodyLimit: MAX_VOICE_BYTES + 4096 }, async (req, reply) => {
+    const principal = authed(req, reply);
+    if (!principal) return;
+    if (!authorizeGlobal(principal, 'post', reply)) return;
+    if (!voiceEnabled) return reply.code(404).send({ error: 'voice dictation is disabled' });
+    if (voiceInFlight) return reply.code(429).send({ error: 'a transcription is already in progress' });
+    voiceInFlight = true; // claim the slot before any await closes the race
+    try {
+      const declared = Number(req.headers['content-length'] ?? 0);
+      if (Number.isFinite(declared) && declared > MAX_VOICE_BYTES) {
+        return reply.code(413).send({ error: 'audio exceeds 8 MB' });
+      }
+      const definition = resolveVoiceProvider(voiceSelected, voiceDefinitions);
+      if (!definition) {
+        return reply.code(503).send({ error: `voice provider ${voiceSelected} is not configured` });
+      }
+      const status = await definition.status();
+      if (!status.available) {
+        return reply.code(503).send({ error: status.reason ?? 'voice provider is unavailable' });
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      try {
+        for await (const chunk of req.body as AsyncIterable<Buffer>) {
+          size += chunk.length;
+          if (size > MAX_VOICE_BYTES) return reply.code(413).send({ error: 'audio exceeds 8 MB' });
+          chunks.push(chunk);
+        }
+      } catch (error) {
+        return reply.code(400).send({ error: String(error) });
+      }
+      const audio = new Uint8Array(Buffer.concat(chunks));
+      const mimeType = (req.headers['content-type'] ?? 'application/octet-stream').split(';')[0]?.trim()
+        || 'application/octet-stream';
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          definition.create().transcribe({ audio, mimeType }),
+          new Promise<never>((_, rejectTimeout) => {
+            timer = setTimeout(() => rejectTimeout(new VoiceTimeout()), voiceTimeoutMs);
+          }),
+        ]);
+        return reply.send({ text: result.text });
+      } catch (error) {
+        if (error instanceof VoiceTimeout) return reply.code(504).send({ error: 'voice transcription timed out' });
+        if (error instanceof VoiceTranscribeError) {
+          return reply.code(error.code === 'input' ? 400 : 502).send({ error: error.message });
+        }
+        return reply.code(502).send({ error: String(error) });
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } finally {
+      voiceInFlight = false;
+    }
+  });
+  // harn:end voice-transcribe-endpoint-is-authorized-and-bounded
 
   // harn:assume descriptor-safe-durable-inert-snapshots-of-successful-output ref=produced-artifact-serve
   // Durable produced-artifact feed: list metadata for room readers, and serve the

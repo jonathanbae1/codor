@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { VoiceProviderIdSchema } from './voice.js';
+import { VOICE_ERROR_CODES, VoiceProviderIdSchema, VoiceTranscribeError } from './voice.js';
 import type { VoiceProvider, VoiceTranscribeInput, VoiceTranscribeResult } from './voice.js';
 
 // harn:assume voice-transcription-provider-contract ref=voice-provider-contract-regression
@@ -29,6 +29,19 @@ describe('VoiceProvider contract shape', () => {
     };
     await expect(provider.transcribe({ audio: new Uint8Array([1, 2, 3]), mimeType: 'audio/wav' }))
       .resolves.toEqual({ text: 'audio/wav:3' });
+  });
+});
+
+describe('VoiceTranscribeError', () => {
+  it('bounds the code set to input/auth/upstream', () => {
+    expect([...VOICE_ERROR_CODES]).toEqual(['input', 'auth', 'upstream']);
+  });
+
+  it('carries a bounded code and stays an Error', () => {
+    const error = new VoiceTranscribeError('auth', 'sign in first');
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('auth');
+    expect(error.message).toBe('sign in first');
   });
 });
 // harn:end voice-transcription-provider-contract

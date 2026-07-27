@@ -41,4 +41,22 @@ export interface VoiceProvider {
   readonly label: string;
   transcribe(input: VoiceTranscribeInput): Promise<VoiceTranscribeResult>;
 }
+
+/** Bounded failure categories so callers map a rejection to an HTTP status. */
+export const VOICE_ERROR_CODES = ['input', 'auth', 'upstream'] as const;
+export type VoiceErrorCode = (typeof VOICE_ERROR_CODES)[number];
+
+/**
+ * A transcription failure carrying a bounded {@link VoiceErrorCode}. The
+ * switchboard endpoint maps `input` → 400 and `auth`/`upstream` → 502 without
+ * string-matching provider messages. The descriptive message is unchanged.
+ */
+export class VoiceTranscribeError extends Error {
+  readonly code: VoiceErrorCode;
+  constructor(code: VoiceErrorCode, message: string) {
+    super(message);
+    this.name = 'VoiceTranscribeError';
+    this.code = code;
+  }
+}
 // harn:end voice-transcription-provider-contract

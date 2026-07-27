@@ -2,15 +2,37 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { VoiceTranscribeError } from '@codor/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CODEX_TRANSCRIBE_URL,
   CodexVoiceProvider,
+  codexVoiceStatus,
   ensureCodexWav,
   type CodexTranscribeFetcher,
   type CodexTranscribeResponse,
 } from './transcribe.js';
+
+/** Capture a synchronous throw as a VoiceTranscribeError for code assertions. */
+function caught(fn: () => unknown): VoiceTranscribeError {
+  try {
+    fn();
+  } catch (error) {
+    return error as VoiceTranscribeError;
+  }
+  throw new Error('expected a throw');
+}
+
+/** Capture an async rejection as a VoiceTranscribeError for code assertions. */
+async function caughtAsync(promise: Promise<unknown>): Promise<VoiceTranscribeError> {
+  try {
+    await promise;
+  } catch (error) {
+    return error as VoiceTranscribeError;
+  }
+  throw new Error('expected a rejection');
+}
 
 const dirs: string[] = [];
 
@@ -104,12 +126,17 @@ describe('ensureCodexWav', () => {
     expect(frames).toBeLessThan(48_000);
   });
 
-  it('rejects audio shorter than one second', () => {
-    expect(() => ensureCodexWav(wav(0.5, 24_000, 1))).toThrow(/at least 1s/);
+  it('rejects audio shorter than one second with code input', () => {
+    const error = caught(() => ensureCodexWav(wav(0.5, 24_000, 1)));
+    expect(error).toBeInstanceOf(VoiceTranscribeError);
+    expect(error.code).toBe('input');
+    expect(error.message).toMatch(/at least 1s/);
   });
 
-  it('rejects a non-WAV payload', () => {
-    expect(() => ensureCodexWav(new Uint8Array([1, 2, 3, 4]))).toThrow(/RIFF\/WAVE/);
+  it('rejects a non-WAV payload with code input', () => {
+    const error = caught(() => ensureCodexWav(new Uint8Array([1, 2, 3, 4])));
+    expect(error.code).toBe('input');
+    expect(error.message).toMatch(/RIFF\/WAVE/);
   });
 });
 // harn:end codex-voice-upload-is-24khz-mono-pcm16-wav
@@ -160,6 +187,16 @@ describe('CodexVoiceProvider identity', () => {
     await expect(provider.transcribe({ audio: wav(1.5, 24_000, 1), mimeType: 'audio/wav' }))
       .rejects.not.toThrow(/top\.secret\.jwt/);
   });
+
+  it('reports availability true for a ChatGPT login and false otherwise, without paths', async () => {
+    await expect(codexVoiceStatus({ credentialsPath: authFile(CHATGPT_AUTH) }))
+      .resolves.toEqual({ available: true });
+    const missing = await codexVoiceStatus({ credentialsPath: authFile({ tokens: {} }) });
+    expect(missing.available).toBe(false);
+    expect(missing.reason).toMatch(/codex login/);
+    const apiKey = await codexVoiceStatus({ credentialsPath: authFile({ OPENAI_API_KEY: 'sk-live', tokens: null }) });
+    expect(apiKey).toEqual({ available: false, reason: expect.stringMatching(/API key/) });
+  });
 });
 // harn:end codex-voice-transcription-reuses-signed-in-codex-identity
 
@@ -167,46 +204,56 @@ describe('CodexVoiceProvider identity', () => {
 describe('CodexVoiceProvider auth matrix', () => {
   const audio = () => ({ audio: wav(1.5, 24_000, 1), mimeType: 'audio/wav' });
 
-  it('rejects an API-key login without uploading', async () => {
+  it('rejects an API-key login with code auth and without uploading', async () => {
     const provider = new CodexVoiceProvider({
       credentialsPath: authFile({ OPENAI_API_KEY: 'sk-live-123', tokens: null }),
       fetcher: rejectIfCalled,
     });
-    await expect(provider.transcribe(audio())).rejects.toThrow(/API key/);
+    const error = await caughtAsync(provider.transcribe(audio()));
+    expect(error.code).toBe('auth');
+    expect(error.message).toMatch(/API key/);
   });
 
-  it('rejects a personal access token without uploading', async () => {
+  it('rejects a personal access token with code auth and without uploading', async () => {
     const provider = new CodexVoiceProvider({
       credentialsPath: authFile({ tokens: { access_token: 'pat-opaque-token', account_id: 'acct-1' } }),
       fetcher: rejectIfCalled,
     });
-    await expect(provider.transcribe(audio())).rejects.toThrow(/personal access token/);
+    const error = await caughtAsync(provider.transcribe(audio()));
+    expect(error.code).toBe('auth');
+    expect(error.message).toMatch(/personal access token/);
   });
 
-  it('rejects a missing auth.json without uploading', async () => {
+  it('rejects a missing auth.json with code auth and without uploading', async () => {
     const provider = new CodexVoiceProvider({
       credentialsPath: join(tmpdir(), 'codor-voice-absent', 'auth.json'),
       fetcher: rejectIfCalled,
     });
-    await expect(provider.transcribe(audio())).rejects.toThrow(/codex login/);
+    const error = await caughtAsync(provider.transcribe(audio()));
+    expect(error.code).toBe('auth');
+    expect(error.message).toMatch(/codex login/);
   });
 
-  it('maps a 401 to a re-authenticate error with no refresh attempt', async () => {
+  it('maps a 401 to a code upstream re-authenticate error with no refresh attempt', async () => {
     const counter = { n: 0 };
     const provider = new CodexVoiceProvider({
       credentialsPath: authFile(CHATGPT_AUTH),
       fetcher: statusFetcher(401, 'unauthorized', counter),
     });
-    await expect(provider.transcribe(audio())).rejects.toThrow(/Re-authenticate with `codex login`/);
+    const error = await caughtAsync(provider.transcribe(audio()));
+    expect(error.code).toBe('upstream');
+    expect(error.message).toMatch(/Re-authenticate with `codex login`/);
     expect(counter.n).toBe(1); // exactly one call — no silent refresh/retry
   });
 
-  it('preserves a non-success response body in the error', async () => {
+  it('preserves a non-success response body in a code upstream error', async () => {
     const provider = new CodexVoiceProvider({
       credentialsPath: authFile(CHATGPT_AUTH),
       fetcher: statusFetcher(503, 'service unavailable'),
     });
-    await expect(provider.transcribe(audio())).rejects.toThrow(/service unavailable/);
+    const error = await caughtAsync(provider.transcribe(audio()));
+    expect(error.code).toBe('upstream');
+    expect(error.message).toMatch(/service unavailable/);
   });
 });
 // harn:end codex-voice-transcription-requires-chatgpt-login

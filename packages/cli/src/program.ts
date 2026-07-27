@@ -411,6 +411,9 @@ export function createProgram(context: CliContext = {}): Command {
     )
     // harn:end tailnet-auto-pairing-explicit-trust
     .option('--adapter <name=module>', 'trusted adapter module (repeatable)', collectAdapter, [])
+    // harn:assume voice-provider-selection-is-operator-config ref=voice-selection-cli-option
+    .option('--voice-provider <id>', 'web dictation provider (none disables)', 'codex')
+    // harn:end voice-provider-selection-is-operator-config
     .action(async (options: {
       host: string;
       port: number;
@@ -423,6 +426,7 @@ export function createProgram(context: CliContext = {}): Command {
       join?: string;
       trustTailscaleServe: boolean;
       adapter: string[];
+      voiceProvider: string;
     }) => {
       const globals = program.opts<GlobalOptions>();
       const running = await startCodor({
@@ -439,6 +443,7 @@ export function createProgram(context: CliContext = {}): Command {
         line: options.join ? parseLine(options.join) : undefined,
         trustTailscaleServe: options.trustTailscaleServe,
         adapters: parseAdapterModules(options.adapter),
+        voiceProvider: options.voiceProvider,
       });
       out(`codor http://localhost:${running.server.port}`);
       out(`socket ${running.server.socketPath}`);

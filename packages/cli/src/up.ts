@@ -42,6 +42,7 @@ export interface UpOptions {
   adapterBaseDir?: string;
   line?: LineConfig;
   trustTailscaleServe?: boolean;
+  voiceProvider?: string;
   bootstrap?: { host: string; port: number }[];
 }
 
@@ -176,6 +177,9 @@ export async function startCodor(options: UpOptions): Promise<RunningCodor> {
       pushRelayEnabled: pushProducer.enabled,
       trustTailscaleServe: options.trustTailscaleServe,
       minimumBrowserProtocol: BROWSER_PROTOCOL_EPOCH,
+      // harn:assume voice-provider-selection-is-operator-config ref=voice-selection-up-option
+      voiceProvider: options.voiceProvider,
+      // harn:end voice-provider-selection-is-operator-config
     });
     // harn:end browser-protocol-epoch-blocks-only-stale-browser-ui
     return {

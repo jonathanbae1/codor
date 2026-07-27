@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import type { VoiceProvider, VoiceTranscribeInput, VoiceTranscribeResult } from '@codor/protocol';
+import {
+  VoiceTranscribeError,
+  type VoiceProvider,
+  type VoiceTranscribeInput,
+  type VoiceTranscribeResult,
+} from '@codor/protocol';
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -25,7 +30,7 @@ function parseWav(bytes: Uint8Array): { sampleRate: number; channels: number; sa
   const tag = (offset: number): string =>
     String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
   if (bytes.length < 44 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') {
-    throw new Error('Codex voice transcription expects a RIFF/WAVE audio payload.');
+    throw new VoiceTranscribeError('input', 'Codex voice transcription expects a RIFF/WAVE audio payload.');
   }
   let fmt: { audioFormat: number; channels: number; sampleRate: number; bitsPerSample: number } | undefined;
   let data: Uint8Array | undefined;
@@ -47,10 +52,10 @@ function parseWav(bytes: Uint8Array): { sampleRate: number; channels: number; sa
     offset = body + size + (size % 2); // chunks are word-aligned
   }
   if (!fmt || !data) {
-    throw new Error('Codex voice transcription expects a WAV file with fmt and data chunks.');
+    throw new VoiceTranscribeError('input', 'Codex voice transcription expects a WAV file with fmt and data chunks.');
   }
   if (fmt.audioFormat !== 1 || fmt.bitsPerSample !== 16 || fmt.channels < 1) {
-    throw new Error('Codex voice transcription expects uncompressed PCM16 WAV audio.');
+    throw new VoiceTranscribeError('input', 'Codex voice transcription expects uncompressed PCM16 WAV audio.');
   }
   const frameView = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const count = Math.floor(data.length / 2);
@@ -121,7 +126,8 @@ export function ensureCodexWav(bytes: Uint8Array): Uint8Array {
   const frames = Math.floor(samples.length / channels);
   const duration = frames / sampleRate;
   if (duration < MIN_DURATION_SECONDS) {
-    throw new Error(
+    throw new VoiceTranscribeError(
+      'input',
       `Codex voice transcription needs at least ${String(MIN_DURATION_SECONDS)}s of audio (got ${duration.toFixed(2)}s).`,
     );
   }
@@ -163,37 +169,50 @@ async function readCodexAuth(path: string): Promise<CodexAuth> {
   if (str(parsed.OPENAI_API_KEY)) return { mode: 'api-key' };
   return { mode: 'missing' };
 }
+
+/**
+ * Whether codex dictation is usable right now, from the same credentials read —
+ * `available` only for a ChatGPT login. `reason` reuses the auth-matrix wording
+ * and never carries a path or token, so it is safe to project to a browser.
+ */
+export async function codexVoiceStatus(
+  options: { credentialsPath?: string } = {},
+): Promise<{ available: boolean; reason?: string }> {
+  const auth = await readCodexAuth(options.credentialsPath ?? defaultCredentialsPath());
+  return auth.mode === 'chatgpt'
+    ? { available: true }
+    : { available: false, reason: chatgptAuthRejection(auth.mode) };
+}
 // harn:end codex-voice-transcription-reuses-signed-in-codex-identity
 
 // harn:assume codex-voice-transcription-requires-chatgpt-login ref=codex-transcribe-auth-matrix
+/** The single source of the mode-specific rejection wording (throw and status share it). */
+function chatgptAuthRejection(mode: 'api-key' | 'personal-access-token' | 'missing'): string {
+  switch (mode) {
+    case 'api-key':
+      return 'Codex voice transcription requires a ChatGPT login, not an API key. Run `codex login` to sign in with ChatGPT.';
+    case 'personal-access-token':
+      return 'Codex voice transcription requires an interactive ChatGPT login, not a personal access token. Run `codex login`.';
+    case 'missing':
+      return 'Codex voice transcription needs a signed-in ChatGPT account. Run `codex login` first.';
+  }
+}
+
 /** Gate the auth mode: only a ChatGPT login proceeds; every other mode is a fix. */
 function authorizeChatgpt(auth: CodexAuth): { accessToken: string; accountId: string } {
-  switch (auth.mode) {
-    case 'chatgpt':
-      return { accessToken: auth.accessToken, accountId: auth.accountId };
-    case 'api-key':
-      throw new Error(
-        'Codex voice transcription requires a ChatGPT login, not an API key. Run `codex login` to sign in with ChatGPT.',
-      );
-    case 'personal-access-token':
-      throw new Error(
-        'Codex voice transcription requires an interactive ChatGPT login, not a personal access token. Run `codex login`.',
-      );
-    case 'missing':
-      throw new Error(
-        'Codex voice transcription needs a signed-in ChatGPT account. Run `codex login` first.',
-      );
-  }
+  if (auth.mode === 'chatgpt') return { accessToken: auth.accessToken, accountId: auth.accountId };
+  throw new VoiceTranscribeError('auth', chatgptAuthRejection(auth.mode));
 }
 
 /** Map a non-success upload: 401 is a clear re-auth (no v1 refresh); else keep the body. */
 function throwTranscribeFailure(status: number, body: string): never {
   if (status === 401) {
-    throw new Error(
+    throw new VoiceTranscribeError(
+      'upstream',
       'Codex voice transcription was rejected (401 Unauthorized). Re-authenticate with `codex login` and try again.',
     );
   }
-  throw new Error(`Codex voice transcription failed (${String(status)}): ${body}`);
+  throw new VoiceTranscribeError('upstream', `Codex voice transcription failed (${String(status)}): ${body}`);
 }
 // harn:end codex-voice-transcription-requires-chatgpt-login
 
@@ -278,7 +297,7 @@ export class CodexVoiceProvider implements VoiceProvider {
     }
     const text = str(record(await response.json())?.text);
     if (text === undefined) {
-      throw new Error('Codex voice transcription returned an empty transcript.');
+      throw new VoiceTranscribeError('upstream', 'Codex voice transcription returned an empty transcript.');
     }
     return { text };
   }
