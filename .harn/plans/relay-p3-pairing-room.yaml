@@ -71,8 +71,5 @@ files:
   - relay-worker/vitest.config.ts
   - relay-worker/test/pairing-room.spec.ts
   - relay-worker/test/healthz.spec.ts
-lock:
-  locked_at: 2026-07-27T09:37:51.477Z
-  base_commit: 998a2797e04315e7a0fe092f0b51d12a28f6814d
-  hash: 8c383dcfb354b8ff876196b47e5a5de8618794f4667756599ac98e586cf517c5
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T09:59:40.828Z

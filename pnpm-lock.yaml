@@ -367,6 +367,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250129.0
         version: 4.20260702.1
+      '@codor/tunnel':
+        specifier: workspace:*
+        version: link:../packages/tunnel
       typescript:
         specifier: ^5.5.4
         version: 5.9.3

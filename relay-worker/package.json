@@ -12,6 +12,7 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@codor/tunnel": "workspace:*",
     "@cloudflare/vitest-pool-workers": "^0.12.21",
     "@cloudflare/workers-types": "^4.20250129.0",
     "typescript": "^5.5.4",

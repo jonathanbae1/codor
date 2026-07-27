@@ -8,6 +8,10 @@ export default defineWorkersConfig({
     include: ['test/**/*.spec.ts'],
     poolOptions: {
       workers: {
+        // Disabled: pool-workers 0.12.x's isolated-storage snapshot trips over
+        // the SQLite DO .sqlite-shm/-wal sidecar files. Tests isolate instead by
+        // using a distinct nameplate/session id per test.
+        isolatedStorage: false,
         wrangler: { configPath: './wrangler.jsonc' },
       },
     },

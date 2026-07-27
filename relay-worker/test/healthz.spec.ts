@@ -19,14 +19,9 @@ describe('relay worker router', () => {
     expect(res.status).toBe(404);
   });
 
-  it('recognizes the pairing-room route (501 until Phase 3)', async () => {
-    const res = await SELF.fetch('https://relay.example/v1/pair/rooms', { method: 'POST' });
-    expect(res.status).toBe(501);
-  });
-
-  it('recognizes the pairing WS route (501 until Phase 3)', async () => {
-    const res = await SELF.fetch('https://relay.example/v1/pair/7Q/ws?role=host');
-    expect(res.status).toBe(501);
+  it('rejects a pairing WS upgrade with a missing/invalid role (400)', async () => {
+    const res = await SELF.fetch('https://relay.example/v1/pair/7Q/ws');
+    expect(res.status).toBe(400);
   });
 
   it('recognizes the session WS route (501 until Phase 4)', async () => {

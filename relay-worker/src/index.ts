@@ -17,22 +17,34 @@ const PAIR_WS_ROUTE = /^\/v1\/pair\/([^/]+)\/ws$/;
 const SESSION_WS_ROUTE = /^\/v1\/session\/([^/]+)\/ws$/;
 
 export default {
-  async fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url);
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
     const { method } = request;
 
     if (method === 'GET' && pathname === '/healthz') {
       return new Response('ok', { status: 200 });
     }
 
-    // Pairing + session routing are implemented in Phases 3 and 4. The router
-    // shape (path-only, no body access) is established here.
     if (method === 'POST' && pathname === '/v1/pair/rooms') {
-      return new Response('not implemented', { status: NOT_IMPLEMENTED });
+      return reservePairingRoom(env);
     }
-    if (method === 'GET' && PAIR_WS_ROUTE.test(pathname)) {
-      return new Response('not implemented', { status: NOT_IMPLEMENTED });
+
+    const pairMatch = PAIR_WS_ROUTE.exec(pathname);
+    if (method === 'GET' && pairMatch) {
+      const nameplate = pairMatch[1];
+      if (!isValidNameplate(nameplate)) {
+        return new Response('invalid nameplate', { status: 400 });
+      }
+      const role = url.searchParams.get('role');
+      if (role !== 'host' && role !== 'claim') {
+        return new Response('missing or invalid role', { status: 400 });
+      }
+      const id = env.PAIRING_ROOM.idFromName(nameplate);
+      return env.PAIRING_ROOM.get(id).fetch(request);
     }
+
+    // Session routing lands in Phase 4.
     if (method === 'GET' && SESSION_WS_ROUTE.test(pathname)) {
       return new Response('not implemented', { status: NOT_IMPLEMENTED });
     }
@@ -43,3 +55,42 @@ export default {
 
 export { PairingRoom, SessionRelay };
 // harn:end relay-worker-stays-blind
+
+// harn:assume pairing-nameplate-reservation ref=nameplate-reservation
+// 32-symbol pairing alphabet (routing only, no crypto): the nameplate is
+// chars 1-2 of the displayed pairing code, so it must draw from the same
+// alphabet the code uses. Deliberately duplicated here to keep the Worker
+// dependency-free.
+const NAMEPLATE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const NAMEPLATE_LENGTH = 2;
+const MAX_RESERVE_ATTEMPTS = 5;
+const NAMEPLATE_PATTERN = new RegExp(`^[${NAMEPLATE_ALPHABET}]{${NAMEPLATE_LENGTH}}$`);
+
+/** A well-formed nameplate is exactly two symbols from the pairing alphabet. */
+function isValidNameplate(nameplate: string): boolean {
+  return NAMEPLATE_PATTERN.test(nameplate);
+}
+
+function randomNameplate(): string {
+  const bytes = new Uint8Array(NAMEPLATE_LENGTH);
+  crypto.getRandomValues(bytes);
+  let nameplate = '';
+  for (const byte of bytes) nameplate += NAMEPLATE_ALPHABET[byte & 31];
+  return nameplate;
+}
+
+/** POST /v1/pair/rooms: reserve a random nameplate, retrying up to 5 distinct ones. */
+async function reservePairingRoom(env: Env): Promise<Response> {
+  const tried = new Set<string>();
+  while (tried.size < MAX_RESERVE_ATTEMPTS) {
+    const nameplate = randomNameplate();
+    if (tried.has(nameplate)) continue;
+    tried.add(nameplate);
+    const room = env.PAIRING_ROOM.get(env.PAIRING_ROOM.idFromName(nameplate));
+    const reserved = await room.fetch('https://relay.internal/reserve', { method: 'POST' });
+    if (reserved.ok) return Response.json({ nameplate });
+    // 409 busy → try another nameplate.
+  }
+  return Response.json({ error: 'exhausted' }, { status: 503 });
+}
+// harn:end pairing-nameplate-reservation
