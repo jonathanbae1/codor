@@ -269,13 +269,17 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
   const connector: RoomConnector = {
     room: () => currentRoom,
     state: () => state,
-    post: (body: string, opts?: { replyTo?: number; attachments?: string[] }) =>
+    post: (
+      body: string,
+      opts?: { replyTo?: number; attachments?: string[]; voice?: { duration_seconds: number; levels: number[] } },
+    ) =>
       send({
         type: 'post',
         room: currentRoom,
         body,
         ...(opts?.replyTo !== undefined && { reply_to: opts.replyTo }),
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
+        ...(opts?.voice !== undefined && { voice: opts.voice }),
       }),
     act: (act: Act) => send({ type: 'act', room: currentRoom, act }),
     disconnect: () => {

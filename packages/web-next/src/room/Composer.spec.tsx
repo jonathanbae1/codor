@@ -4,17 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { composeVoiceBody, deriveVoiceRecipientHandle } from './Composer.js';
 
 describe('composeVoiceBody', () => {
-  it('prefixes the recipient mention and wraps the segments in the mic marker', () => {
+  it('prefixes the recipient mention before the plain transcript — no marker glyphs', () => {
     expect(composeVoiceBody('opus', ['first thought', 'second thought']))
-      .toBe('@opus 🎤 “first thought\nsecond thought”');
+      .toBe('@opus first thought\nsecond thought');
   });
 
-  it('newline-joins every segment inside the quotes', () => {
-    expect(composeVoiceBody('opus', ['a', 'b', 'c'])).toBe('@opus 🎤 “a\nb\nc”');
+  it('newline-joins every segment', () => {
+    expect(composeVoiceBody('opus', ['a', 'b', 'c'])).toBe('@opus a\nb\nc');
   });
 
   it('omits the mention entirely when unaddressed — never a dangling @', () => {
-    expect(composeVoiceBody(undefined, ['solo'])).toBe('🎤 “solo”');
+    expect(composeVoiceBody(undefined, ['solo'])).toBe('solo');
   });
 });
 

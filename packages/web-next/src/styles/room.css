@@ -2390,9 +2390,10 @@
   align-items: center;
   gap: var(--sp-2);
 }
-.nx-dictation-segments {
+/* Recorded takes: voice-memo chips with their own mini waveform + duration. */
+.nx-dictation-memos {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   margin: 0;
   padding: 0;
@@ -2400,17 +2401,25 @@
   max-height: 40vh;
   overflow-y: auto;
 }
-.nx-dictation-segment {
-  display: flex;
+.nx-memo-chip {
+  display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-sm, 8px);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
   background: var(--c-surface-sunken, var(--c-surface));
 }
-.nx-dictation-segment-text { flex: 1; font: var(--t-ui); overflow-wrap: anywhere; }
-.nx-dictation-segment.is-failed .nx-dictation-segment-text { color: var(--c-error-text); }
-.nx-dictation-segment.is-transcribing .nx-dictation-segment-text { color: var(--c-secondary); }
+.nx-memo-chip.is-failed { border-color: var(--c-error); }
+.nx-memo-wave { width: 64px; height: 20px; color: var(--c-live-text); }
+.nx-memo-duration { font: var(--t-ui); font-variant-numeric: tabular-nums; color: var(--c-secondary); }
+.nx-memo-ok { color: var(--c-live-text); }
+.nx-memo-error { font: var(--t-ui); color: var(--c-error-text); overflow-wrap: anywhere; }
+
+/* A static waveform shared by memo chips and the timeline voice card. */
+.nx-miniwave { display: inline-flex; align-items: flex-end; gap: 1px; height: 100%; }
+.nx-miniwave-bar { flex: 1; min-width: 2px; background: currentColor; border-radius: 1px; opacity: 0.85; }
+
 .nx-dictation-spinner {
   width: 14px;
   height: 14px;
@@ -2419,14 +2428,60 @@
   border-radius: 50%;
   animation: nx-dictation-spin 0.8s linear infinite;
 }
-.nx-dictation-waiting { color: var(--c-secondary); font: var(--t-ui); }
+
+/* The Send loader: three bars pulsing like a waveform — no counter text. */
+.nx-dictation-loader {
+  position: relative;
+  display: inline-block;
+  width: 3px;
+  height: 18px;
+  background: var(--c-live-text);
+  border-radius: 2px;
+  animation: nx-dictation-bar 0.9s ease-in-out infinite;
+}
+.nx-dictation-loader::before,
+.nx-dictation-loader::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--c-live-text);
+  border-radius: 2px;
+  animation: nx-dictation-bar 0.9s ease-in-out infinite;
+}
+.nx-dictation-loader::before { left: -6px; animation-delay: -0.3s; }
+.nx-dictation-loader::after { left: 6px; animation-delay: 0.3s; }
+@keyframes nx-dictation-bar { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+
+/* Timeline voice card: a dictated message wears a voice header above its text. */
+.nx-voice-card {
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-live-text);
+  border-radius: var(--r-md, 10px);
+  padding: var(--sp-2);
+  background: var(--c-surface-sunken, var(--c-surface));
+}
+.nx-voice-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+  color: var(--c-live-text);
+}
+.nx-voice-card-icon { flex: none; }
+.nx-voice-card-wave { flex: 1; height: 24px; max-width: 160px; }
+.nx-voice-card-duration { font: var(--t-ui); font-variant-numeric: tabular-nums; color: var(--c-secondary); }
+.nx-voice-card .nx-prose { margin: 0; }
 @keyframes nx-dictation-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
 @keyframes nx-dictation-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .nx-dictation-dot, .nx-dictation-spinner { animation: none; }
+  .nx-dictation-dot, .nx-dictation-spinner,
+  .nx-dictation-loader, .nx-dictation-loader::before, .nx-dictation-loader::after { animation: none; }
+  .nx-dictation-loader, .nx-dictation-loader::before, .nx-dictation-loader::after { transform: scaleY(0.7); }
 }
 
 /* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-component */

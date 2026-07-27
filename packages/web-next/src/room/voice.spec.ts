@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DictationSession,
+  downsampleLevels,
   encodeWav,
   fetchVoiceProviders,
   formatElapsed,
+  perceptualLevel,
   startRecording,
   transcribeVoice,
   VOICE_SAMPLE_RATE,
@@ -114,10 +116,42 @@ describe('capture level stream', () => {
     const emit = (data: number[]) =>
       node?.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array(data) } });
 
-    emit([0.5, 0.5, 0.5, 0.5]); // RMS = 0.5
-    emit([0, 0, 0, 0]); // silence
-    emit([2, 2]); // clamped to 1
-    expect(levels).toEqual([0.5, 0, 1]);
+    emit([0, 0, 0, 0]); // silence → 0
+    emit(new Array(64).fill(0.03)); // quiet speech → a mid bar
+    emit([1, 1]); // loud → clamps to the ceiling
+    expect(levels[0]).toBe(0);
+    expect(levels[1]).toBeGreaterThan(0.2);
+    expect(levels[1]).toBeLessThan(0.9);
+    expect(levels[2]).toBe(1);
+  });
+});
+
+describe('perceptualLevel', () => {
+  it('maps silence to 0, quiet speech to a mid bar, and loud to the ceiling', () => {
+    expect(perceptualLevel(0)).toBe(0);
+    const quiet = perceptualLevel(0.03);
+    expect(quiet).toBeGreaterThan(0.2);
+    expect(quiet).toBeLessThan(0.9);
+    expect(perceptualLevel(0.5)).toBe(1); // the gain pushes even 0.5 rms to full
+  });
+
+  it('is monotonic in the audible range', () => {
+    expect(perceptualLevel(0.02)).toBeLessThan(perceptualLevel(0.05));
+    expect(perceptualLevel(0.05)).toBeLessThan(perceptualLevel(0.1));
+  });
+});
+
+describe('downsampleLevels', () => {
+  it('returns the input unchanged when it is within the cap', () => {
+    expect(downsampleLevels([10, 20, 30], 48)).toEqual([10, 20, 30]);
+  });
+
+  it('peak-downsamples to at most the cap, order preserved', () => {
+    const ramp = Array.from({ length: 200 }, (_, i) => i);
+    const out = downsampleLevels(ramp, 48);
+    expect(out.length).toBe(48);
+    expect(out[47]).toBe(199); // last bucket keeps the peak
+    for (let i = 1; i < out.length; i += 1) expect(out[i]!).toBeGreaterThanOrEqual(out[i - 1]!);
   });
 });
 
@@ -148,99 +182,102 @@ describe('DictationSession', () => {
     await session.addTake();
   };
 
-  it('runs uploads strictly serially in take order', async () => {
+  it('records takes without uploading anything until Send', async () => {
+    const transcribe = vi.fn(async () => 'text');
+    const { session, takes } = makeSession(transcribe);
+    await record(session);
+    await record(session);
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(takes().map((t) => t.state)).toEqual(['recorded', 'recorded']);
+
+    await session.sendWhenReady();
+    expect(transcribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('uploads serially on Send and resolves texts in take order', async () => {
     const d1 = deferred<string>();
     const d2 = deferred<string>();
-    const calls: number[] = [];
     let n = 0;
-    const transcribe = vi.fn(async () => { n += 1; calls.push(n); return n === 1 ? d1.promise : d2.promise; });
-    const { session, takes } = makeSession(transcribe);
-
+    const transcribe = vi.fn(async () => { n += 1; return n === 1 ? d1.promise : d2.promise; });
+    const { session } = makeSession(transcribe);
     await record(session);
     await record(session);
-    expect(transcribe).toHaveBeenCalledTimes(1); // second upload must wait
 
-    d1.resolve('first');
+    const sent = session.sendWhenReady();
+    await flush();
+    expect(transcribe).toHaveBeenCalledTimes(1); // second waits for the first
+    d1.resolve('alpha');
     await flush();
     expect(transcribe).toHaveBeenCalledTimes(2);
-
-    d2.resolve('second');
-    await flush();
-    expect(takes().map((t) => t.text)).toEqual(['first', 'second']);
-    expect(takes().every((t) => t.state === 'done')).toBe(true);
-  });
-
-  it('allows recording a new take while an earlier one transcribes', async () => {
-    const d1 = deferred<string>();
-    const { session, takes } = makeSession(async () => d1.promise);
-    await record(session); // take-1 transcribing
-    await session.startTake(); // take-2 recording, concurrently
-    expect(takes().map((t) => t.state)).toEqual(['transcribing', 'recording']);
-    d1.resolve('ok');
-    await flush();
-  });
-
-  it('isolates a failed take from the others', async () => {
-    let n = 0;
-    const transcribe = vi.fn(async () => {
-      n += 1;
-      if (n === 1) throw new Error('provider boom');
-      return 'good';
-    });
-    const { session, takes } = makeSession(transcribe);
-    await record(session);
-    await flush();
-    await record(session);
-    await flush();
-    expect(takes()[0]).toMatchObject({ state: 'failed', error: 'provider boom' });
-    expect(takes()[1]).toMatchObject({ state: 'done', text: 'good' });
-  });
-
-  it('marks an empty transcript as a failed take, never a silent segment', async () => {
-    const { session, takes } = makeSession(async () => '   ');
-    await record(session);
-    await flush();
-    expect(takes()[0]).toMatchObject({ state: 'failed', error: 'Nothing was transcribed' });
-  });
-
-  it('sendWhenReady waits for stragglers then resolves done texts in order', async () => {
-    const d1 = deferred<string>();
-    const d2 = deferred<string>();
-    let n = 0;
-    const { session } = makeSession(async () => { n += 1; return n === 1 ? d1.promise : d2.promise; });
-    await record(session);
-    await record(session);
-    const sent = session.sendWhenReady();
-    d2.resolve('beta'); // resolve out of order — result order still follows take order
-    d1.resolve('alpha');
+    d2.resolve('beta');
     await expect(sent).resolves.toEqual(['alpha', 'beta']);
   });
 
-  it('discardAll posts nothing and ignores late results', async () => {
+  it('keeps a done take and re-uploads only the failed one on a retry Send', async () => {
+    let n = 0;
+    const transcribe = vi.fn(async () => { n += 1; if (n === 1) return 'kept'; throw new Error('boom'); });
+    const { session, takes } = makeSession(transcribe);
+    await record(session);
+    await record(session);
+
+    await expect(session.sendWhenReady()).rejects.toThrow(/could not be transcribed/);
+    expect(takes()[0]).toMatchObject({ state: 'done', text: 'kept' });
+    expect(takes()[1]!.state).toBe('failed');
+    expect(transcribe).toHaveBeenCalledTimes(2);
+
+    transcribe.mockImplementation(async () => 'recovered');
+    await expect(session.sendWhenReady()).resolves.toEqual(['kept', 'recovered']);
+    expect(transcribe).toHaveBeenCalledTimes(3); // only the failed take re-uploaded
+  });
+
+  it('marks an empty transcript as a failed take on Send', async () => {
+    const { session, takes } = makeSession(async () => '   ');
+    await record(session);
+    await expect(session.sendWhenReady()).rejects.toThrow();
+    expect(takes()[0]).toMatchObject({ state: 'failed', error: 'Nothing was transcribed' });
+  });
+
+  it('keeps earlier recorded takes while a new one records', async () => {
+    const { session, takes } = makeSession(async () => 'x');
+    await record(session);
+    await session.startTake();
+    expect(takes().map((t) => t.state)).toEqual(['recorded', 'recording']);
+  });
+
+  it('stores a downsampled 0..100 level envelope on a recorded take', async () => {
+    const noisyStart: StartRecording = async (onLevel) => {
+      for (let i = 0; i < 100; i += 1) onLevel?.(0.5);
+      return { async stop() { return new Uint8Array([1]); }, cancel() {} };
+    };
+    const { session, takes } = makeSession(async () => 'x', noisyStart);
+    await record(session);
+    const take = takes()[0]!;
+    expect(take.state).toBe('recorded');
+    expect(take.levels.length).toBeLessThanOrEqual(48);
+    expect(take.levels.every((l) => Number.isInteger(l) && l >= 0 && l <= 100)).toBe(true);
+    expect(take.levels[0]).toBe(50); // 0.5 → round(0.5 × 100)
+  });
+
+  it('discardAll abandons an in-flight Send and drops every take', async () => {
     const d1 = deferred<string>();
     const { session, takes } = makeSession(async () => d1.promise);
     await record(session);
-    session.discardAll();
     const sent = session.sendWhenReady();
-    await expect(sent).rejects.toThrow(/No dictation/);
+    await flush();
+    session.discardAll();
     d1.resolve('too late');
-    await flush();
+    await expect(sent).rejects.toThrow(/discarded/);
     expect(takes()).toEqual([]);
   });
 
-  it('removeTake drops a transcribing take and ignores its late result', async () => {
-    const d1 = deferred<string>();
-    const { session, takes } = makeSession(async () => d1.promise);
+  it('removeTake drops the take and its audio', async () => {
+    const { session, takes } = makeSession(async () => 'x');
     await record(session);
-    const id = takes()[0]!.id;
-    session.removeTake(id);
-    expect(takes()).toEqual([]);
-    d1.resolve('ignored');
-    await flush();
+    session.removeTake(takes()[0]!.id);
     expect(takes()).toEqual([]);
   });
 
-  it('cancelTake discards the in-progress recording without transcribing', async () => {
+  it('cancelTake discards the in-progress recording without recording it', async () => {
     const transcribe = vi.fn(async () => 'unused');
     const { session, takes } = makeSession(transcribe);
     await session.startTake();

@@ -17,11 +17,14 @@ import {
 } from './attachments.js';
 import {
   DictationSession,
+  downsampleLevels,
   fetchVoiceProviders,
   formatElapsed,
+  LONG_PRESS_MS,
   transcribeVoice,
   type DictationTake,
 } from './voice.js';
+import { MiniWaveform } from './MiniWaveform.js';
 
 const MAX_ROWS = 8;
 
@@ -40,11 +43,11 @@ function mentionQuery(draft: string, caret: number): { start: number; query: str
 }
 
 /** The spoken-message body: mention prefix (omitted when unaddressed — never a
- *  dangling `@`), then the mic marker with the segment texts newline-joined
- *  inside curly quotes. Pure so it is unit-tested directly. */
+ *  dangling `@`), then the plain newline-joined transcript. No marker glyphs —
+ *  the voice-ness rides the message's `voice` metadata, rendered as a card. */
 export function composeVoiceBody(recipientHandle: string | undefined, texts: string[]): string {
-  const marker = `🎤 “${texts.join('\n')}”`;
-  return recipientHandle ? `@${recipientHandle} ${marker}` : marker;
+  const body = texts.join('\n');
+  return recipientHandle ? `@${recipientHandle} ${body}` : body;
 }
 
 /** The voice recipient when the panel opens: the first roster member @-mentioned
@@ -94,6 +97,7 @@ export function Composer(props: { room: string; token: () => string; connection:
   const levelsRef = useRef<number[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const suppressClickRef = useRef(false);
   const recording = takes.some((take) => take.state === 'recording');
 
   // Programmatic inserts restore the caret synchronously with the DOM update —
@@ -286,6 +290,7 @@ export function Composer(props: { room: string; token: () => string; connection:
   const closeDictation = (): void => {
     sessionRef.current = undefined;
     levelsRef.current = [];
+    suppressClickRef.current = false;
     setPanelOpen(false);
     setTakes([]);
     setSending(false);
@@ -343,13 +348,42 @@ export function Composer(props: { room: string; token: () => string; connection:
     setHint(undefined);
     session.sendWhenReady()
       .then((texts) => {
-        props.connection.post(composeVoiceBody(voiceRecipient, texts));
+        const done = session.snapshot().filter((take) => take.state === 'done');
+        const duration = done.reduce((sum, take) => sum + take.durationSeconds, 0);
+        const voice = {
+          duration_seconds: Math.min(600, Math.max(0.1, duration)),
+          levels: downsampleLevels(done.flatMap((take) => take.levels)),
+        };
+        props.connection.post(composeVoiceBody(voiceRecipient, texts), { voice });
         closeDictation();
       })
-      .catch((error: unknown) => {
-        setHint(error instanceof Error ? error.message : 'Nothing was transcribed');
-        setSending(false); // keep the panel open to record or discard
+      .catch(() => {
+        // A failed take keeps its inline error on the chip; the panel stays open
+        // so the operator can remove it or retry Send (done takes never re-upload).
+        setSending(false);
       });
+  };
+
+  // Long-press the mic to hold-to-record: pointerdown opens the panel in the
+  // recording state; a release ≥350 ms performs Add, a shorter tap leaves it
+  // recording (today's behavior). The synthetic click after a pointer press is
+  // swallowed so it never re-opens; keyboard activation still routes to click.
+  const onMicPointerDown = (event: { pointerType: string; button: number }): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const started = Date.now();
+    suppressClickRef.current = true; // a pointer press opens the panel; swallow its click
+    openDictation();
+    // The mic unmounts when the panel takes over, so catch the release on the
+    // window: a hold ≥350 ms performs Add; a quick tap leaves the take recording.
+    const onUp = (): void => {
+      window.removeEventListener('pointerup', onUp);
+      if (Date.now() - started >= LONG_PRESS_MS) void sessionRef.current?.addTake();
+    };
+    window.addEventListener('pointerup', onUp);
+  };
+  const onMicClick = (): void => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    openDictation(); // keyboard activation (no pointerdown fired)
   };
 
   const voiceHasAgents = roster.some((member) => member.kind === 'agent');
@@ -415,8 +449,8 @@ export function Composer(props: { room: string; token: () => string; connection:
         <>
           <canvas ref={canvasRef} className="nx-dictation-wave" data-testid="dictation-wave" aria-hidden="true" />
           <div className="nx-dictation-controls">
-            <IconButton icon={X} label="Cancel dictation" variant="quiet" data-testid="dictation-cancel" onClick={cancelRecording} />
             <span className="nx-composer-spacer" />
+            <IconButton icon={X} label="Cancel dictation" variant="quiet" data-testid="dictation-cancel" onClick={cancelRecording} />
             <button type="button" className="nx-btn is-primary nx-dictation-add" data-testid="dictation-add" onClick={() => void sessionRef.current?.addTake()}>
               Add
             </button>
@@ -424,17 +458,20 @@ export function Composer(props: { room: string; token: () => string; connection:
         </>
       ) : (
         <>
-          <ul className="nx-dictation-segments" data-testid="dictation-segments">
+          <ul className="nx-dictation-memos" data-testid="dictation-segments">
             {takes.map((take, index) => (
-              <li key={take.id} className={`nx-dictation-segment is-${take.state}`} data-testid={`dictation-segment-${String(index)}`}>
+              <li key={take.id} className={`nx-memo-chip is-${take.state}`} data-testid={`dictation-segment-${String(index)}`}>
+                <MiniWaveform levels={take.levels} className="nx-memo-wave" />
+                <span className="nx-memo-duration">{formatElapsed(Math.round(take.durationSeconds))}</span>
                 {take.state === 'transcribing' && <span className="nx-dictation-spinner" aria-hidden="true" />}
-                <span className="nx-dictation-segment-text">
-                  {take.state === 'transcribing' ? 'transcribing…' : take.state === 'failed' ? take.error : take.text}
-                </span>
+                {take.state === 'done' && <span className="nx-memo-ok" aria-hidden="true">✓</span>}
+                {take.state === 'failed' && (
+                  <span className="nx-memo-error" data-testid={`dictation-segment-${String(index)}-error`}>{take.error}</span>
+                )}
                 <button
                   type="button"
                   className="nx-attach-remove"
-                  aria-label={`Remove segment ${String(index + 1)}`}
+                  aria-label={`Remove take ${String(index + 1)}`}
                   data-testid={`dictation-segment-${String(index)}-remove`}
                   onClick={() => removeSegment(take.id)}
                 >
@@ -447,12 +484,13 @@ export function Composer(props: { room: string; token: () => string; connection:
             <IconButton icon={Mic} label="Record another" variant="quiet" data-testid="dictation-record-another" onClick={() => void sessionRef.current?.startTake()} />
             <IconButton icon={X} label="Discard all" variant="quiet" data-testid="dictation-discard" onClick={discardDictation} />
             <span className="nx-composer-spacer" />
-            {sending && (
-              <span className="nx-dictation-waiting" role="status" data-testid="dictation-waiting">waiting for transcription…</span>
+            {sending ? (
+              <span className="nx-dictation-loader" role="status" aria-label="Transcribing" data-testid="dictation-waiting" />
+            ) : (
+              <button type="button" className="nx-btn is-primary nx-dictation-send" data-testid="dictation-send" onClick={sendDictation}>
+                Send
+              </button>
             )}
-            <button type="button" className="nx-btn is-primary nx-dictation-send" data-testid="dictation-send" disabled={sending} onClick={sendDictation}>
-              Send
-            </button>
           </div>
         </>
       )}
@@ -462,11 +500,12 @@ export function Composer(props: { room: string; token: () => string; connection:
   const micButton = voiceEnabled ? (
     <IconButton
       icon={Mic}
-      label="Start dictation"
+      label="Start dictation (hold to record)"
       variant="quiet"
       className="nx-composer-mic"
       data-testid="composer-mic"
-      onClick={openDictation}
+      onPointerDown={onMicPointerDown}
+      onClick={onMicClick}
     />
   ) : null;
 

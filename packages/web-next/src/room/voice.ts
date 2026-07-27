@@ -107,6 +107,35 @@ function rms(samples: Float32Array): number {
   return Math.min(1, Math.sqrt(sum / samples.length));
 }
 
+// Raw conversational-speech RMS is small (~0.02–0.15); this gain + 0.6 power
+// curve maps it so normal speech fills roughly half the bar height. Chosen by
+// eye against the e2e fake (constant 0.4 buffers read as a full trail).
+export const VOICE_LEVEL_GAIN = 7;
+export const VOICE_MAX_LEVELS = 48;
+/** Long-press threshold (ms) that turns a mic tap into hold-to-record. */
+export const LONG_PRESS_MS = 350;
+
+/** The single shared level mapping: raw RMS → 0..1 perceptual bar height. Every
+ *  surface (live wave, chip waveforms, stored envelope) uses this so what is
+ *  rendered later matches what the speaker saw while recording. */
+export function perceptualLevel(rawRms: number): number {
+  return Math.min(1, (Math.max(0, rawRms) * VOICE_LEVEL_GAIN) ** 0.6);
+}
+
+/** Peak-downsample a level series to at most `max` buckets, order preserved. */
+export function downsampleLevels(levels: number[], max = VOICE_MAX_LEVELS): number[] {
+  if (levels.length <= max) return levels.slice();
+  const out: number[] = [];
+  for (let i = 0; i < max; i += 1) {
+    const start = Math.floor((i * levels.length) / max);
+    const end = Math.max(start + 1, Math.floor(((i + 1) * levels.length) / max));
+    let peak = 0;
+    for (let j = start; j < end; j += 1) peak = Math.max(peak, levels[j] ?? 0);
+    out.push(peak);
+  }
+  return out;
+}
+
 /** Open the mic and capture mono PCM until stop()/cancel(), emitting a live RMS
  *  level per buffer (~12–23 Hz) for the waveform. Prefers a 24 kHz context, else
  *  captures at the device rate and resamples on encode. */
@@ -127,7 +156,7 @@ export const startRecording: StartRecording = async (onLevel) => {
   processor.onaudioprocess = (event) => {
     const frame = new Float32Array(event.inputBuffer.getChannelData(0));
     chunks.push(frame);
-    onLevel?.(rms(frame));
+    onLevel?.(perceptualLevel(rms(frame)));
   };
   source.connect(processor);
   processor.connect(context.destination);
@@ -184,7 +213,7 @@ export function formatElapsed(seconds: number): string {
   return `${String(minutes)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-export type DictationTakeState = 'recording' | 'transcribing' | 'done' | 'failed';
+export type DictationTakeState = 'recording' | 'recorded' | 'transcribing' | 'done' | 'failed';
 
 export interface DictationTake {
   id: string;
@@ -192,6 +221,8 @@ export interface DictationTake {
   text?: string;
   error?: string;
   durationSeconds: number;
+  /** Post-gain waveform envelope, integers 0..100, for the memo chip. */
+  levels: number[];
 }
 
 export interface DictationSessionOptions {
@@ -216,12 +247,11 @@ export class DictationSession {
   private recordingId: string | undefined;
   private recordingHandle: RecordingHandle | undefined;
   private recordingStartedAt = 0;
+  private recordingLevels: number[] = [];
+  private readonly wavById = new Map<string, Uint8Array>();
   private autoAdd: unknown;
-  private queue: { id: string; wav: Uint8Array }[] = [];
-  private processing = false;
   private generation = 0;
   private seq = 0;
-  private pendingSend: { resolve: (texts: string[]) => void; reject: (error: Error) => void } | undefined;
   private readonly begin: StartRecording;
   private readonly timers: DictationTimers;
   private readonly now: () => number;
@@ -261,15 +291,19 @@ export class DictationSession {
     if (this.recordingId !== undefined) return;
     const id = `take-${String(++this.seq)}`;
     this.recordingId = id;
-    this.takes.push({ id, state: 'recording', durationSeconds: 0 });
+    this.recordingLevels = [];
+    this.takes.push({ id, state: 'recording', durationSeconds: 0, levels: [] });
     this.emit();
+    const collect = (level: number): void => {
+      this.recordingLevels.push(level);
+      this.options.onLevel?.(level);
+    };
     let handle: RecordingHandle;
     try {
-      handle = await this.begin(this.options.onLevel);
+      handle = await this.begin(collect);
     } catch (error) {
       this.recordingId = undefined;
       this.update(id, { state: 'failed', error: captureErrorMessage(error) });
-      this.maybeResolveSend();
       return;
     }
     // A cancel/discardAll during the await must not leave a live handle.
@@ -282,7 +316,8 @@ export class DictationSession {
     this.autoAdd = this.timers.set(() => { void this.addTake(); }, MAX_RECORDING_MS);
   }
 
-  /** Stop the current recording and enqueue it for transcription. */
+  /** Stop the current recording and store it as a `recorded` take with its WAV,
+   *  duration, and level envelope — no upload happens until Send. */
   async addTake(): Promise<void> {
     const id = this.recordingId;
     const handle = this.recordingHandle;
@@ -291,17 +326,16 @@ export class DictationSession {
     this.recordingId = undefined;
     this.recordingHandle = undefined;
     const durationSeconds = Math.max(0, (this.now() - this.recordingStartedAt) / 1000);
+    const levels = downsampleLevels(this.recordingLevels).map((level) => Math.round(level * 100));
     let wav: Uint8Array;
     try {
       wav = await handle.stop();
     } catch (error) {
-      this.update(id, { state: 'failed', error: captureErrorMessage(error), durationSeconds });
-      this.maybeResolveSend();
+      this.update(id, { state: 'failed', error: captureErrorMessage(error), durationSeconds, levels });
       return;
     }
-    this.update(id, { state: 'transcribing', durationSeconds });
-    this.queue.push({ id, wav });
-    void this.pump();
+    this.wavById.set(id, wav);
+    this.update(id, { state: 'recorded', durationSeconds, levels });
   }
 
   /** Discard the in-progress recording only; added takes are untouched. */
@@ -313,87 +347,66 @@ export class DictationSession {
     this.recordingHandle = undefined;
     this.recordingId = undefined;
     this.takes = this.takes.filter((take) => take.id !== id);
+    this.wavById.delete(id);
     this.emit();
-    this.maybeResolveSend();
   }
 
-  /** Remove any take; a late transcription result for it is ignored. */
+  /** Remove any take and drop its stored audio. */
   removeTake(id: string): void {
     if (id === this.recordingId) {
       this.cancelTake();
       return;
     }
     this.takes = this.takes.filter((take) => take.id !== id);
+    this.wavById.delete(id);
     this.emit();
-    this.maybeResolveSend();
   }
 
-  /** Stop everything and drop all takes; every late result is ignored. */
+  /** Stop everything and drop all takes; a send in flight is abandoned. */
   discardAll(): void {
     this.clearAutoAdd();
     this.recordingHandle?.cancel();
     this.recordingHandle = undefined;
     this.recordingId = undefined;
-    this.queue = [];
     this.generation += 1;
     this.takes = [];
+    this.wavById.clear();
     this.emit();
-    this.maybeResolveSend();
   }
 
-  /** Resolve with the done texts in take order once nothing is recording or
-   *  transcribing; reject if nothing succeeded. Finalizes an in-progress
-   *  recording first so Send can never hang on it. */
-  sendWhenReady(): Promise<string[]> {
-    if (this.recordingId !== undefined) void this.addTake();
-    return new Promise((resolve, reject) => {
-      this.pendingSend = { resolve, reject };
-      this.maybeResolveSend();
-    });
-  }
-
-  private async pump(): Promise<void> {
-    if (this.processing) return;
-    this.processing = true;
-    while (this.queue.length > 0) {
-      const next = this.queue.shift()!;
-      const gen = this.generation;
+  /** Finalize any in-progress recording, then upload each not-yet-transcribed
+   *  take serially — a take that already has text is never re-uploaded. Resolves
+   *  with the done texts in take order, or rejects if any take failed or none
+   *  succeeded, leaving the panel open with per-chip errors. */
+  async sendWhenReady(): Promise<string[]> {
+    if (this.recordingId !== undefined) await this.addTake();
+    const gen = this.generation;
+    for (const take of [...this.takes]) {
+      if (gen !== this.generation) break; // discarded mid-send
+      if (take.state !== 'recorded' && take.state !== 'failed') continue; // done/recording skip
+      const wav = this.wavById.get(take.id);
+      if (!wav) {
+        this.update(take.id, { state: 'failed', error: 'The recording was lost.' });
+        continue;
+      }
+      this.update(take.id, { state: 'transcribing', error: undefined });
       try {
-        const text = await this.options.transcribe(next.wav);
-        this.applyResult(gen, next.id, text.trim());
+        const text = (await this.options.transcribe(wav)).trim();
+        if (gen !== this.generation || !this.takes.some((t) => t.id === take.id)) continue;
+        if (text === '') this.update(take.id, { state: 'failed', error: EMPTY_TRANSCRIPT_MESSAGE });
+        else this.update(take.id, { state: 'done', text });
       } catch (error) {
-        this.applyResult(gen, next.id, undefined, error);
+        if (gen !== this.generation || !this.takes.some((t) => t.id === take.id)) continue;
+        this.update(take.id, {
+          state: 'failed',
+          error: error instanceof Error ? error.message : 'Transcription failed.',
+        });
       }
     }
-    this.processing = false;
-    this.maybeResolveSend();
-  }
-
-  private applyResult(gen: number, id: string, text?: string, error?: unknown): void {
-    if (gen !== this.generation) return; // discarded since this upload started
-    if (!this.takes.some((take) => take.id === id)) return; // removed
-    if (error !== undefined) {
-      this.update(id, {
-        state: 'failed',
-        error: error instanceof Error ? error.message : 'Transcription failed.',
-      });
-    } else if (text === undefined || text === '') {
-      this.update(id, { state: 'failed', error: EMPTY_TRANSCRIPT_MESSAGE });
-    } else {
-      this.update(id, { state: 'done', text });
-    }
-    this.maybeResolveSend();
-  }
-
-  private maybeResolveSend(): void {
-    if (!this.pendingSend) return;
-    if (this.takes.some((take) => take.state === 'recording' || take.state === 'transcribing')) return;
-    const texts = this.takes
-      .filter((take) => take.state === 'done' && take.text !== undefined)
-      .map((take) => take.text!);
-    const pending = this.pendingSend;
-    this.pendingSend = undefined;
-    if (texts.length === 0) pending.reject(new Error('No dictation to send.'));
-    else pending.resolve(texts);
+    if (gen !== this.generation) throw new Error('Dictation was discarded.');
+    const texts = this.takes.filter((t) => t.state === 'done' && t.text !== undefined).map((t) => t.text!);
+    if (texts.length === 0) throw new Error('No dictation to send.');
+    if (this.takes.some((t) => t.state === 'failed')) throw new Error('Some takes could not be transcribed.');
+    return texts;
   }
 }
