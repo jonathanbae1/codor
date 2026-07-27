@@ -57,6 +57,13 @@ importers:
       '@codor/protocol':
         specifier: workspace:*
         version: link:../../protocol
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
+    devDependencies:
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
 
   packages/adapters/copilot:
     dependencies:
