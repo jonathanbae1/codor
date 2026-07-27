@@ -82,8 +82,9 @@ export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = {
   'gemini-2.5-flash': {
     standard: { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   },
+  // harn:assume grok-price-table-distinguishes-cache-and-context-tier ref=grok-price-table
   'grok-4.5': {
-    standard: { inputPerMTok: 2, outputPerMTok: 6 },
+    standard: { inputPerMTok: 2, cachedInputPerMTok: 0.3, outputPerMTok: 6 },
     longContext: {
       aboveInputTokens: 200_000,
       inclusive: true,
@@ -92,6 +93,7 @@ export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = {
       outputPerMTok: 12,
     },
   },
+  // harn:end grok-price-table-distinguishes-cache-and-context-tier
 };
 
 const MODEL_ALIASES: Readonly<Record<string, string>> = {

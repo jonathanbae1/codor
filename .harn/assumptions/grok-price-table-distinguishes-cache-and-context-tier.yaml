@@ -1,0 +1,12 @@
+id: grok-price-table-distinguishes-cache-and-context-tier
+hash: a-0375d79ad051
+title: Grok 4.5 advisory pricing distinguishes cache and context tier
+state: active
+statement: The advisory Grok 4.5 price table must calculate uncached input,
+  cached input, and output separately at the cited public standard rates of $2,
+  $0.30, and $6 per million tokens below 200,000 input tokens and $4, $0.60, and
+  $12 per million tokens at or above that threshold, because the operator
+  estimate must not charge cached short-context input at the uncached rate.
+depends_on:
+  - adapters-own-their-model-catalog
+created_by: reconcile-pr7-grok-truth

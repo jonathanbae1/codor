@@ -23,6 +23,9 @@ afterEach(() => {
 });
 
 describe('Grok subprocess and capability conformance', () => {
+  // harn:assume canonical-spawn-controls-enforced ref=grok-spawn-control-regression
+  // harn:assume harness-declares-what-a-policy-becomes ref=grok-policy-regression
+  // harn:assume harness-declares-supported-thinking-levels ref=grok-thinking-level-regression
   it('maps documented effort and approval controls', () => {
     expect(grokApprovalArgs('read-only')).toEqual([]);
     expect(grokApprovalArgs('workspace-write')).toEqual([]);
@@ -34,7 +37,12 @@ describe('Grok subprocess and capability conformance', () => {
         '--model', 'grok-4.5', '--effort', 'high', '--always-approve', '--resume', 'session',
       ]);
   });
+  // harn:end harness-declares-supported-thinking-levels
+  // harn:end harness-declares-what-a-policy-becomes
+  // harn:end canonical-spawn-controls-enforced
 
+  // harn:assume adapter-process-lifecycle-supervised ref=grok-cli-process-supervision-regression
+  // harn:assume grok-cli-resolves-windows-command-shims ref=grok-windows-cli-launch-regression
   it('passes headless arguments and translates a streaming turn', async () => {
     const command = executable(`
 const fs = require('node:fs');
@@ -58,6 +66,7 @@ console.log(JSON.stringify({type:'response.completed',status:'completed',usage:{
     });
     expect(session.session_ref).toBe('22222222-2222-4222-8222-222222222222');
   });
+  // harn:end grok-cli-resolves-windows-command-shims
 
   it('discovers UUID sessions from ~/.grok/sessions', () => {
     const home = mkdtempSync(join(tmpdir(), 'codor-grok-home-'));
@@ -74,4 +83,5 @@ console.log(JSON.stringify({type:'response.completed',status:'completed',usage:{
       new GrokAdapter().spawn({ cwd: process.cwd() }), 'hello')) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'run.completed', status: 'failed' });
   });
+  // harn:end adapter-process-lifecycle-supervised
 });
