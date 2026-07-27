@@ -109,8 +109,5 @@ files:
   - packages/tunnel/src/pake.spec.ts
   - packages/tunnel/src/handshake.spec.ts
   - packages/tunnel/src/pairing-channel.spec.ts
-lock:
-  locked_at: 2026-07-27T08:56:42.592Z
-  base_commit: 6695a467b93f71236b6f2bc2dd7b107e14c53055
-  hash: c8e313344a639b2ffd92b3bfa29cb96dc3166e23a068c2159110ac5ba7e74c95
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T09:25:44.492Z
