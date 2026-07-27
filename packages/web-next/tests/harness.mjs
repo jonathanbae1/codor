@@ -1485,8 +1485,11 @@ createServer((req, res) => {
 
 // ── Serve: built SPA + API on one isolated port ──────────────────────────
 const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-// A stub voice provider: the real /api/voice/transcribe endpoint, but a fixed
-// transcript instead of any paid upstream call.
+// A stub voice provider: the real /api/voice/transcribe endpoint, but a
+// distinct counter-suffixed transcript per call (so multi-segment assertions are
+// real) with a small delay (so the "waiting for transcription" state is
+// observable) instead of any paid upstream call.
+let voiceCall = 0;
 const voiceProviders = [{
   id: 'codex',
   label: 'Codex (ChatGPT login)',
@@ -1494,7 +1497,11 @@ const voiceProviders = [{
   create: () => ({
     id: 'codex',
     label: 'Codex (ChatGPT login)',
-    transcribe: async () => ({ text: 'Voice dictation landed in the composer.' }),
+    transcribe: async () => {
+      const nth = (voiceCall += 1);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      return { text: `dictation ${String(nth)}` };
+    },
   }),
 }];
 await startServer({

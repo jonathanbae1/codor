@@ -16,11 +16,11 @@ import {
   type UploadedAttachment,
 } from './attachments.js';
 import {
-  DictationController,
+  DictationSession,
   fetchVoiceProviders,
   formatElapsed,
   transcribeVoice,
-  type DictationState,
+  type DictationTake,
 } from './voice.js';
 
 const MAX_ROWS = 8;
@@ -37,6 +37,28 @@ function mentionQuery(draft: string, caret: number): { start: number; query: str
   const query = upToCaret.slice(at + 1);
   if (!/^[a-z0-9_-]*$/i.test(query)) return undefined;
   return { start: at, query };
+}
+
+/** The spoken-message body: mention prefix (omitted when unaddressed — never a
+ *  dangling `@`), then the mic marker with the segment texts newline-joined
+ *  inside curly quotes. Pure so it is unit-tested directly. */
+export function composeVoiceBody(recipientHandle: string | undefined, texts: string[]): string {
+  const marker = `🎤 “${texts.join('\n')}”`;
+  return recipientHandle ? `@${recipientHandle} ${marker}` : marker;
+}
+
+/** The voice recipient when the panel opens: the first roster member @-mentioned
+ *  in the draft, else the composer's effective default, else unaddressed. */
+export function deriveVoiceRecipientHandle(
+  draft: string,
+  rosterHandles: readonly string[],
+  fallbackHandle: string | undefined,
+): string | undefined {
+  for (const match of draft.matchAll(/@([a-z0-9_-]+)/gi)) {
+    const handle = rosterHandles.find((candidate) => candidate.toLowerCase() === match[1]!.toLowerCase());
+    if (handle) return handle;
+  }
+  return fallbackHandle;
 }
 
 /** Docked composer: auto-grow, Enter sends, Shift+Enter breaks. Drafts start
@@ -62,9 +84,17 @@ export function Composer(props: { room: string; token: () => string; connection:
   const seededRef = useRef(false);
   const pendingCaretRef = useRef<number>();
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [dictation, setDictation] = useState<DictationState>('idle');
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [takes, setTakes] = useState<DictationTake[]>([]);
   const [elapsed, setElapsed] = useState(0);
-  const dictationRef = useRef<DictationController>();
+  const [sending, setSending] = useState(false);
+  const [voiceRecipient, setVoiceRecipient] = useState<string>();
+  const [recipientPicker, setRecipientPicker] = useState(false);
+  const sessionRef = useRef<DictationSession>();
+  const levelsRef = useRef<number[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const recording = takes.some((take) => take.state === 'recording');
 
   // Programmatic inserts restore the caret synchronously with the DOM update —
   // an rAF here loses keystrokes racing in from a fast typist.
@@ -141,16 +171,49 @@ export function Composer(props: { room: string; token: () => string; connection:
     return () => { live = false; };
   }, []);
 
-  // The elapsed indicator ticks only while recording and resets on every exit.
+  // Unmounting mid-dictation (channel switch) must release the microphone —
+  // discardAll cancels any live recording handle and drops the queue.
+  useEffect(() => () => { sessionRef.current?.discardAll(); }, []);
+
+  // The elapsed clock ticks only while a take is recording; it resets each take.
   useEffect(() => {
-    if (dictation !== 'recording') {
+    if (!recording) {
       setElapsed(0);
       return;
     }
     const started = Date.now();
     const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
     return () => window.clearInterval(id);
-  }, [dictation]);
+  }, [recording]);
+
+  // Left-scrolling waveform: newest level bars enter at the right, the trail
+  // slides left as the buffer grows. Reduced-motion draws the recent levels once.
+  useEffect(() => {
+    if (!panelOpen || !recording) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let raf = 0;
+    const draw = (): void => {
+      const w = canvas.width = canvas.clientWidth || 320;
+      const h = canvas.height = canvas.clientHeight || 44;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = getComputedStyle(canvas).color || '#d33';
+      const barW = 3;
+      const gap = 2;
+      const slots = Math.max(1, Math.floor(w / (barW + gap)));
+      const recent = levelsRef.current.slice(-slots);
+      recent.forEach((level, index) => {
+        const barH = Math.max(2, level * h);
+        const x = w - (recent.length - index) * (barW + gap);
+        ctx.fillRect(x, (h - barH) / 2, barW, barH);
+      });
+      if (!reduced) raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [panelOpen, recording]);
 
   const canSend = connected && hydrated && !uploading && (draft.trim().length > 0 || pending.length > 0);
 
@@ -220,58 +283,191 @@ export function Composer(props: { room: string; token: () => string; connection:
     pendingCaretRef.current = mention.start + member.handle.length + 2;
   };
 
-  // Splice a transcript at the caret with the same idiom as the @ button, reading
-  // the live textarea so a fast typist mid-recording is never clobbered.
-  const insertTranscript = (text: string): void => {
-    const node = areaRef.current;
-    const current = node?.value ?? draft;
-    const caret = node?.selectionStart ?? current.length;
-    seededRef.current = true;
-    const before = current.slice(0, caret);
-    const lead = before === '' || /\s$/.test(before) ? '' : ' ';
-    const insertion = `${lead}${text}`;
-    setDraft(`${before}${insertion}${current.slice(caret)}`);
+  const closeDictation = (): void => {
+    sessionRef.current = undefined;
+    levelsRef.current = [];
+    setPanelOpen(false);
+    setTakes([]);
+    setSending(false);
+    setRecipientPicker(false);
+    requestAnimationFrame(() => areaRef.current?.focus());
+  };
+
+  const openDictation = (): void => {
+    const derived = deriveVoiceRecipientHandle(
+      areaRef.current?.value ?? draft,
+      roster.map((member) => member.handle),
+      defaultRecipient?.handle,
+    );
+    setVoiceRecipient(derived);
     setHint(undefined);
-    pendingCaretRef.current = caret + insertion.length;
-  };
-
-  const dictationController = (): DictationController => {
-    dictationRef.current ??= new DictationController({
+    levelsRef.current = [];
+    const session = new DictationSession({
       transcribe: (wav) => transcribeVoice(props.token(), wav),
-      onState: setDictation,
-      onTranscript: insertTranscript,
-      onError: (message) => setHint(message),
+      onChange: setTakes,
+      onLevel: (level) => {
+        levelsRef.current.push(level);
+        if (levelsRef.current.length > 512) levelsRef.current.shift();
+      },
     });
-    return dictationRef.current;
+    sessionRef.current = session;
+    setPanelOpen(true);
+    // The bar (and the clicked mic) unmounts, so move focus onto the panel or
+    // the spec'd Enter/Esc keys land on <body> and do nothing.
+    requestAnimationFrame(() => panelRef.current?.focus());
+    void session.startTake();
   };
 
-  const dictationControls = voiceEnabled ? (
-    <div className="nx-composer-dictation" data-testid="composer-dictation">
-      {dictation === 'recording' && (
-        <>
-          <span className="nx-dictation-elapsed" data-testid="composer-mic-elapsed" aria-hidden="true">
-            {formatElapsed(elapsed)}
+  // Cancel/remove that empties the take list closes the panel; a live recording
+  // is decided from the session snapshot, which onChange has already emitted.
+  const cancelRecording = (): void => {
+    const session = sessionRef.current;
+    if (!session) return;
+    session.cancelTake();
+    if (session.snapshot().length === 0) closeDictation();
+  };
+  const removeSegment = (id: string): void => {
+    const session = sessionRef.current;
+    if (!session) return;
+    session.removeTake(id);
+    if (session.snapshot().length === 0) closeDictation();
+  };
+  const discardDictation = (): void => {
+    sessionRef.current?.discardAll();
+    closeDictation();
+  };
+  const sendDictation = (): void => {
+    const session = sessionRef.current;
+    if (!session || sending) return;
+    setSending(true); // single-slot: a second press is impossible
+    setHint(undefined);
+    session.sendWhenReady()
+      .then((texts) => {
+        props.connection.post(composeVoiceBody(voiceRecipient, texts));
+        closeDictation();
+      })
+      .catch((error: unknown) => {
+        setHint(error instanceof Error ? error.message : 'Nothing was transcribed');
+        setSending(false); // keep the panel open to record or discard
+      });
+  };
+
+  const voiceHasAgents = roster.some((member) => member.kind === 'agent');
+  const recipientChip = voiceHasAgents ? (
+    <div className="nx-dictation-recipient-wrap">
+      <button
+        type="button"
+        className="nx-dictation-recipient"
+        data-testid="dictation-recipient"
+        aria-haspopup="listbox"
+        onClick={() => setRecipientPicker((open) => !open)}
+      >
+        → {voiceRecipient ? `@${voiceRecipient}` : 'no recipient'}
+      </button>
+      {recipientPicker && (
+        <ul className="nx-dictation-recipient-list" role="listbox" aria-label="Choose recipient" data-testid="dictation-recipient-list">
+          {roster.map((member) => (
+            <li key={member.id} role="presentation">
+              <button
+                role="option"
+                aria-selected={member.handle === voiceRecipient}
+                className={`nx-mention ${member.handle === voiceRecipient ? 'is-active' : ''}`}
+                onClick={() => { setVoiceRecipient(member.handle); setRecipientPicker(false); }}
+              >
+                <Chip name={member.handle} accent={memberAccent(member)} size={20} />
+                <span className="nx-mention-handle">@{member.handle}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ) : null;
+
+  const dictationPanel = (
+    <div
+      ref={panelRef}
+      className="nx-dictation-panel"
+      data-testid="composer-dictation-panel"
+      role="group"
+      aria-label="Voice dictation"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (recording && event.key === 'Enter') {
+          event.preventDefault();
+          void sessionRef.current?.addTake();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          if (recording) cancelRecording(); else discardDictation();
+        }
+      }}
+    >
+      <div className="nx-dictation-head">
+        {recipientChip}
+        {recording && (
+          <span className="nx-dictation-clock" data-testid="dictation-clock">
+            <span className="nx-dictation-dot" aria-hidden="true" /> Recording {formatElapsed(elapsed)}
           </span>
-          <IconButton
-            icon={X}
-            label="Cancel dictation"
-            variant="quiet"
-            data-testid="composer-mic-cancel"
-            onClick={() => dictationController().cancel()}
-          />
+        )}
+      </div>
+
+      {recording ? (
+        <>
+          <canvas ref={canvasRef} className="nx-dictation-wave" data-testid="dictation-wave" aria-hidden="true" />
+          <div className="nx-dictation-controls">
+            <IconButton icon={X} label="Cancel dictation" variant="quiet" data-testid="dictation-cancel" onClick={cancelRecording} />
+            <span className="nx-composer-spacer" />
+            <button type="button" className="nx-btn is-primary nx-dictation-add" data-testid="dictation-add" onClick={() => void sessionRef.current?.addTake()}>
+              Add
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <ul className="nx-dictation-segments" data-testid="dictation-segments">
+            {takes.map((take, index) => (
+              <li key={take.id} className={`nx-dictation-segment is-${take.state}`} data-testid={`dictation-segment-${String(index)}`}>
+                {take.state === 'transcribing' && <span className="nx-dictation-spinner" aria-hidden="true" />}
+                <span className="nx-dictation-segment-text">
+                  {take.state === 'transcribing' ? 'transcribing…' : take.state === 'failed' ? take.error : take.text}
+                </span>
+                <button
+                  type="button"
+                  className="nx-attach-remove"
+                  aria-label={`Remove segment ${String(index + 1)}`}
+                  data-testid={`dictation-segment-${String(index)}-remove`}
+                  onClick={() => removeSegment(take.id)}
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="nx-dictation-controls">
+            <IconButton icon={Mic} label="Record another" variant="quiet" data-testid="dictation-record-another" onClick={() => void sessionRef.current?.startTake()} />
+            <IconButton icon={X} label="Discard all" variant="quiet" data-testid="dictation-discard" onClick={discardDictation} />
+            <span className="nx-composer-spacer" />
+            {sending && (
+              <span className="nx-dictation-waiting" role="status" data-testid="dictation-waiting">waiting for transcription…</span>
+            )}
+            <button type="button" className="nx-btn is-primary nx-dictation-send" data-testid="dictation-send" disabled={sending} onClick={sendDictation}>
+              Send
+            </button>
+          </div>
         </>
       )}
-      <IconButton
-        icon={Mic}
-        label={dictation === 'recording' ? 'Stop dictation' : 'Start dictation'}
-        variant="quiet"
-        className={`nx-composer-mic${dictation === 'recording' ? ' is-recording' : ''}${dictation === 'transcribing' ? ' is-busy' : ''}`}
-        data-testid="composer-mic"
-        aria-pressed={dictation === 'recording'}
-        disabled={dictation === 'transcribing'}
-        onClick={() => { void dictationController().toggle(); }}
-      />
     </div>
+  );
+
+  const micButton = voiceEnabled ? (
+    <IconButton
+      icon={Mic}
+      label="Start dictation"
+      variant="quiet"
+      className="nx-composer-mic"
+      data-testid="composer-mic"
+      onClick={openDictation}
+    />
   ) : null;
 
   const send = (): void => {
@@ -353,6 +549,7 @@ export function Composer(props: { room: string; token: () => string; connection:
           ))}
         </ul>
       )}
+      {panelOpen ? dictationPanel : (
       <div className="nx-composer-bar">
         {mention && mentionables.length > 0 && (
           <ul className="nx-mentions" role="listbox" aria-label="Mention someone" data-testid="mention-popover">
@@ -465,7 +662,7 @@ export function Composer(props: { room: string; token: () => string; connection:
                 pendingCaretRef.current = caret + lead.length + 1;
               }}
             />
-            {dictationControls}
+            {micButton}
             <span className="nx-composer-spacer" />
             {/* The same primitive desktop sends with, so the two surfaces cannot
                 drift in theme or shape; the mobile class only widens the hit
@@ -485,7 +682,7 @@ export function Composer(props: { room: string; token: () => string; connection:
           // Attach and Send are one bottom-right action group sharing a centre
           // line, not two controls floating to the growing bar's optical middle.
           <div className="nx-composer-actions" data-testid="composer-actions">
-            {dictationControls}
+            {micButton}
             <IconButton
               icon={Paperclip}
               label="Attach files"
@@ -507,6 +704,7 @@ export function Composer(props: { room: string; token: () => string; connection:
           // harn:end desktop-composer-groups-attach-and-send-bottom-right
         )}
       </div>
+      )}
     </footer>
   );
 }

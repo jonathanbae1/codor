@@ -168,8 +168,6 @@ function captureErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Could not start recording.';
 }
 
-export type DictationState = 'idle' | 'recording' | 'transcribing';
-
 export interface DictationTimers {
   set(fn: () => void, ms: number): unknown;
   clear(handle: unknown): void;
@@ -179,109 +177,6 @@ const defaultTimers: DictationTimers = {
   set: (fn, ms) => setTimeout(fn, ms),
   clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); },
 };
-
-export interface DictationOptions {
-  transcribe: (wav: Uint8Array) => Promise<string>;
-  onState: (state: DictationState) => void;
-  onTranscript: (text: string) => void;
-  onError: (message: string) => void;
-  startRecording?: () => Promise<RecordingHandle>;
-  timers?: DictationTimers;
-}
-
-/**
- * The push-to-talk state machine: idle → recording → transcribing → idle, with
- * a single capture in flight, a 60 s auto-stop, and every failure returning to
- * idle with the mic released. Framework-free; the React composer wires its
- * callbacks and an elapsed timer around it.
- */
-export class DictationController {
-  private stateValue: DictationState = 'idle';
-  private handle: RecordingHandle | undefined;
-  private autoStop: unknown;
-  private readonly begin: () => Promise<RecordingHandle>;
-  private readonly timers: DictationTimers;
-
-  constructor(private readonly options: DictationOptions) {
-    this.begin = options.startRecording ?? startRecording;
-    this.timers = options.timers ?? defaultTimers;
-  }
-
-  get state(): DictationState {
-    return this.stateValue;
-  }
-
-  /** Start when idle, stop when recording; a no-op mid-transcription. */
-  async toggle(): Promise<void> {
-    if (this.stateValue === 'idle') return this.start();
-    if (this.stateValue === 'recording') return this.stop();
-  }
-
-  async start(): Promise<void> {
-    if (this.stateValue !== 'idle') return;
-    let handle: RecordingHandle;
-    try {
-      handle = await this.begin();
-    } catch (error) {
-      this.options.onError(captureErrorMessage(error));
-      return;
-    }
-    this.handle = handle;
-    this.setState('recording');
-    this.autoStop = this.timers.set(() => { void this.stop(); }, MAX_RECORDING_MS);
-  }
-
-  async stop(): Promise<void> {
-    if (this.stateValue !== 'recording' || !this.handle) return;
-    this.clearAutoStop();
-    const handle = this.handle;
-    this.handle = undefined;
-    let wav: Uint8Array;
-    try {
-      wav = await handle.stop();
-    } catch (error) {
-      this.fail(captureErrorMessage(error));
-      return;
-    }
-    this.setState('transcribing');
-    try {
-      const text = await this.options.transcribe(wav);
-      this.setState('idle');
-      this.options.onTranscript(text);
-    } catch (error) {
-      this.setState('idle');
-      this.options.onError(error instanceof Error ? error.message : 'Transcription failed.');
-    }
-  }
-
-  cancel(): void {
-    if (this.stateValue === 'idle') return;
-    this.clearAutoStop();
-    this.handle?.cancel();
-    this.handle = undefined;
-    this.setState('idle');
-  }
-
-  private fail(message: string): void {
-    this.clearAutoStop();
-    this.handle?.cancel();
-    this.handle = undefined;
-    this.setState('idle');
-    this.options.onError(message);
-  }
-
-  private clearAutoStop(): void {
-    if (this.autoStop !== undefined) {
-      this.timers.clear(this.autoStop);
-      this.autoStop = undefined;
-    }
-  }
-
-  private setState(state: DictationState): void {
-    this.stateValue = state;
-    this.options.onState(state);
-  }
-}
 
 /** Format elapsed seconds as m:ss for the recording indicator. */
 export function formatElapsed(seconds: number): string {

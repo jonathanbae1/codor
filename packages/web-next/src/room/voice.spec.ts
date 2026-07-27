@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  DictationController,
   DictationSession,
   encodeWav,
   fetchVoiceProviders,
@@ -10,10 +9,8 @@ import {
   startRecording,
   transcribeVoice,
   VOICE_SAMPLE_RATE,
-  type DictationState,
   type DictationTake,
   type DictationTimers,
-  type RecordingHandle,
   type StartRecording,
 } from './voice.js';
 
@@ -88,114 +85,6 @@ describe('voice REST client', () => {
       json: () => Promise.resolve({ enabled: true, selected: 'codex', providers: [] }),
     } as unknown as Response));
     await expect(fetchVoiceProviders('t')).resolves.toEqual({ enabled: true, selected: 'codex', providers: [] });
-  });
-});
-
-describe('DictationController', () => {
-  const manualTimers = (): DictationTimers & { fire: () => void } => {
-    let pending: (() => void) | undefined;
-    return {
-      set: (fn) => { pending = fn; return 1; },
-      clear: () => { pending = undefined; },
-      fire: () => pending?.(),
-    };
-  };
-
-  const handle = (wav = new Uint8Array([1, 2])): RecordingHandle & { stopped: boolean; cancelled: boolean } => {
-    const h = {
-      stopped: false,
-      cancelled: false,
-      async stop() { h.stopped = true; return wav; },
-      cancel() { h.cancelled = true; },
-    };
-    return h;
-  };
-
-  const observe = () => {
-    const states: DictationState[] = [];
-    return {
-      states,
-      onState: (s: DictationState) => states.push(s),
-      onTranscript: vi.fn(),
-      onError: vi.fn(),
-    };
-  };
-
-  it('records, transcribes, and delivers the transcript', async () => {
-    const o = observe();
-    const rec = handle();
-    const controller = new DictationController({
-      startRecording: async () => rec,
-      transcribe: async () => 'hello world',
-      onState: o.onState, onTranscript: o.onTranscript, onError: o.onError,
-    });
-    await controller.start();
-    expect(controller.state).toBe('recording');
-    await controller.stop();
-    expect(o.states).toEqual(['recording', 'transcribing', 'idle']);
-    expect(o.onTranscript).toHaveBeenCalledWith('hello world');
-    expect(rec.stopped).toBe(true);
-    expect(o.onError).not.toHaveBeenCalled();
-  });
-
-  it('cancels without transcribing and releases the mic', async () => {
-    const o = observe();
-    const rec = handle();
-    const transcribe = vi.fn(async () => 'unused');
-    const controller = new DictationController({
-      startRecording: async () => rec, transcribe,
-      onState: o.onState, onTranscript: o.onTranscript, onError: o.onError,
-    });
-    await controller.start();
-    controller.cancel();
-    expect(controller.state).toBe('idle');
-    expect(rec.cancelled).toBe(true);
-    expect(transcribe).not.toHaveBeenCalled();
-    expect(o.onTranscript).not.toHaveBeenCalled();
-  });
-
-  it('surfaces a blocked microphone and stays idle', async () => {
-    const o = observe();
-    const denied = Object.assign(new Error('denied'), { name: 'NotAllowedError' });
-    const controller = new DictationController({
-      startRecording: async () => { throw denied; },
-      transcribe: async () => 'x',
-      onState: o.onState, onTranscript: o.onTranscript, onError: o.onError,
-    });
-    await controller.start();
-    expect(controller.state).toBe('idle');
-    expect(o.onError).toHaveBeenCalledWith(expect.stringMatching(/[Mm]icrophone access was blocked/));
-  });
-
-  it('returns to idle and surfaces a transcription failure, preserving no partial state', async () => {
-    const o = observe();
-    const controller = new DictationController({
-      startRecording: async () => handle(),
-      transcribe: async () => { throw new Error('endpoint said boom'); },
-      onState: o.onState, onTranscript: o.onTranscript, onError: o.onError,
-    });
-    await controller.start();
-    await controller.stop();
-    expect(controller.state).toBe('idle');
-    expect(o.onTranscript).not.toHaveBeenCalled();
-    expect(o.onError).toHaveBeenCalledWith('endpoint said boom');
-  });
-
-  it('auto-stops at the recording cap and transcribes what it captured', async () => {
-    const o = observe();
-    const timers = manualTimers();
-    const controller = new DictationController({
-      startRecording: async () => handle(),
-      transcribe: async () => 'auto transcript',
-      onState: o.onState, onTranscript: o.onTranscript, onError: o.onError,
-      timers,
-    });
-    await controller.start();
-    timers.fire(); // simulate the 60 s cap elapsing
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(o.onTranscript).toHaveBeenCalledWith('auto transcript');
-    expect(controller.state).toBe('idle');
   });
 });
 
