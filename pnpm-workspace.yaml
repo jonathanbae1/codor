@@ -6,3 +6,13 @@ packages:
   - website
   - relay
 # harn:end workspace-gates-cover-all-buildable-projects
+
+# pnpm >= 10.26 reads build-script approvals from this map instead of the "pnpm.onlyBuiltDependencies"
+# field in package.json, which pnpm 11 ignores outright. Kept in addition to that field, not in
+# place of it: package.json's "packageManager" pin stays at pnpm@10.9.0, which predates
+# allowBuilds (added in 10.26.0) and only reads the package.json field.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  sodium-native: true
+  udx-native: true
