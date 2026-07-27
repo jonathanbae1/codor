@@ -24,8 +24,8 @@ describe('relay worker router', () => {
     expect(res.status).toBe(400);
   });
 
-  it('recognizes the session WS route (501 until Phase 4)', async () => {
+  it('rejects a malformed session id (400)', async () => {
     const res = await SELF.fetch('https://relay.example/v1/session/abc/ws?role=client');
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(400); // not 64 lowercase hex
   });
 });

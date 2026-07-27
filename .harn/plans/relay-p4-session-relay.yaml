@@ -70,8 +70,5 @@ files:
   - relay-worker/src/index.ts
   - relay-worker/test/session-relay.spec.ts
   - relay-worker/test/healthz.spec.ts
-lock:
-  locked_at: 2026-07-27T10:02:16.833Z
-  base_commit: 1f9596d218f6a0acc34b234d4cf6d8212731e49b
-  hash: a353e47a040a3698ea6f872cdff6f862e4285b386025bed8b1e3211f98559f1b
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T10:22:36.958Z

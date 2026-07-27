@@ -11,8 +11,6 @@ export interface Env {
   SESSION_RELAY: DurableObjectNamespace;
 }
 
-const NOT_IMPLEMENTED = 501;
-
 const PAIR_WS_ROUTE = /^\/v1\/pair\/([^/]+)\/ws$/;
 const SESSION_WS_ROUTE = /^\/v1\/session\/([^/]+)\/ws$/;
 
@@ -44,9 +42,18 @@ export default {
       return env.PAIRING_ROOM.get(id).fetch(request);
     }
 
-    // Session routing lands in Phase 4.
-    if (method === 'GET' && SESSION_WS_ROUTE.test(pathname)) {
-      return new Response('not implemented', { status: NOT_IMPLEMENTED });
+    const sessionMatch = SESSION_WS_ROUTE.exec(pathname);
+    if (method === 'GET' && sessionMatch) {
+      const sessionId = sessionMatch[1];
+      if (!isValidSessionId(sessionId)) {
+        return new Response('invalid session id', { status: 400 });
+      }
+      const role = url.searchParams.get('role');
+      if (role !== 'host' && role !== 'client') {
+        return new Response('missing or invalid role', { status: 400 });
+      }
+      const id = env.SESSION_RELAY.idFromName(sessionId);
+      return env.SESSION_RELAY.get(id).fetch(request);
     }
 
     return new Response('not found', { status: 404 });
@@ -55,6 +62,18 @@ export default {
 
 export { PairingRoom, SessionRelay };
 // harn:end relay-worker-stays-blind
+
+// harn:assume session-capability-addressing ref=session-id-gate
+// A session id is 32 random bytes rendered as 64 lowercase hex chars (PLAN
+// §4.1). Possession of this unguessable id is the only capability the relay
+// checks; there is no reservation. Reject anything that is not exactly this
+// shape so a malformed id can never address a session Durable Object.
+const SESSION_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+function isValidSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
+}
+// harn:end session-capability-addressing
 
 // harn:assume pairing-nameplate-reservation ref=nameplate-reservation
 // 32-symbol pairing alphabet (routing only, no crypto): the nameplate is
