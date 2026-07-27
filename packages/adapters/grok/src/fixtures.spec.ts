@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createTurnTranslator } from './translate.js';
 
 describe('native Grok streaming-json fixture', () => {
+  // harn:assume grok-capability-truth ref=grok-event-translation-regression
   it('translates text, thought, session id, and end events', () => {
     const translator = createTurnTranslator();
     const lines = readFileSync(new URL('../fixtures/streaming-native.jsonl', import.meta.url), 'utf8')
@@ -20,4 +21,5 @@ describe('native Grok streaming-json fixture', () => {
     expect(translator.sessionId()).toBe('22222222-2222-4222-8222-222222222222');
     expect(translator.end()).toEqual([]);
   });
+  // harn:end grok-capability-truth
 });

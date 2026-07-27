@@ -1,0 +1,13 @@
+id: grok-cli-resolves-windows-command-shims
+hash: a-83ce68825360
+title: Grok direct turns resolve Windows command shims
+state: active
+statement: The Grok direct CLI turn launcher must use cross-spawn so grok
+  command and shebang shims resolve on Windows while preserving exact argv, cwd,
+  inherited session environment, process supervision, interruption, output
+  translation, and terminal cleanup, because native Node spawn does not
+  consistently resolve Windows command shims.
+depends_on:
+  - adapter-process-lifecycle-supervised
+  - adapter-children-inherit-session-env
+created_by: reconcile-pr7-grok-truth

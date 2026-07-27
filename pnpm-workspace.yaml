@@ -7,6 +7,7 @@ packages:
   - relay
 # harn:end workspace-gates-cover-all-buildable-projects
 
+# harn:assume pnpm-build-approvals-span-pinned-and-current-config ref=pnpm-current-build-approvals
 # pnpm >= 10.26 reads build-script approvals from this map instead of the "pnpm.onlyBuiltDependencies"
 # field in package.json, which pnpm 11 ignores outright. Kept in addition to that field, not in
 # place of it: package.json's "packageManager" pin stays at pnpm@10.9.0, which predates
@@ -16,3 +17,4 @@ allowBuilds:
   esbuild: true
   sodium-native: true
   udx-native: true
+# harn:end pnpm-build-approvals-span-pinned-and-current-config

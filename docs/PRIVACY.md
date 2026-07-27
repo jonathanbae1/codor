@@ -33,6 +33,7 @@ no cloud ever holds content, encrypted or not.
 
 ### Tier 0 — tailnet only (recommended default)
 
+<!-- harn:assume tailscale-serve-docs-disclose-certificate-transparency ref=privacy-tailscale-certificate-disclosure -->
 Switchboard binds its Tailscale IP; web/iPhone connect over WireGuard (`tailscale serve` gives
 HTTPS + certs once your tailnet has HTTPS certificates enabled—a one-time authorization step at
 [the admin console](https://console.tailscale.com/admin/dns); running `tailscale serve` then issues
@@ -41,6 +42,7 @@ Transparency log, irreversibly; a Tailscale app connector adds custom-domain acc
 for teams). No Codor-related traffic leaves the tailnet; transport encryption is WireGuard's. **Zero
 third-party infrastructure.** Limits: watch has no tailnet of its own (phone relays via
 WatchConnectivity), and no push when the phone app is cold (see §push).
+<!-- harn:end tailscale-serve-docs-disclose-certificate-transparency -->
 
 ### Tier 1 — serverless P2P (the walkie tier)
 

@@ -1,0 +1,207 @@
+id: reconcile-pr7-grok-truth
+title: Reconcile Grok truth and cached-input pricing after contributor PR 7
+notes: "This plan honestly reconciles contributor PR #7 after its original
+  commits were merged unchanged. It does not claim to have governed or predated
+  that feature. The merged dangling translator anchor becomes a narrow
+  streaming-event contract; Grok command-shim resolution and Grok 4.5 pricing
+  remain independent review obligations. Invalid Grok markers are removed from
+  assumptions whose statements enumerate only older adapters. Existing general
+  adapter obligations are reviewed and receive only scoped Grok anchors. The
+  only behavioral correction is the published $0.30/M short-context cached-input
+  rate and one focused regression."
+assumptions:
+  create:
+    - id: grok-capability-truth
+      title: Grok streaming events normalize into truthful bounded turn evidence
+      statement: Grok streaming-json and Responses-style events accepted by the
+        translator must normalize into bounded text, reasoning, and tool
+        WireEvents; retain a discovered session identifier; normalize reported
+        input and output usage without inventing absent usage; and emit exactly
+        one truthful terminal completion or failure, because downstream run
+        evidence must reflect the observable native stream rather than adapter
+        guesses.
+      reason: "Contributor PR #7 added this translator and a dangling anchor; the
+        post-merge reconciliation establishes only the observable translation
+        contract enclosed by that anchor."
+      depends_on:
+        - normalized-run-item-payload-contract
+    - id: grok-cli-resolves-windows-command-shims
+      title: Grok direct turns resolve Windows command shims
+      statement: The Grok direct CLI turn launcher must use cross-spawn so grok
+        command and shebang shims resolve on Windows while preserving exact
+        argv, cwd, inherited session environment, process supervision,
+        interruption, output translation, and terminal cleanup, because native
+        Node spawn does not consistently resolve Windows command shims.
+      reason: "Grok is outside the existing Windows assumption that explicitly
+        enumerates Copilot, Gemini, and OpenCode, but contributor PR #7 adopted
+        the same observable compatibility requirement."
+      depends_on:
+        - adapter-process-lifecycle-supervised
+        - adapter-children-inherit-session-env
+    - id: grok-price-table-distinguishes-cache-and-context-tier
+      title: Grok 4.5 advisory pricing distinguishes cache and context tier
+      statement: The advisory Grok 4.5 price table must calculate uncached input,
+        cached input, and output separately at the cited public standard rates
+        of $2, $0.30, and $6 per million tokens below 200,000 input tokens and
+        $4, $0.60, and $12 per million tokens at or above that threshold,
+        because the operator estimate must not charge cached short-context input
+        at the uncached rate.
+      reason: "Contributor PR #7 recorded the long-context cached rate but omitted the
+        published short-context cached-input rate."
+      depends_on:
+        - adapters-own-their-model-catalog
+  reviewed:
+    - id: canonical-spawn-controls-enforced
+      outcome: unchanged
+      reason: Grok's policy and thinking argv mapping satisfies the existing
+        every-adapter control contract; scoped source and regression anchors are
+        added without changing behavior.
+    - id: harness-declares-what-a-policy-becomes
+      outcome: unchanged
+      reason: Grok declares all three canonical policy outcomes and the declaration
+        matches its argv mapping; scoped anchors are added.
+    - id: harness-declares-supported-thinking-levels
+      outcome: unchanged
+      reason: Grok declares and enforces its exact low, medium, and high levels;
+        scoped anchors are added.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: Grok observes spawn, error, stderr, close, EOF, interruption, and
+        cleanup under the existing general lifecycle contract; malformed merged
+        marker nesting is repaired.
+    - id: adapter-children-inherit-session-env
+      outcome: unchanged
+      reason: Grok merges session.env over process.env at its only child launch; a
+        scoped source anchor is added.
+    - id: adapters-own-their-model-catalog
+      outcome: unchanged
+      reason: Grok returns a curated adapter-owned catalog backed by its cited
+        provider model source; scoped code and documentation anchors are added.
+    - id: adapter-registry-sole-harness-source
+      outcome: unchanged
+      reason: The existing registry-owned built-in composition already includes Grok
+        and needs no source change.
+    - id: adapter-catalog-distinguishes-installed-and-configurable
+      outcome: unchanged
+      reason: Existing registry tests already prove Grok is a native executable
+        detected on PATH; no catalog behavior changes.
+    - id: attach-custody-lease-tracks-child-pid
+      outcome: unchanged
+      reason: The focused CLI regression confirms Grok resolves to its native resume
+        argv, while the shared attach custody implementation is unchanged.
+    - id: live-inbox-capability-is-evidence-backed-v2
+      outcome: unchanged
+      reason: Its immutable statement does not enumerate Grok, so the invalid
+        contributor marker is removed rather than broadening the assumption.
+    - id: remaining-cli-adapters-use-supervised-subprocesses
+      outcome: unchanged
+      reason: Its immutable statement enumerates only Copilot, Gemini, and OpenCode,
+        so the invalid Grok marker is removed.
+    - id: windows-cli-adapters-resolve-command-shims
+      outcome: unchanged
+      reason: Its immutable statement enumerates only Copilot, Gemini, and OpenCode;
+        Grok receives a separate narrow assumption instead.
+    - id: codex-price-table-models-cache-and-aliases
+      outcome: unchanged
+      reason: Nested Grok-specific pricing anchors isolate the new obligation; all
+        Codex prices, aliases, and behavior remain unchanged.
+files:
+  - packages/adapters/grok/NOTES.md
+  - packages/adapters/grok/src/adapter.ts
+  - packages/adapters/grok/src/adapter.spec.ts
+  - packages/adapters/grok/src/fixtures.spec.ts
+  - packages/adapters/grok/src/index.spec.ts
+  - packages/switchboard/src/pricing.ts
+  - packages/switchboard/src/pricing.spec.ts
+anchors:
+  grok-capability-truth:
+    grok-event-translation:
+      action: keep
+      reason: Preserve the exact merged translator region while establishing its
+        previously missing narrow assumption truth.
+    grok-event-translation-regression:
+      action: change
+      reason: Anchor the focused native fixture regression for translation,
+        completion, session-id, and terminal de-duplication behavior.
+  grok-cli-resolves-windows-command-shims:
+    grok-windows-cli-spawn-provider:
+      action: change
+      reason: Anchor only the Grok cross-spawn provider at the direct turn launch.
+    grok-windows-cli-launch-regression:
+      action: change
+      reason: Anchor the existing focused executable launch and translated-turn
+        regression.
+  grok-price-table-distinguishes-cache-and-context-tier:
+    grok-price-table:
+      action: change
+      reason: Add the missing $0.30/M standard cached-input rate without changing
+        other rates or thresholds.
+    grok-price-regression:
+      action: change
+      reason: Add one short-context cached-input calculation regression.
+  canonical-spawn-controls-enforced:
+    grok-spawn-control-mapping:
+      action: change
+      reason: Repair and scope the merged marker around Grok argv construction.
+    grok-spawn-control-regression:
+      action: change
+      reason: Anchor the existing focused policy/thinking argv regression.
+  harness-declares-what-a-policy-becomes:
+    grok-policy-declarations:
+      action: change
+      reason: Anchor Grok's exact three-policy declaration.
+    grok-policy-regression:
+      action: change
+      reason: Anchor the existing capability snapshot and argv regression.
+  harness-declares-supported-thinking-levels:
+    grok-thinking-level-declaration:
+      action: change
+      reason: Anchor Grok's exact supported thinking levels.
+    grok-thinking-level-regression:
+      action: change
+      reason: Anchor the existing capability snapshot and argv regression.
+  adapter-process-lifecycle-supervised:
+    grok-cli-process-supervision:
+      action: change
+      reason: Repair the malformed merged marker and scope it to deliver,
+        interruption, and process-group signaling.
+    grok-cli-process-supervision-regression:
+      action: change
+      reason: Anchor the existing successful and missing-command lifecycle tests.
+  adapter-children-inherit-session-env:
+    grok-child-environment:
+      action: change
+      reason: Anchor the exact environment merge at the only Grok child launch.
+  adapters-own-their-model-catalog:
+    grok-model-catalog:
+      action: change
+      reason: Anchor the curated Grok model result owned by the adapter.
+    grok-model-catalog-notes:
+      action: change
+      reason: Anchor the provider model documentation cited by the curated catalog.
+  live-inbox-capability-is-evidence-backed-v2:
+    grok-live-inbox-capability:
+      action: remove
+      reason: Remove the invalid Grok marker from an assumption whose statement
+        explicitly enumerates other built-ins.
+  remaining-cli-adapters-use-supervised-subprocesses:
+    grok-cli-subprocess-driver:
+      action: remove
+      reason: Remove the invalid Grok marker from the Copilot/Gemini/OpenCode-only
+        assumption.
+  windows-cli-adapters-resolve-command-shims:
+    windows-cli-spawn-provider:
+      action: remove
+      reason: Remove the invalid Grok marker from the Copilot/Gemini/OpenCode-only
+        assumption and replace it with the separate Grok obligation.
+  codex-price-table-models-cache-and-aliases:
+    codex-price-table:
+      action: change
+      reason: Add a nested Grok price anchor inside the existing table region without
+        changing Codex truth.
+    codex-price-regression:
+      action: change
+      reason: Add a nested Grok regression anchor inside the existing suite without
+        changing Codex coverage.
+applied:
+  applied_at: 2026-07-27T08:32:49.167Z

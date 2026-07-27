@@ -35,6 +35,7 @@ export function grokArgs(session: Session, payload: string): string[] {
   if (session.session_ref !== undefined) args.push('--resume', session.session_ref);
   return args;
 }
+// harn:end canonical-spawn-controls-enforced
 
 const SESSION_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -48,18 +49,20 @@ export class GrokAdapter implements HarnessAdapter {
     ask: false,
     approvals: 'spawn-time',
     extensions: false,
+    // harn:assume harness-declares-supported-thinking-levels ref=grok-thinking-level-declaration
     thinking: true,
     thinking_levels: ['low', 'medium', 'high'] as const,
-    // harn:assume live-inbox-capability-is-evidence-backed-v2 ref=grok-live-inbox-capability
+    // harn:end harness-declares-supported-thinking-levels
     live_inbox: false,
     // Grok exposes --always-approve, but its CLI does not document a native
     // read-only/workspace-write mapping. Do not imply either tier is enforced.
+    // harn:assume harness-declares-what-a-policy-becomes ref=grok-policy-declarations
     policies: {
       'read-only': null,
       'workspace-write': null,
       'full-access': '--always-approve',
     },
-    // harn:end live-inbox-capability-is-evidence-backed-v2
+    // harn:end harness-declares-what-a-policy-becomes
   } as const;
 
   private readonly children = new WeakMap<Session, ChildProcess>();
@@ -87,16 +90,16 @@ export class GrokAdapter implements HarnessAdapter {
     };
   }
 
+  // harn:assume adapters-own-their-model-catalog ref=grok-model-catalog
   listModels(): Promise<ModelCatalog> {
     return Promise.resolve({ models: ['grok-4.5'], source: 'curated' });
   }
+  // harn:end adapters-own-their-model-catalog
 
   attach(session_ref: SessionRef): Session {
     return { harness: this.id, session_ref, cwd: process.cwd() };
   }
 
-  // harn:assume windows-cli-adapters-resolve-command-shims ref=windows-cli-spawn-provider
-  // harn:assume remaining-cli-adapters-use-supervised-subprocesses ref=grok-cli-subprocess-driver
   // harn:assume adapter-process-lifecycle-supervised ref=grok-cli-process-supervision
   async *deliver(
     session: Session,
@@ -104,12 +107,16 @@ export class GrokAdapter implements HarnessAdapter {
     hooks: AdapterTurnHooks = {},
   ): AsyncIterable<WireEvent> {
     const args = grokArgs(session, payload);
+    // harn:assume grok-cli-resolves-windows-command-shims ref=grok-windows-cli-spawn-provider
+    // harn:assume adapter-children-inherit-session-env ref=grok-child-environment
     const child = spawn(this.command, args, {
       cwd: session.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
       env: { ...process.env, ...session.env },
     });
+    // harn:end adapter-children-inherit-session-env
+    // harn:end grok-cli-resolves-windows-command-shims
     this.children.set(session, child);
 
     let stderr = '';
@@ -182,6 +189,7 @@ export class GrokAdapter implements HarnessAdapter {
       child.kill(signal);
     }
   }
+  // harn:end adapter-process-lifecycle-supervised
 
   respondInteraction(): Promise<void> {
     return Promise.reject(

@@ -5,7 +5,9 @@ specification is based on the xAI CLI documentation checked on 2026-07-23:
 
 - <https://docs.x.ai/build/cli/headless-scripting>
 - <https://docs.x.ai/build/cli/reference>
+<!-- harn:assume adapters-own-their-model-catalog ref=grok-model-catalog-notes -->
 - <https://docs.x.ai/developers/models>
+<!-- harn:end adapters-own-their-model-catalog -->
 - <https://docs.x.ai/developers/model-capabilities/text/reasoning>
 
 ## Invocation

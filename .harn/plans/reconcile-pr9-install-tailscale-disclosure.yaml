@@ -1,0 +1,100 @@
+id: reconcile-pr9-install-tailscale-disclosure
+title: Anchor post-merge install and Tailscale disclosure truth from PR 9
+notes: "This plan honestly reconciles contributor PR #9 after its original
+  commits were merged unchanged. It does not claim to have governed or predated
+  that documentation. The implementation adds Harn markers only: pnpm guidance
+  must retain the tested pnpm dlx limitation and compatible build-approval
+  names, while Tailscale guidance must distinguish HTTPS authorization,
+  certificate issuance, irreversible public Certificate Transparency disclosure,
+  and the localhost alternative. Setup behavior, trust policy, and contributor
+  prose remain unchanged."
+assumptions:
+  create:
+    - id: pnpm-install-docs-disclose-build-approval-boundaries
+      title: pnpm install guidance discloses execution and build-approval boundaries
+      statement: Public install documentation must direct pnpm users away from the
+        tested pnpm dlx path, explain that it did not receive required workspace
+        package extensions and native build approvals, and name the compatible
+        legacy onlyBuiltDependencies and current allowBuilds settings, because
+        an apparently successful install without required native scripts
+        produces an unusable runtime.
+      reason: "Contributor PR #9 records a tested packaging limitation and the
+        configuration operators need to avoid a silent native-binding failure."
+      depends_on:
+        - public-npx-install-is-primary-install
+        - pnpm-build-approvals-span-pinned-and-current-config
+    - id: tailscale-serve-docs-disclose-certificate-transparency
+      title: Tailscale Serve docs disclose HTTPS authorization and public CT issuance
+      statement: Public and privacy documentation must explain that tailnet HTTPS
+        enablement authorizes certificate issuance, running tailscale serve
+        issues a certificate whose device ts.net name enters the irreversible
+        public Certificate Transparency record, and localhost avoids that
+        disclosure, because disabling Serve or HTTPS later cannot withdraw an
+        already published certificate record.
+      reason: Operators must be able to distinguish reversible access configuration
+        from the public disclosure caused by certificate issuance.
+      depends_on:
+        - setup-resolves-and-capability-probes-tailscale-serve
+  reviewed:
+    - id: public-npx-install-is-primary-install
+      outcome: unchanged
+      reason: The primary npx install command and setup alias remain unchanged; the
+        pnpm note documents a separate tested execution boundary.
+    - id: fresh-clone-install-proven-by-script
+      outcome: unchanged
+      reason: The self-host guide remains the clean-clone contract; new markers only
+        anchor merged prerequisite and disclosure prose.
+    - id: setup-resolves-and-capability-probes-tailscale-serve
+      outcome: unchanged
+      reason: Runtime resolution, capability probing, retry, and localhost fallback
+        behavior are untouched by documentation anchors.
+    - id: tailnet-auto-pairing-explicit-trust
+      outcome: unchanged
+      reason: Certificate disclosure is independent from the existing opt-in
+        identity-header trust and pairing boundary.
+    - id: operator-launches-serve-web-next
+      outcome: unchanged
+      reason: README anchor nesting does not change which supported browser runtime
+        setup launches.
+files:
+  - README.md
+  - docs/SELF-HOST.md
+  - docs/PRIVACY.md
+anchors:
+  pnpm-install-docs-disclose-build-approval-boundaries:
+    readme-pnpm-install-disclosure:
+      action: change
+      reason: Anchor the concise public warning against the tested pnpm dlx path.
+    selfhost-pnpm-build-approval-disclosure:
+      action: change
+      reason: Anchor both pnpm generations' required approval setting names.
+    selfhost-pnpm-dlx-disclosure:
+      action: change
+      reason: Anchor the detailed tested pnpm dlx configuration limitation.
+  tailscale-serve-docs-disclose-certificate-transparency:
+    readme-tailscale-certificate-disclosure:
+      action: change
+      reason: Anchor the public HTTPS prerequisite, issuance, CT, and localhost note.
+    selfhost-tailscale-certificate-disclosure:
+      action: change
+      reason: Anchor the detailed reversible configuration versus irreversible CT
+        truth.
+    privacy-tailscale-certificate-disclosure:
+      action: change
+      reason: Anchor the privacy tier's public device-name disclosure.
+  public-npx-install-is-primary-install:
+    readme-primary-install:
+      action: change
+      reason: A nested pnpm disclosure anchor is added inside the existing install
+        region.
+  fresh-clone-install-proven-by-script:
+    selfhost-guide:
+      action: change
+      reason: Nested anchors are added throughout the canonical self-host guide.
+  operator-launches-serve-web-next:
+    readme-current-web-client:
+      action: change
+      reason: Nested install and Tailscale anchors are added inside the README runtime
+        region.
+applied:
+  applied_at: 2026-07-27T08:24:34.533Z
