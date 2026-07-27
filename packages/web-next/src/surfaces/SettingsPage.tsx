@@ -21,6 +21,7 @@ import {
 } from '@runtime/theme.js';
 
 import { createConnector, type RoomConnector } from '../app/connector.js';
+import { relayConnectExtras } from '@runtime/relay-mode.js';
 import { roomSlice, useClientStore } from '../app/store.js';
 import { clockTime } from '../primitives/identity.js';
 import { Button, Code, Eyebrow, Modal, Segmented } from '../primitives/primitives.js';
@@ -43,6 +44,9 @@ export function SettingsPage(props: {
       room: page.room,
       token: props.token,
       refreshToken: props.refreshToken,
+      // Relay mode: same tunnel transport as the room connector (empty on the
+      // direct path).
+      ...relayConnectExtras(),
     });
   }
 

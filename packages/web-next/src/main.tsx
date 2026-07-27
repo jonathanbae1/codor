@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { applyThemeChoice } from '@runtime/theme.js';
 
 import { pageParams, resolveAccessToken } from './app/session.js';
+import { initRelayMode } from '@runtime/relay-mode.js';
 import {
   fetchAuthorizedRooms,
   forgetRoom,
@@ -50,6 +51,7 @@ async function surfaceFor(path: string, room: string, token: string) {
 }
 
 async function render(): Promise<void> {
+  await initRelayMode(); // relay-paired browsers route transport through the tunnel
   const token = await resolveAccessToken();
   if (token !== '') await checkBrowserCompatibility(token);
   const path = window.location.pathname;

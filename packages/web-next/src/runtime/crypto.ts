@@ -1,4 +1,14 @@
 import sodium from 'libsodium-wrappers';
+import {
+  PairingChannel,
+  PakeClaimant,
+  decodePairingMessage,
+  generateTunnelKeypair,
+  normalizeCode,
+  splitCode,
+  type PairingMessage,
+} from '@codor/tunnel';
+import { relayFetch } from './relay-transport.js';
 
 export interface BrowserPublicIdentity {
   device_id: string;
@@ -184,6 +194,101 @@ async function persistBrowserPairing(result: PairingResult, origin: string): Pro
   await storeBrowserAccess({ origin: new URL(origin).origin, authority: 'device' });
 }
 
+/** Browser-side relay tunnel record (PLAN §4.5). */
+export interface StoredRelayRecord {
+  relay_url: string;
+  session_id: string; // 64-hex
+  client_static: { pub: string; priv: string }; // base64url
+  host_static_pub: string; // base64url
+}
+
+export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined> {
+  return readState<StoredRelayRecord>('relay');
+}
+
+/** The stable access origin used to key relay-paired switchboard access. */
+export function relayAccessOrigin(relayUrl: string): string {
+  return new URL(relayUrl.replace(/^ws/, 'http')).origin;
+}
+
+/**
+ * Pair a browser through the blind relay (PLAN §4.2). Runs the real CPace PAKE
+ * over the pairing room, enrolls into the SAME PairingService result as local
+ * pairing, and persists the relay tunnel record. Real browser WebCrypto (noble
+ * + libsodium) runs throughout.
+ */
+export async function pairThroughRelay(code: string, relayUrl: string): Promise<void> {
+  const normalized = normalizeCode(code);
+  if (!normalized) throw new Error('invalid pairing code');
+  const { nameplate, secret } = splitCode(normalized);
+  const identity = await ensureBrowserIdentity();
+  const clientStatic = generateTunnelKeypair();
+  const claimant = new PakeClaimant({ nameplate, secret });
+
+  const wsBase = relayUrl.replace(/\/$/, '').replace(/^http/, 'ws');
+  const socket = new WebSocket(`${wsBase}/v1/pair/${nameplate}/ws?role=claim`);
+  socket.binaryType = 'arraybuffer';
+  let channel: PairingChannel | undefined;
+  let hello: { session_id: string; host_static_pub: string } | undefined;
+  let settled = false;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      };
+      socket.onerror = () => fail(new Error('relay pairing connection failed'));
+      socket.onclose = () => fail(new Error('relay pairing closed before completion'));
+      socket.onmessage = (event) => {
+        void (async () => {
+          try {
+            const bytes = new Uint8Array(event.data as ArrayBuffer);
+            if (!channel) {
+              if (bytes.length === 48) {
+                const { msgB, tagC } = claimant.receiveMsgA(bytes);
+                socket.send(msgB);
+                socket.send(tagC);
+              } else if (bytes.length === 32) {
+                claimant.receiveHostConfirmation(bytes);
+                channel = new PairingChannel(claimant.channel());
+              }
+              return;
+            }
+            const message = decodePairingMessage(claimant.channel().open(bytes));
+            if (message.type === 'hello') {
+              hello = { session_id: message.session_id, host_static_pub: message.host_static_pub };
+              const enroll: PairingMessage = {
+                type: 'enroll',
+                request: { ...identity, kind: 'device', label: navigator.userAgent },
+                client_static_pub: encode(clientStatic.publicKey),
+                pairing_token: message.pairing_token,
+              };
+              socket.send(channel.seal(enroll));
+            } else if (message.type === 'enrolled') {
+              await persistBrowserPairing(message.result as PairingResult, relayAccessOrigin(relayUrl));
+              await writeState('relay', {
+                relay_url: relayUrl,
+                session_id: hello!.session_id,
+                client_static: { pub: encode(clientStatic.publicKey), priv: encode(clientStatic.secretKey) },
+                host_static_pub: hello!.host_static_pub,
+              } satisfies StoredRelayRecord);
+              socket.send(channel.seal({ type: 'done' }));
+              settled = true;
+              resolve();
+            }
+          } catch (error) {
+            fail(error);
+          }
+        })();
+      };
+    });
+  } finally {
+    socket.close();
+  }
+}
+
 export async function completeBrowserPairing(url: URL): Promise<PairingResult> {
   const endpoint = url.searchParams.get('endpoint');
   const token = url.searchParams.get('pairing_token');
@@ -238,7 +343,7 @@ export async function openBrowserDeviceSession(origin = window.location.origin):
   const switchboard = await readState<BrowserPeer>('peer:switchboard');
   if (switchboard?.kind !== 'switchboard') return undefined;
   const identity = await requiredIdentity();
-  const challengeResponse = await fetch(`${origin}/api/auth/challenge`, {
+  const challengeResponse = await relayFetch(`${origin}/api/auth/challenge`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ device_id: identity.device_id }),
@@ -273,7 +378,7 @@ export async function openBrowserDeviceSession(origin = window.location.origin):
     challengeBytes(challenge),
     decode(identity.sign_secret_key),
   ));
-  const sessionResponse = await fetch(`${origin}/api/auth/session`, {
+  const sessionResponse = await relayFetch(`${origin}/api/auth/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ challenge_id: challenge.challenge_id, signature }),

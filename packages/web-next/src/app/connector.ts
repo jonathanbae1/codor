@@ -27,7 +27,13 @@ export interface RoomConnector extends Connection {
 export interface ConnectorOptions {
   room: string;
   token: string;
-  /** Injectable for tests; production always constructs a real WebSocket. */
+  /** ws(s):// origin; defaults to the page origin. Set to the relay origin when
+   *  the browser reaches its switchboard through the blind relay tunnel. */
+  origin?: string;
+  /** Injectable for tests AND the relay tunnel; production direct-path
+   *  constructs a real WebSocket to the page origin. Re-invoked on EVERY
+   *  (re)open, so when the tunnel session drops and closes the app-WS socket,
+   *  the next open builds a fresh app-WS stream on the NEW session. */
   socketFactory?: (url: string) => WebSocket;
   /** Called for EVERY legal resume — lifecycle or watchdog — so recovery work
    *  that must follow a replacement has one place to live. */
@@ -56,7 +62,7 @@ const PROBE_INTERVAL_MS = 20_000;
 const PROBE_TIMEOUT_MS = 8_000;
 
 export function createConnector(options: ConnectorOptions): RoomConnector {
-  const origin = window.location.origin.replace(/^http/, 'ws');
+  const origin = (options.origin ?? window.location.origin).replace(/^http/, 'ws');
   const socketFactory = options.socketFactory ?? ((url: string) => new WebSocket(url));
   let currentRoom = options.room;
   let socket: WebSocket | undefined;

@@ -17,6 +17,13 @@ export interface ConnectOptions {
   origin?: string;
   /** Re-authenticates a paired browser after a server restart invalidates its page session. */
   refreshToken?: () => Promise<string>;
+  /**
+   * Socket constructor seam (relay tunnel). Re-invoked on EVERY (re)connect, so
+   * when the tunnel session drops and closes the app-WS socket, this reconnect
+   * builds a fresh app-WS stream on the NEW session — never reuses a dead socket
+   * or a stale session. Defaults to the direct browser WebSocket.
+   */
+  socketFactory?: (url: string) => WebSocket;
 }
 
 // harn:assume client-syncs-by-seq ref=ws-resubscribe-cursor
@@ -41,10 +48,11 @@ export function connect(options: ConnectOptions): Connection {
   let manuallyClosed = false;
   let retryMs = 500;
   let token = options.token;
+  const makeSocket = options.socketFactory ?? ((url: string) => new WebSocket(url));
 
   const open = (): void => {
     manuallyClosed = false;
-    socket = new WebSocket(`${origin}/ws?token=${encodeURIComponent(token)}`);
+    socket = makeSocket(`${origin}/ws?token=${encodeURIComponent(token)}`);
     socket.onopen = () => {
       retryMs = 500;
       setConnected(true);

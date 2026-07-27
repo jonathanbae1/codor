@@ -10,6 +10,7 @@ import type {
 } from '@codor/protocol';
 
 import { openForBrowser, persistBrowserRoomKey } from './crypto.js';
+import { relayFetch } from './relay-transport.js';
 
 export interface ApiOptions {
   token: string;
@@ -128,7 +129,7 @@ async function requestError(response: Response): Promise<Error> {
 
 async function fetchJson<T>(path: string, options: ApiOptions): Promise<T> {
   const origin = options.origin ?? window.location.origin;
-  const res = await fetch(`${origin}${path}`, {
+  const res = await relayFetch(`${origin}${path}`, {
     headers: { authorization: `Bearer ${options.token}` },
   });
   if (!res.ok) throw await requestError(res);
@@ -142,7 +143,7 @@ async function sendJson<T>(
   options: ApiOptions,
 ): Promise<T> {
   const origin = options.origin ?? window.location.origin;
-  const response = await fetch(`${origin}${path}`, {
+  const response = await relayFetch(`${origin}${path}`, {
     method,
     headers: {
       authorization: `Bearer ${options.token}`,

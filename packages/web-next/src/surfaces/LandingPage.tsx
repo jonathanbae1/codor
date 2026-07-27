@@ -1,7 +1,8 @@
 import { Check, Copy, Laptop, LockKeyhole, Network, Pause, Play, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { exchangeBrowserPairingCode, tryTrustedBrowserPairing } from '@runtime/crypto.js';
+import { exchangeBrowserPairingCode, pairThroughRelay, tryTrustedBrowserPairing } from '@runtime/crypto.js';
+import { relayUrlConfigured } from '@runtime/relay-mode.js';
 
 import { Button } from '../primitives/primitives.js';
 import { PairingCodeInput } from './PairingCodeInput.js';
@@ -152,13 +153,18 @@ export function LandingPage() {
                 onSubmit={(code) => {
                   setPairing(true);
                   setFailure(undefined);
-                  void exchangeBrowserPairingCode(code).then(
-                    (url) => window.location.assign(url.toString()),
-                    () => {
-                      setPairing(false);
-                      setFailure('Pairing code not found. Run setup again for a fresh code.');
-                    },
-                  );
+                  const relayUrl = relayUrlConfigured();
+                  const flow = relayUrl
+                    ? pairThroughRelay(code, relayUrl).then(() => window.location.replace('/'))
+                    : exchangeBrowserPairingCode(code).then((url) => window.location.assign(url.toString()));
+                  void flow.catch(() => {
+                    setPairing(false);
+                    setFailure(
+                      relayUrl
+                        ? 'Relay pairing failed. Check the code and that Codor is running, then try again.'
+                        : 'Pairing code not found. Run setup again for a fresh code.',
+                    );
+                  });
                 }}
               />
               <a className="nx-pair-link" href="/pair">Have a full pairing link?</a>

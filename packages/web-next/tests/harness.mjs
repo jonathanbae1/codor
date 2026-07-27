@@ -16,8 +16,13 @@ import {
   Daemon,
   FakeAdapter,
   LedgerManager,
+  RelayLink,
+  RelayPairingHost,
+  RelayStore,
   startServer,
 } from '@codor/switchboard';
+
+import { startMockRelay } from './mock-relay.mjs';
 
 const readPort = (name, fallback) => {
   const value = Number(process.env[name] ?? fallback);
@@ -1158,6 +1163,12 @@ daemon.store.postMessage('eng', {
   body: 'chronology probe posted after the running turn started',
 });
 
+// ── Relay tunnel: a faithful in-process §4.1 mock relay + the switchboard's
+// RelayLink, so the relay journey e2e drives real browser webcrypto end to end.
+let mockRelay;
+let relayStore;
+let relayLink;
+
 // ── Control endpoint: tests script upcoming fake turns just-in-time ──────
 createServer((req, res) => {
   let raw = '';
@@ -1300,6 +1311,19 @@ createServer((req, res) => {
         const body = raw === '' ? {} : JSON.parse(raw);
         const roomId = String(body.room ?? 'eng');
         payload = daemon.store.roomSupport(roomId, daemon.ownerOf(roomId).id);
+      }
+      if (url.pathname === '/relay-pair') {
+        const host = new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() });
+        payload = { ...(await host.pair()), relayUrl: mockRelay.url };
+      }
+      if (url.pathname === '/relay-down') {
+        relayLink.stop();
+        mockRelay.dropHosts();
+        payload = { ok: true };
+      }
+      if (url.pathname === '/relay-up') {
+        relayLink.start();
+        payload = { ok: true };
       }
       if (url.pathname === '/fixture-ids') {
         payload = {
@@ -1485,17 +1509,41 @@ createServer((req, res) => {
 
 // ── Serve: built SPA + API on one isolated port ──────────────────────────
 const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+// Bring up the blind relay + the switchboard's RelayLink before the server
+// listens, so the relay journey is ready the moment Playwright sees the port.
+mockRelay = await startMockRelay();
+relayStore = new RelayStore(dir);
+relayStore.enable(mockRelay.url);
+relayLink = new RelayLink({
+  store: relayStore,
+  loopbackPort: API_PORT,
+  isDeviceActive: (deviceId) => crypto.keys.getPeer(deviceId) !== undefined,
+});
+crypto.keys.onPeerRevoked((deviceId) => {
+  relayLink.dropDevice(deviceId);
+  relayStore.removeDevice(deviceId);
+});
+relayLink.start();
+
 await startServer({
   daemon,
   token: TOKEN,
   port: API_PORT,
   staticRoot,
   crypto,
+  relay: {
+    status: () => ({ enabled: relayStore.enabled, relay_url: relayStore.relayUrl, session_id: relayStore.sessionId, devices: relayStore.listDevices().length }),
+    enable: (url) => { relayStore.enable(url); relayLink.restart(); },
+    disable: () => { relayStore.disable(); relayLink.restart(); },
+    rotate: () => { const id = relayStore.rotate(); relayLink.restart(); return id; },
+    pair: () => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(),
+  },
   principals: [
     { token: VIEWER_TOKEN, member_id: viewer.id },
     { token: RECOVERY_VIEWER_TOKEN, member_id: onlooker.id },
   ],
 });
+console.log(`  relay:  ${mockRelay.url}`);
 
 console.log(`web-next harness ready
   data:   ${dir}

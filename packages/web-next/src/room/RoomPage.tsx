@@ -12,6 +12,7 @@ import {
   useIsMobile,
   useMinuteTick,
 } from '../app/session.js';
+import { relayConnectExtras } from '@runtime/relay-mode.js';
 import { useRoomSummaries, type RoomSummary } from '../app/summary.js';
 import { roomSlice, useClientStore } from '../app/store.js';
 import { ContextPanel } from './ContextPanel.js';
@@ -45,6 +46,10 @@ export function RoomPage(props: {
       // 4401 refresh the original is stale, and journal recovery would go out
       // with a credential the server has already replaced.
       onResume: (room) => { refreshMutableRunJournals(room, token); },
+      // Relay mode: route the app WebSocket through the tunnel (origin + a
+      // socketFactory that opens a fresh app-WS mux stream per session). Empty
+      // on the direct local/tailnet path, leaving the page-origin default.
+      ...relayConnectExtras(),
     });
   }
   const connection = connectorRef.current;

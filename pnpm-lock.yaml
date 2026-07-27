@@ -260,6 +260,9 @@ importers:
       '@codor/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@codor/tunnel':
+        specifier: workspace:*
+        version: link:../tunnel
       culori:
         specifier: ^4.0.2
         version: 4.0.2
@@ -339,6 +342,9 @@ importers:
       workbox-precaching:
         specifier: ^7.4.1
         version: 7.4.1
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
 
   relay:
     dependencies:
