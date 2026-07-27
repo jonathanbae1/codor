@@ -123,6 +123,27 @@ assert.equal((firstChannelSource.match(/headingLevel=\{2\}/g) ?? []).length, 2);
 const selfHost = await readFile(new URL('../docs/SELF-HOST.md', import.meta.url), 'utf8');
 const setupGuide = await readFile(new URL('../docs/SETUP.md', import.meta.url), 'utf8');
 const rootManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const workspaceManifest = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
+
+// harn:assume pnpm-build-approvals-span-pinned-and-current-config ref=pnpm-build-approval-equivalence-audit
+const requiredBuildApprovals = ['better-sqlite3', 'esbuild', 'sodium-native', 'udx-native'];
+const legacyBuildApprovals = [...(rootManifest.pnpm?.onlyBuiltDependencies ?? [])].sort();
+const allowBuilds = workspaceManifest.match(/^allowBuilds:\n((?:^  [^\n]+\n?)*)/m);
+assert.ok(allowBuilds, 'pnpm-workspace.yaml must declare allowBuilds');
+const currentBuildApprovals = [...allowBuilds[1].matchAll(/^  ([^:#\n]+): true$/gm)]
+  .map((match) => match[1])
+  .sort();
+assert.deepEqual(
+  legacyBuildApprovals,
+  requiredBuildApprovals,
+  'package.json pnpm.onlyBuiltDependencies must approve every required build script',
+);
+assert.deepEqual(
+  currentBuildApprovals,
+  legacyBuildApprovals,
+  'pnpm-workspace.yaml allowBuilds must match package.json pnpm.onlyBuiltDependencies',
+);
+// harn:end pnpm-build-approvals-span-pinned-and-current-config
 
 // harn:assume public-npx-install-is-primary-install ref=release-install-audit
 for (const [name, body] of [['README', readme], ['self-host guide', selfHost], ['setup guide', setupGuide]]) {

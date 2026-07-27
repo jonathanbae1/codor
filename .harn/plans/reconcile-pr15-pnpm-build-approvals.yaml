@@ -1,0 +1,51 @@
+id: reconcile-pr15-pnpm-build-approvals
+title: Record and enforce post-merge pnpm build-approval compatibility from PR 15
+notes: "This is an honest post-merge reconciliation of contributor PR #15. The
+  contributor commits were merged unchanged before this plan existed, so this
+  plan does not claim to have governed or predated them. Strict package.json
+  cannot carry Harn comment markers without unsupported syntax, so the current
+  pnpm-workspace declaration is source-anchored and the existing release audit
+  gains a second anchor with an executable equivalence check that reads both
+  package.json and pnpm-workspace.yaml. The four approvals and pnpm 10.9
+  packageManager pin remain unchanged. Disposable clean installs and recursive
+  builds must pass under pinned pnpm 10.9.0 and current pnpm 11 with only the
+  alternate-version guard explicitly bypassed for the latter probe."
+assumptions:
+  create:
+    - id: pnpm-build-approvals-span-pinned-and-current-config
+      title: Required build scripts are approved by pinned and current pnpm config
+      statement: The pinned pnpm 10.9 package.json onlyBuiltDependencies list and the
+        pnpm 10.26+/11 pnpm-workspace allowBuilds map must remain additive and
+        approve the same better-sqlite3, esbuild, sodium-native, and udx-native
+        build scripts, with the release audit rejecting any divergence, because
+        either supported pnpm generation must produce usable native bindings and
+        generated binaries without silently ignoring a required install script.
+      reason: pnpm 11 ignores the legacy package.json field while the pinned pnpm 10.9
+        predates allowBuilds, so compatibility depends on both equivalent
+        declarations remaining present and executable drift detection.
+      depends_on:
+        - workspace-gates-cover-all-buildable-projects
+  reviewed:
+    - id: workspace-gates-cover-all-buildable-projects
+      outcome: unchanged
+      reason: "PR #15 adds build approval configuration below the existing workspace
+        glob anchor without changing which projects recursive gates cover."
+    - id: fresh-clone-install-proven-by-script
+      outcome: unchanged
+      reason: The clean-clone install and build contract is unchanged; the additive
+        current-pnpm map makes the same required scripts available to newer pnpm
+        generations.
+files:
+  - pnpm-workspace.yaml
+  - scripts/release-audit.mjs
+anchors:
+  pnpm-build-approvals-span-pinned-and-current-config:
+    pnpm-current-build-approvals:
+      action: change
+      reason: Anchor the merged pnpm 10.26+/11 allowBuilds declaration.
+    pnpm-build-approval-equivalence-audit:
+      action: change
+      reason: Read both config files and fail the release audit unless the enabled
+        allowBuilds keys exactly equal package.json onlyBuiltDependencies.
+applied:
+  applied_at: 2026-07-27T08:22:13.767Z
