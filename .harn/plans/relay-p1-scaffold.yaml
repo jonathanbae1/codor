@@ -120,8 +120,5 @@ files:
   - packages/tunnel/src/control.ts
   - packages/tunnel/src/codes.spec.ts
   - packages/tunnel/src/frames.spec.ts
-lock:
-  locked_at: 2026-07-27T08:19:20.634Z
-  base_commit: bc4794270e50902c749fe8830ed20ddf9ef065c6
-  hash: 149e4a846198f37b7be91cfaf7cf861f77182071d317ebd02c18115cabccefe7
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T08:48:53.621Z

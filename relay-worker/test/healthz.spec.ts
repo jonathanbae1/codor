@@ -1,0 +1,36 @@
+/// <reference types="@cloudflare/vitest-pool-workers" />
+import { SELF } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
+describe('relay worker router', () => {
+  it('serves /healthz with 200 "ok"', async () => {
+    const res = await SELF.fetch('https://relay.example/healthz');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('ok');
+  });
+
+  it('returns 404 for unknown paths', async () => {
+    const res = await SELF.fetch('https://relay.example/nope');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 for a wrong method on /healthz', async () => {
+    const res = await SELF.fetch('https://relay.example/healthz', { method: 'POST' });
+    expect(res.status).toBe(404);
+  });
+
+  it('recognizes the pairing-room route (501 until Phase 3)', async () => {
+    const res = await SELF.fetch('https://relay.example/v1/pair/rooms', { method: 'POST' });
+    expect(res.status).toBe(501);
+  });
+
+  it('recognizes the pairing WS route (501 until Phase 3)', async () => {
+    const res = await SELF.fetch('https://relay.example/v1/pair/7Q/ws?role=host');
+    expect(res.status).toBe(501);
+  });
+
+  it('recognizes the session WS route (501 until Phase 4)', async () => {
+    const res = await SELF.fetch('https://relay.example/v1/session/abc/ws?role=client');
+    expect(res.status).toBe(501);
+  });
+});

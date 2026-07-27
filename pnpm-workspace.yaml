@@ -5,4 +5,5 @@ packages:
   - packages/bridges/*
   - website
   - relay
+  - relay-worker
 # harn:end workspace-gates-cover-all-buildable-projects

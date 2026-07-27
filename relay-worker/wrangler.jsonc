@@ -1,0 +1,19 @@
+{
+  // Codor blind relay Worker. Two SQLite-backed Durable Objects; no logging,
+  // no observability sink — the relay must never retain traffic (PLAN §4.1, §5).
+  "name": "codor-relay",
+  "main": "src/index.ts",
+  // Pinned to what the local vitest-pool-workers runtime supports; every DO API
+  // used (SQLite classes, hibernation, auto-response) long predates this date.
+  // Bump at Phase 7 real deploy where production workerd is current.
+  "compatibility_date": "2026-03-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "PAIRING_ROOM", "class_name": "PairingRoom" },
+      { "name": "SESSION_RELAY", "class_name": "SessionRelay" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PairingRoom", "SessionRelay"] }
+  ]
+}
