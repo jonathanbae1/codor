@@ -3,10 +3,17 @@
   // no observability sink — the relay must never retain traffic (PLAN §4.1, §5).
   "name": "codor-relay",
   "main": "src/index.ts",
-  // Pinned to what the local vitest-pool-workers runtime supports; every DO API
-  // used (SQLite classes, hibernation, auto-response) long predates this date.
-  // Bump at Phase 7 real deploy where production workerd is current.
-  "compatibility_date": "2026-03-01",
+  // PRODUCTION compatibility date — current workerd on real deploy. Every DO API
+  // used (SQLite classes, hibernation, auto-response) long predates it. The
+  // vitest-pool-workers test runtime bundles an older workerd that rejects a
+  // future date, so it is pinned to 2026-03-01 via a miniflare override in
+  // vitest.config.ts rather than by reading this field.
+  "compatibility_date": "2026-07-01",
+  // The blind relay is served at this hostname; the zone must exist in the
+  // Cloudflare account before deploy (Phase 7 Track B).
+  "routes": [
+    { "pattern": "relay.codor.app", "custom_domain": true }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "PAIRING_ROOM", "class_name": "PairingRoom" },

@@ -20,8 +20,5 @@ assumptions:
 files:
   - relay-worker/wrangler.jsonc
   - relay-worker/vitest.config.ts
-lock:
-  locked_at: 2026-07-27T15:46:54.852Z
-  base_commit: 4a05218736b1fbfbebd3eff7e3e26ac269430e56
-  hash: 0427d497ca620cace17abcfe9fc2d27ab82ed48a60381c8a1602b9cc5b04d9c7
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-27T15:53:55.680Z
