@@ -1485,6 +1485,18 @@ createServer((req, res) => {
 
 // ── Serve: built SPA + API on one isolated port ──────────────────────────
 const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+// A stub voice provider: the real /api/voice/transcribe endpoint, but a fixed
+// transcript instead of any paid upstream call.
+const voiceProviders = [{
+  id: 'codex',
+  label: 'Codex (ChatGPT login)',
+  status: async () => ({ available: true }),
+  create: () => ({
+    id: 'codex',
+    label: 'Codex (ChatGPT login)',
+    transcribe: async () => ({ text: 'Voice dictation landed in the composer.' }),
+  }),
+}];
 await startServer({
   daemon,
   token: TOKEN,
@@ -1495,6 +1507,8 @@ await startServer({
     { token: VIEWER_TOKEN, member_id: viewer.id },
     { token: RECOVERY_VIEWER_TOKEN, member_id: onlooker.id },
   ],
+  voiceProvider: 'codex',
+  voiceProviders,
 });
 
 console.log(`web-next harness ready

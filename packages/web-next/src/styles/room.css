@@ -2322,6 +2322,33 @@
 /* Mobile keeps the send centred within its row. */
 .nx-composer-send { align-self: center; }
 
+/* Dictation joins the same bottom-right action group; while recording it shows
+   an elapsed count and a cancel affordance beside the pulsing mic. */
+.nx-composer-dictation {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.nx-dictation-elapsed {
+  font: var(--t-mono, var(--t-ui));
+  color: var(--c-live-text);
+  font-variant-numeric: tabular-nums;
+  padding-inline: var(--sp-1);
+}
+.nx-composer-mic.is-recording {
+  color: var(--c-live-text);
+  background: var(--c-live-tint);
+  animation: nx-mic-pulse 1.4s ease-in-out infinite;
+}
+.nx-composer-mic.is-busy { opacity: 0.6; }
+@keyframes nx-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--c-live-tint); }
+  50% { box-shadow: 0 0 0 4px var(--c-live-tint); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-composer-mic.is-recording { animation: none; }
+}
+
 /* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-component */
 /* Estimated (artifact-seeded) context rings render dimmed until a live report replaces them. */
 .nx-context-meter.is-estimated { opacity: 0.55; }

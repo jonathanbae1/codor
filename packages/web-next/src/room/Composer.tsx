@@ -1,5 +1,5 @@
 import type { Member } from '@codor/protocol';
-import { ArrowUp, AtSign, Paperclip, X } from 'lucide-react';
+import { ArrowUp, AtSign, Mic, Paperclip, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { Connection } from '@runtime/ws.js';
@@ -15,6 +15,13 @@ import {
   uploadAttachment,
   type UploadedAttachment,
 } from './attachments.js';
+import {
+  DictationController,
+  fetchVoiceProviders,
+  formatElapsed,
+  transcribeVoice,
+  type DictationState,
+} from './voice.js';
 
 const MAX_ROWS = 8;
 
@@ -54,6 +61,10 @@ export function Composer(props: { room: string; token: () => string; connection:
   const fileRef = useRef<HTMLInputElement>(null);
   const seededRef = useRef(false);
   const pendingCaretRef = useRef<number>();
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [dictation, setDictation] = useState<DictationState>('idle');
+  const [elapsed, setElapsed] = useState(0);
+  const dictationRef = useRef<DictationController>();
 
   // Programmatic inserts restore the caret synchronously with the DOM update —
   // an rAF here loses keystrokes racing in from a fast typist.
@@ -120,6 +131,26 @@ export function Composer(props: { room: string; token: () => string; connection:
     window.addEventListener(QUOTE_EVENT, onQuote);
     return () => window.removeEventListener(QUOTE_EVENT, onQuote);
   }, []);
+
+  // Discover dictation once: a disabled or unreachable catalog renders no mic.
+  useEffect(() => {
+    let live = true;
+    void fetchVoiceProviders(props.token())
+      .then((catalog) => { if (live) setVoiceEnabled(catalog.enabled); })
+      .catch(() => { if (live) setVoiceEnabled(false); });
+    return () => { live = false; };
+  }, []);
+
+  // The elapsed indicator ticks only while recording and resets on every exit.
+  useEffect(() => {
+    if (dictation !== 'recording') {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+    return () => window.clearInterval(id);
+  }, [dictation]);
 
   const canSend = connected && hydrated && !uploading && (draft.trim().length > 0 || pending.length > 0);
 
@@ -188,6 +219,60 @@ export function Composer(props: { room: string; token: () => string; connection:
     setMention(undefined);
     pendingCaretRef.current = mention.start + member.handle.length + 2;
   };
+
+  // Splice a transcript at the caret with the same idiom as the @ button, reading
+  // the live textarea so a fast typist mid-recording is never clobbered.
+  const insertTranscript = (text: string): void => {
+    const node = areaRef.current;
+    const current = node?.value ?? draft;
+    const caret = node?.selectionStart ?? current.length;
+    seededRef.current = true;
+    const before = current.slice(0, caret);
+    const lead = before === '' || /\s$/.test(before) ? '' : ' ';
+    const insertion = `${lead}${text}`;
+    setDraft(`${before}${insertion}${current.slice(caret)}`);
+    setHint(undefined);
+    pendingCaretRef.current = caret + insertion.length;
+  };
+
+  const dictationController = (): DictationController => {
+    dictationRef.current ??= new DictationController({
+      transcribe: (wav) => transcribeVoice(props.token(), wav),
+      onState: setDictation,
+      onTranscript: insertTranscript,
+      onError: (message) => setHint(message),
+    });
+    return dictationRef.current;
+  };
+
+  const dictationControls = voiceEnabled ? (
+    <div className="nx-composer-dictation" data-testid="composer-dictation">
+      {dictation === 'recording' && (
+        <>
+          <span className="nx-dictation-elapsed" data-testid="composer-mic-elapsed" aria-hidden="true">
+            {formatElapsed(elapsed)}
+          </span>
+          <IconButton
+            icon={X}
+            label="Cancel dictation"
+            variant="quiet"
+            data-testid="composer-mic-cancel"
+            onClick={() => dictationController().cancel()}
+          />
+        </>
+      )}
+      <IconButton
+        icon={Mic}
+        label={dictation === 'recording' ? 'Stop dictation' : 'Start dictation'}
+        variant="quiet"
+        className={`nx-composer-mic${dictation === 'recording' ? ' is-recording' : ''}${dictation === 'transcribing' ? ' is-busy' : ''}`}
+        data-testid="composer-mic"
+        aria-pressed={dictation === 'recording'}
+        disabled={dictation === 'transcribing'}
+        onClick={() => { void dictationController().toggle(); }}
+      />
+    </div>
+  ) : null;
 
   const send = (): void => {
     // Enter can follow an input event before React has committed the matching
@@ -380,6 +465,7 @@ export function Composer(props: { room: string; token: () => string; connection:
                 pendingCaretRef.current = caret + lead.length + 1;
               }}
             />
+            {dictationControls}
             <span className="nx-composer-spacer" />
             {/* The same primitive desktop sends with, so the two surfaces cannot
                 drift in theme or shape; the mobile class only widens the hit
@@ -399,6 +485,7 @@ export function Composer(props: { room: string; token: () => string; connection:
           // Attach and Send are one bottom-right action group sharing a centre
           // line, not two controls floating to the growing bar's optical middle.
           <div className="nx-composer-actions" data-testid="composer-actions">
+            {dictationControls}
             <IconButton
               icon={Paperclip}
               label="Attach files"
