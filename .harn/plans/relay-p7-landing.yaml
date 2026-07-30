@@ -76,8 +76,5 @@ anchors:
       action: change
       reason: Add the blind tunnel-relay setup subsection inside the self-host guide;
         the wrapping install-proven invariant is unchanged.
-lock:
-  locked_at: 2026-07-30T06:16:45.198Z
-  base_commit: 05f85594cbc4a9f374f21a45fb78eb57214c16db
-  hash: a4f6151e60e2f76911b8fdf7258d59edbf7821b46fcdeeb4aade1ef2b80a95fb
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-30T07:43:10.433Z

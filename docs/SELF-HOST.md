@@ -258,6 +258,31 @@ prefer Serve; it has fewer moving parts and does not require a public origin.
 [Tailscale's app-connector guide](https://tailscale.com/docs/features/app-connectors/how-to/setup)
 is the authority for current platform requirements and policy syntax.
 
+## Hosted access through the blind relay
+
+For access from anywhere without a VPN, the hosted browser app at codor.app can reach your
+self-hosted switchboard through the Codor blind relay. The relay is a Cloudflare Worker that holds no
+keys and cannot read pairing traffic, session traffic, or your channels; it forwards encrypted
+payloads and sees only routing metadata — addresses, timing, sizes, and connection/room identifiers
+(see `PLAN` §2.2, §4.1). It never replaces localhost or Tailscale; it is an additional path you opt
+into, and each browser stays individually revocable.
+
+Enable it on the switchboard host and pair one browser:
+
+```sh
+codor relay enable                 # targets relay.codor.app; override with a URL or CODOR_TUNNEL_URL
+codor relay pair                   # prints a single-use code (ten-minute expiry)
+codor relay status                 # enabled state, session id, and paired-device count
+```
+
+Open codor.app in the browser you want to enroll and enter the code. That browser runs the CPace
+pairing and the session handshake with its own WebCrypto keys, so the relay never holds a key that
+could open those frames — which is why using the shared `relay.codor.app` is safe even though you do
+not operate it.
+`codor relay rotate` issues a new session id (every paired browser must pair again) and
+`codor relay disable` turns the path off. To avoid the shared relay entirely, deploy the MIT-licensed
+Worker in `relay-worker/` to your own Cloudflare account and point `CODOR_TUNNEL_URL` at it.
+
 ## Private DHT lines
 
 The channel home can accept resident agents from other machines over a shared Hyperswarm line. Create

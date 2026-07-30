@@ -109,7 +109,8 @@ export function LandingPage() {
           <p className="nx-landing-kicker">Your coding agents, one shared channel</p>
           <h1 id="landing-title">Make every agent part of the same conversation.</h1>
           <p className="nx-landing-lede">
-            Run Codor on this computer. Use it on localhost, or reach the same private host through your Tailscale network.
+            Run Codor on this computer. Use it on localhost, reach the same private host across your Tailscale network,
+            or open it from anywhere through the hosted app at codor.app — a relay that holds no keys and cannot read your channels, forwarding only encrypted payloads and their routing metadata.
           </p>
           <div className="nx-tool-row" aria-label="Supported coding harnesses">
             <span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Gemini CLI</span>
@@ -177,7 +178,7 @@ export function LandingPage() {
 
       <section className="nx-landing-proof" aria-label="How Codor stays private">
         <article><Laptop aria-hidden="true" /><h2>Your computer is the host</h2><p>History, keys, and repositories remain on the machine you chose.</p></article>
-        <article><Network aria-hidden="true" /><h2>Local or private-network access</h2><p>Open the local address directly, or use Tailscale for your own devices.</p></article>
+        <article><Network aria-hidden="true" /><h2>Local, private, or hosted access</h2><p>Open the local address, use Tailscale for your own devices, or reach your machine from anywhere through codor.app — the relay in between holds no keys and cannot read your channels, seeing only encrypted payloads and routing metadata.</p></article>
         <article><LockKeyhole aria-hidden="true" /><h2>No account required</h2><p>Each browser receives its own revocable device authority during pairing.</p></article>
       </section>
 

@@ -295,6 +295,38 @@ Screen install, APNs-backed Web Push, cold delivery, and notification navigation
    the revoked device must receive or decrypt nothing. This checks the device-sealed key refresh
    on a real push provider rather than only the automated worker simulation.
 
+## Blind tunnel relay (codor.app hosted access)
+
+Status: **not run — blocked on the Cloudflare account** (Phase 7 Track B: an account, the `codor.app`
+zone on Cloudflare nameservers, and `wrangler login`). This is the production smoke for the blind
+*tunnel* relay that lets the hosted browser at codor.app reach a NAT'd self-hosted switchboard. It is
+distinct from the [Public Web Push relay](#public-web-push-relay) below: the tunnel relay is the
+Cloudflare Worker in `relay-worker/`, configured with `CODOR_TUNNEL_URL` / `codor relay …`, whereas
+the push relay is the sealed Web Push forwarder configured with `CODOR_RELAY_URL`.
+
+1. Deploy the Worker to `relay.codor.app` (`wrangler deploy`) and confirm it is reachable: `wrangler
+   tail` shows Worker invocations with request metadata only — method, path, and status such as
+   `101`/`200` on `/v1/pair/rooms`, `/v1/pair/:np/ws`, and `/v1/session/:id/ws`. That is all
+   Cloudflare exposes to `tail`; it does not — and cannot — surface WebSocket frame contents, so this
+   step proves reachability and absence of application logging, not blindness (see step 4).
+2. On the switchboard host (behind NAT, no port forwarding), run `codor relay enable` then
+   `codor relay pair`. From a phone on **cellular** (not the home network), open codor.app, enter the
+   code, and confirm the channel loads and a posted message round-trips — proving the browser reached
+   the switchboard purely through the relay.
+3. Confirm the pairing code is refused after ten minutes (expiry) and that a used code cannot pair a
+   second browser (burn-after-success).
+4. Confirm the relay is blind two ways. (a) By construction: review `relay-worker/` for zero
+   third-party dependencies and no logging of frame or body bytes (only invocation metadata), and
+   confirm `wrangler tail` never surfaces frame contents. (b) At the endpoints: in browser devtools,
+   inspect the session WebSocket frames — encryption happens in page JS before send, so the wire
+   bytes shown there are opaque binary; that the switchboard and browser each decrypt successfully
+   while holding the only keys is itself proof the relay never had them. No room or channel names
+   appear on any relay-visible surface.
+5. Kill the switchboard's agent/host process; confirm the browser visibly drops the connection and
+   then recovers on a fresh session when the host returns.
+6. Over one day of normal use, sanity-check the relay's request count against the `PLAN` §5 budget
+   (idle heartbeat plus session frames) to confirm there is no runaway polling.
+
 ## Public Web Push relay
 
 Status on 2026-07-11: **not run**, by the M3 operator directive. This verifies the self-hosted
