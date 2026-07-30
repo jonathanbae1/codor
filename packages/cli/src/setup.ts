@@ -36,6 +36,20 @@ import { copyToClipboard } from './clipboard.js';
 const HARNESSES = ['claude', 'codex', 'opencode', 'gemini', 'copilot', 'cursor-agent', 'agy'] as const;
 const LAUNCH_AGENT_LABEL = 'app.codor.switchboard';
 
+/**
+ * Canonical operator config directory (~/.config/codor). The SINGLE source for
+ * the installed-service paths — setup and any CLI command that reads them must
+ * derive from here so the two can never drift.
+ */
+export function operatorConfigDir(home: string = homedir()): string {
+  return join(home, '.config', 'codor');
+}
+
+/** Canonical operator token file (mode-0600, written by setup). */
+export function operatorTokenPath(home: string = homedir()): string {
+  return join(operatorConfigDir(home), 'token');
+}
+
 export interface SetupOverrides {
   exec?(command: string, args: string[]): string;
   exists?(path: string): boolean;
@@ -648,9 +662,9 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   const renderQr = overrides.renderQr ?? renderTerminalQr;
   const probe = overrides.probe ?? probeCodorStatus;
   const sleep = overrides.sleep ?? defaultSleep;
-  const configDir = join(home, '.config', 'codor');
+  const configDir = operatorConfigDir(home);
   const dataDir = join(home, '.codor');
-  const tokenPath = join(configDir, 'token');
+  const tokenPath = operatorTokenPath(home);
   const envPath = join(configDir, 'env');
   const userUnitDir = join(home, '.config', 'systemd', 'user');
   const userUnitPath = join(userUnitDir, 'codor.service');

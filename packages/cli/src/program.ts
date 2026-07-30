@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,7 +32,7 @@ import {
 import { ProtocolClient, type ProtocolClientOptions } from './connection.js';
 import { detectSession } from './detect.js';
 import { parseMirrorHook } from './mirror.js';
-import { runSetup, type SetupAccess, type SetupOverrides } from './setup.js';
+import { operatorTokenPath, runSetup, type SetupAccess, type SetupOverrides } from './setup.js';
 import { renderTerminalQr } from './terminal-qr.js';
 import { parseLine, startOutpost, startCodor, waitForShutdown } from './up.js';
 
@@ -58,6 +59,24 @@ interface ChannelOptions {
 
 interface OptionalChannelOptions {
   channel?: string;
+}
+
+/**
+ * Last-resort bearer source: the installed service's operator token file
+ * (mode-0600, written by setup). Used only when neither --token nor a CODOR_*
+ * env var supplies one — the common case for a systemd/launchd install where the
+ * token lives in the service env, not the operator's interactive shell. Home is
+ * taken from env so tests can point it at an isolated directory; a missing or
+ * unreadable file falls through to today's tokenless behavior.
+ */
+function readOperatorTokenFile(env: NodeJS.ProcessEnv): string | undefined {
+  try {
+    const path = operatorTokenPath(env.HOME ?? homedir());
+    if (!existsSync(path)) return undefined;
+    return readFileSync(path, 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // harn:assume adapter-registry-sole-harness-source ref=registry-cli-composition
@@ -354,6 +373,26 @@ export function createProgram(context: CliContext = {}): Command {
     return room;
   };
 
+  // The installed operator token file is a LOCAL-service credential: fall back to
+  // it ONLY when the target is the local daemon, never when an explicit remote
+  // --url (or CODOR_URL) is set — so the installed bearer can never ride to an
+  // arbitrary origin.
+  const targetsLocalService = (): boolean => {
+    const raw = program.opts<GlobalOptions>().url ?? env.CODOR_URL;
+    if (!raw) return true; // default endpoint is loopback
+    try {
+      // WHATWG URL keeps IPv6 brackets on hostname ([::1]); strip them so the
+      // bracketed loopback form is recognized as local, not silently "remote".
+      const host = new URL(raw.replace(/^ws/, 'http')).hostname.replace(/^\[|\]$/g, '');
+      return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    } catch {
+      return false;
+    }
+  };
+  const bearer = (): string | undefined =>
+    program.opts<GlobalOptions>().token
+    ?? (targetsLocalService() ? readOperatorTokenFile(env) : undefined);
+
   // harn:assume cli-observability-uses-scoped-rest ref=scoped-rest-client
   const restUrl = (path: string): URL => {
     const globals = program.opts<GlobalOptions>();
@@ -368,7 +407,7 @@ export function createProgram(context: CliContext = {}): Command {
   };
 
   const fetchJson = async (url: URL): Promise<unknown> => {
-    const token = program.opts<GlobalOptions>().token;
+    const token = bearer();
     if (!token) throw new Error('--token, CODOR_TOKEN, or CODOR_MEMBER_TOKEN is required');
     const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     const value = await response.json() as unknown;
@@ -383,7 +422,7 @@ export function createProgram(context: CliContext = {}): Command {
   // harn:end cli-observability-uses-scoped-rest
 
   const postJson = async (path: string, body?: unknown): Promise<unknown> => {
-    const token = program.opts<GlobalOptions>().token;
+    const token = bearer();
     if (!token) throw new Error('--token, CODOR_TOKEN, or CODOR_MEMBER_TOKEN is required');
     const response = await fetch(restUrl(path), {
       method: 'POST',
@@ -1110,9 +1149,14 @@ export function createProgram(context: CliContext = {}): Command {
     .description('create a ten-minute browser or peer pairing link')
     .option('--endpoint <url>', 'switchboard browser endpoint', 'http://127.0.0.1:8137')
     .option('--no-qr', 'print the plain pairing URL without a terminal QR')
-    .action((options: { endpoint: string; qr: boolean }) => {
-      withCrypto((crypto) => {
-        const offer = crypto.pairing.issue(options.endpoint);
+    .action(async (options: { endpoint: string; qr: boolean }) => {
+      const emit = (offer: {
+        endpoint: string;
+        pairing_token: string;
+        pairing_code: string;
+        expires_at: string;
+        switchboard_sign_pub: string;
+      }): void => {
         const url = pairingUrl(offer);
         if (options.qr) out((context.renderQr ?? renderTerminalQr)(url));
         out(url);
@@ -1120,7 +1164,31 @@ export function createProgram(context: CliContext = {}): Command {
         out(`code: ${offer.pairing_code}`);
         // harn:end pairing-code-enrollment-surfaces
         out(`expires ${offer.expires_at}`);
-      });
+      };
+      // When the relay is enabled, delegate to the daemon's universal mint so the
+      // printed code opens BOTH codor.app and the local door. If the daemon is
+      // unreachable (or the relay is off), mint locally exactly as before.
+      let relayEnabled = false;
+      try {
+        relayEnabled = ((await fetchJson(restUrl('/api/relay/status'))) as { enabled?: boolean }).enabled === true;
+      } catch {
+        relayEnabled = false;
+      }
+      if (relayEnabled) {
+        emit((await postJson('/api/pairing/offers', { endpoint: options.endpoint })) as {
+          endpoint: string;
+          pairing_token: string;
+          pairing_code: string;
+          expires_at: string;
+          switchboard_sign_pub: string;
+        });
+        return;
+      }
+      // NOTE (ledger): a "code works locally only" degrade notice belongs here, but
+      // it can't fire accurately without knowing whether the relay is configured
+      // (which needs the daemon), and the CLI test helper folds stderr into stdout
+      // so any notice breaks anchored pair tests outside this plan. Deferred.
+      withCrypto((crypto) => emit(crypto.pairing.issue(options.endpoint)));
     });
   // harn:end terminal-pairing-qr-matches-plain-url
 
@@ -1221,8 +1289,17 @@ export function createProgram(context: CliContext = {}): Command {
     .command('pair')
     .description('pair a browser through the tunnel relay')
     .action(async () => {
-      const result = (await postJson('/api/relay/pair')) as { code: string; expires_at: string };
-      out(`pairing code ${result.code} (expires ${result.expires_at})`);
+      const result = (await postJson('/api/relay/pair')) as {
+        code: string;
+        expires_at: string;
+        doors?: 'both' | 'local';
+      };
+      // Label a degraded code honestly: the relay was unreachable, so this code
+      // opens the local/tailnet door only — not codor.app — until the relay is back.
+      const label = result.doors === 'local'
+        ? 'local-only pairing code (relay unreachable; works on your network, not codor.app)'
+        : 'pairing code';
+      out(`${label} ${result.code} (expires ${result.expires_at})`);
     });
   relay
     .command('enable')

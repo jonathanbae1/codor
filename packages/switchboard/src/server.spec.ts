@@ -3241,3 +3241,58 @@ describe('named ACP providers over REST', () => {
   });
   // harn:end named-acp-provider-selection-resolves-to-private-structured-launch
 });
+
+describe('universal pairing mint (relay-enabled routes)', () => {
+  it('serves the dual-door offer from /api/pairing/offers and maps /api/relay/pair to the code line', async () => {
+    const canned = {
+      endpoint: 'wss://relay.test',
+      pairing_token: 'universal-token',
+      pairing_code: 'AB23-CD45',
+      expires_at: new Date(Date.now() + 600_000).toISOString(),
+      switchboard_sign_pub: 'sign-pub',
+      doors: 'both' as const,
+    };
+    let pairCalls = 0;
+    let lastEndpoint: string | undefined;
+    const relay = {
+      status: () => ({ enabled: true, relay_url: 'wss://relay.test', session_id: 's', devices: 0 }),
+      enable: () => {},
+      disable: () => {},
+      rotate: () => 's',
+      pair: async (endpoint?: string) => {
+        pairCalls += 1;
+        lastEndpoint = endpoint;
+        return canned;
+      },
+    };
+    const relayServer = await startServer({ daemon, token: TOKEN, crypto, relay, port: 0 });
+    const rbase = `http://127.0.0.1:${relayServer.port}`;
+    try {
+      // Settings' mint endpoint returns the FULL universal offer (both doors).
+      const offersRes = await fetch(`${rbase}/api/pairing/offers`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ endpoint: rbase }),
+      });
+      expect(offersRes.status).toBe(200);
+      expect(await offersRes.json()).toMatchObject({
+        pairing_code: 'AB23-CD45',
+        pairing_token: 'universal-token',
+        doors: 'both',
+      });
+      expect(lastEndpoint).toBe(rbase); // Settings' endpoint is threaded to the mint
+
+      // The relay CLI endpoint maps the same universal offer down to a code line.
+      const pairRes = await fetch(`${rbase}/api/relay/pair`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(pairRes.status).toBe(200);
+      expect(await pairRes.json()).toEqual({ code: 'AB23-CD45', expires_at: canned.expires_at, doors: 'both' });
+
+      expect(pairCalls).toBe(2); // both surfaces funnel through the one mint
+    } finally {
+      await relayServer.close();
+    }
+  });
+});

@@ -1,7 +1,7 @@
 id: relay-pairing-host
 hash: a-e0c15d50f348
 title: Relay pairing terminates in the existing PairingService enrollment
-state: active
+state: retired
 statement: packages/switchboard/src/relay/pairing-host.ts must drive the host
   side of relay pairing - reserve a room, connect the pairing-room WS as host,
   run a fresh PakeHost per claimant with attempt and reset handling, and over
@@ -15,3 +15,4 @@ depends_on:
   - tunnel-pairing-channel-payloads
   - relay-store-persistence
 created_by: relay-p5-switchboard
+retired_by: relay-ux-p1-universal-code

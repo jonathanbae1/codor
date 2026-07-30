@@ -218,8 +218,5 @@ files:
   - scripts/test-env.mjs
   - packages/cli/src/index.spec.ts
   - packages/cli/src/pair-universal.spec.ts
-lock:
-  locked_at: 2026-07-30T10:43:14.843Z
-  base_commit: ace6be44b513279ec7d90361860382b6c495c305
-  hash: 46ff0a365dcabfbe7cfbdca490db80472379a7c26caaf32578a7fa21099b71c2
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-30T13:57:30.138Z

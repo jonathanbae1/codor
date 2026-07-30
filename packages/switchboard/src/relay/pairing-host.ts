@@ -6,23 +6,24 @@ import {
   RELAY_KEEPALIVE_INTERVAL_MS,
   RELAY_KEEPALIVE_PONG,
   composeCode,
-  formatCode,
   generateSecret,
   type PairingMessage,
 } from '@codor/tunnel';
 
 import type { PublicIdentity } from '../crypto/keys.js';
-import type { PairingRequest, PairingResult, PairingService } from '../crypto/pairing.js';
+import type { PairingOffer, PairingRequest, PairingResult, PairingService } from '../crypto/pairing.js';
 import { dialWs, type RelaySocket } from './link.js';
 import type { RelayStore } from './store.js';
 
-// harn:assume relay-pairing-host ref=relay-pairing-host
+// harn:assume relay-pairing-host-universal-mint ref=relay-pairing-host-universal
 // Host side of relay pairing (PLAN §4.2). It reserves a room, connects as host,
 // runs a fresh PakeHost per claimant, and over the pairing AEAD channel bridges
-// to the EXISTING PairingService: hello carries a token minted by issue(); the
-// claimant's echoed token is verified and complete() enrolls the device into the
-// same PairingResult as local pairing. Attempt/reset accounting preserves the
-// online-guess bound; success burns the room.
+// to the EXISTING PairingService. The universal mint reserves the room, derives
+// the code from nameplate+secret, and dual-registers it as a LOCAL pairing grant
+// via PairingService.issueForCode; the resulting token is what hello carries and
+// what complete() burns, so the one code opens both the relay and local doors on
+// a single shared grant. Attempt/reset accounting preserves the online-guess
+// bound; success burns the room.
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 
@@ -70,18 +71,37 @@ export class RelayPairingHost {
     };
   }
 
-  /** Reserve a room, show a code, and pair the first claimant that completes. */
-  async pair(): Promise<{ code: string; expires_at: string }> {
+  /**
+   * Reserve a room, dual-register its code as a local grant, and pair the first
+   * claimant that completes. Returns the full PairingOffer (doors:'both') so the
+   * same code and link token work at the local door too. If the relay room can't
+   * be reserved the mint degrades to a local-only code (doors:'local') rather
+   * than failing — local pairing must never hard-depend on relay reachability.
+   */
+  async pair(endpoint?: string): Promise<PairingOffer> {
     const { store } = this.deps;
     const secret = this.deps.randomSecret();
-    const { nameplate } = await this.deps.reserveRoom(store.relayUrl);
-    const code = formatCode(composeCode(nameplate, secret));
-    const expiresAt = new Date(this.deps.now() + PAIRING_WINDOW_MS).toISOString();
+    let nameplate: string;
+    try {
+      ({ nameplate } = await this.deps.reserveRoom(store.relayUrl));
+    } catch (error) {
+      // Relay unreachable: degrade to a local-only code, no relay session. The
+      // caller sees doors:'local' — dual-door whenever the relay answers, local
+      // always works.
+      this.deps.onError?.(error);
+      return this.deps.pairing.issue(endpoint ?? store.relayUrl);
+    }
+    // The room's nameplate+secret IS the pairing code; register it as a local
+    // pairing grant and reuse the minted token for the relay hello so consuming
+    // either door burns the single shared grant. Preserve the CALLER's endpoint
+    // (symmetric with the degrade branch) so Settings' link/QR and the enrolling
+    // browser's ?endpoint= stay on the switchboard origin, not the relay Worker.
+    const offer = this.deps.pairing.issueForCode(composeCode(nameplate, secret), endpoint ?? store.relayUrl);
 
     const wsBase = store.relayUrl.replace(/\/$/, '').replace(/^http/, 'ws');
     const socket = this.deps.dialRoom(`${wsBase}/v1/pair/${nameplate}/ws?role=host`);
-    new RelayPairingSession(socket, nameplate, secret, this.deps);
-    return { code, expires_at: expiresAt };
+    new RelayPairingSession(socket, nameplate, secret, offer.pairing_token, this.deps);
+    return { ...offer, doors: 'both' };
   }
 }
 
@@ -92,7 +112,14 @@ class RelayPairingSession {
   private phase: Phase = 'idle';
   private pake?: PakeHost;
   private channel?: PairingChannel;
-  private token?: string;
+  /**
+   * The successful enrollment, cached in-memory for the room's live window so a
+   * lost `enrolled` ack is recoverable: a retry that re-confirms the PAKE and
+   * enrolls with the SAME device_id gets this result replayed (idempotent — the
+   * device is already enrolled). The grant stays burned; only the result is
+   * replayed, never re-minted, so single-use is untouched. Dies with the session.
+   */
+  private enrolled?: { deviceId: string; result: PairingResult };
   private attempts = 0;
   private closed = false;
   private readonly deadline: ReturnType<typeof setTimeout>;
@@ -102,6 +129,8 @@ class RelayPairingSession {
     private readonly socket: RelaySocket,
     private readonly nameplate: string,
     private readonly secret: string,
+    /** Pre-minted at reservation via issueForCode; hello carries it, complete() burns it. */
+    private readonly token: string,
     private readonly deps: RelayPairingHost['deps'],
   ) {
     socket.onMessage((data, isBinary) => {
@@ -174,7 +203,6 @@ class RelayPairingSession {
   private startAttempt(): void {
     this.pake = new PakeHost({ nameplate: this.nameplate, secret: this.secret });
     this.channel = undefined;
-    this.token = undefined;
     this.phase = 'msgB';
     this.socket.send(this.pake.start());
   }
@@ -216,14 +244,12 @@ class RelayPairingSession {
     }
     this.socket.send(tagH);
     this.channel = new PairingChannel(this.pake!.channel());
-    const offer = this.deps.pairing.issue(this.deps.store.relayUrl);
-    this.token = offer.pairing_token;
     const hello: PairingMessage = {
       type: 'hello',
       switchboard: this.deps.identity,
       session_id: this.deps.store.sessionId,
       host_static_pub: this.deps.store.hostStaticPubB64,
-      pairing_token: offer.pairing_token,
+      pairing_token: this.token,
       relay_url: this.deps.store.relayUrl,
       protocol: 1,
     };
@@ -231,11 +257,43 @@ class RelayPairingSession {
     this.phase = 'enroll';
   }
 
+  /**
+   * Re-seal and replay the cached `enrolled` over the CURRENT channel when a
+   * retry enrolls the already-enrolled device (a lost ack). Returns false if
+   * there is nothing to replay or the device_id differs (a different claimant).
+   */
+  private replayEnrolledFor(request: PairingRequest, clientStaticPub: string): boolean {
+    if (!this.enrolled || request.device_id !== this.enrolled.deviceId) return false;
+    // A real retry arrives with a FRESH tunnel static key. The replay is a
+    // re-enrollment for KEY CUSTODY, not a cache hit: update the stored device
+    // record to the retry's key (replace by device_id) BEFORE replaying, or the
+    // device looks paired but every future KK session handshake fails against the
+    // stale key — worse than the ack-loss this recovers.
+    this.deps.store.addDevice({ device_id: request.device_id, client_static_pub: clientStaticPub, label: request.label });
+    this.socket.send(this.channel!.seal({ type: 'enrolled', result: this.enrolled.result }));
+    this.phase = 'done';
+    return true;
+  }
+
   private handleEnroll(message: PairingMessage): void {
     if (message.type !== 'enroll') throw new Error(`expected enroll, got ${message.type}`);
-    if (message.pairing_token !== this.token) throw new Error('pairing token mismatch');
-    const result: PairingResult = this.deps.pairing.complete(this.token, message.request as PairingRequest);
+    // A wrong echoed token is a tamper/protocol failure: fail the claimant (count
+    // the attempt, room closes it 4003) rather than throwing into a silent onError.
+    if (message.pairing_token !== this.token) return this.failAttempt();
     const request = message.request as PairingRequest;
+    let result: PairingResult;
+    try {
+      result = this.deps.pairing.complete(this.token, request);
+    } catch (error) {
+      // The grant is gone. If this is the already-enrolled device re-confirming
+      // after a lost `enrolled` ack, replay the cached result (idempotent). A
+      // DIFFERENT device_id means the code was consumed by someone else: fail the
+      // claimant (attempt counted, closed 4003) instead of a silent onError.
+      if (this.replayEnrolledFor(request, message.client_static_pub)) return;
+      this.deps.onError?.(error);
+      return this.failAttempt();
+    }
+    this.enrolled = { deviceId: request.device_id, result };
     this.deps.store.addDevice({ device_id: request.device_id, client_static_pub: message.client_static_pub, label: request.label });
     const enrolled: PairingMessage = { type: 'enrolled', result };
     this.socket.send(this.channel!.seal(enrolled));
@@ -243,6 +301,13 @@ class RelayPairingSession {
   }
 
   private handleDone(message: PairingMessage): void {
+    // A lost `enrolled` ack resent on the SAME channel arrives here in phase
+    // 'done' as an enroll: replay for the enrolled device, else fail — never the
+    // old "expected done" throw that hung the claimant.
+    if (message.type === 'enroll') {
+      if (this.replayEnrolledFor(message.request as PairingRequest, message.client_static_pub)) return;
+      return this.failAttempt();
+    }
     if (message.type !== 'done') throw new Error(`expected done, got ${message.type}`);
     this.sendText({ type: 'success' });
     this.phase = 'idle';
@@ -252,4 +317,4 @@ class RelayPairingSession {
     this.closed = true;
   }
 }
-// harn:end relay-pairing-host
+// harn:end relay-pairing-host-universal-mint

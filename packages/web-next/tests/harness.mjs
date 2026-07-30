@@ -1319,7 +1319,11 @@ createServer((req, res) => {
       }
       if (url.pathname === '/relay-pair') {
         const host = new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() });
-        payload = { ...(await host.pair()), relayUrl: mockRelay.url };
+        const offer = await host.pair(`http://127.0.0.1:${API_PORT}`);
+        // The universal mint renamed `code` → `pairing_code`; expose `code` for the
+        // control-endpoint spec, and thread a real switchboard endpoint (not the
+        // relay URL) so a locally-exchanged code resolves to a real pairing page.
+        payload = { ...offer, code: offer.pairing_code, relayUrl: mockRelay.url };
       }
       if (url.pathname === '/relay-down') {
         relayLink.stop();
@@ -1560,7 +1564,7 @@ await startServer({
     enable: (url) => { relayStore.enable(url); relayLink.restart(); },
     disable: () => { relayStore.disable(); relayLink.restart(); },
     rotate: () => { const id = relayStore.rotate(); relayLink.restart(); return id; },
-    pair: () => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(),
+    pair: (endpoint) => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(endpoint),
   },
   principals: [
     { token: VIEWER_TOKEN, member_id: viewer.id },

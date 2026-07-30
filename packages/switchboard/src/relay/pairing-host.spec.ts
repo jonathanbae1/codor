@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CryptoVault } from './../crypto/pairing.js';
+import { CryptoVault, normalizePairingCode } from './../crypto/pairing.js';
 import type { RelaySocket } from './link.js';
 import { RelayPairingHost } from './pairing-host.js';
 import { RelayStore } from './store.js';
@@ -208,6 +208,71 @@ describe('RelayPairingHost keepalive (§4.1 room-socket probe)', () => {
       msgCb!(new TextEncoder().encode('codor-pong'), false); // healthy traffic
     }
     expect(closed).toBe(false);
+    host.close();
+  });
+});
+
+describe('RelayPairingHost universal mint (one code, both doors)', () => {
+  it('pair() returns the full offer and dual-registers the room code as a local grant', async () => {
+    const room = mockRoom();
+    const timers = { fire: () => {} };
+    const { host, pairingHost } = makeHost(room, timers);
+    const offer = await pairingHost.pair('http://switchboard.local:8137');
+
+    expect(normalizePairingCode(offer.pairing_code)).toBeDefined(); // valid 8-char code
+    expect(offer.pairing_code.startsWith('AA')).toBe(true); // nameplate from the reserved room
+    expect(offer.pairing_token).toBeTruthy();
+    expect(offer.doors).toBe('both'); // relay room reserved → dual-door
+    // The CALLER's endpoint is preserved (not the relay URL), so Settings' link/QR
+    // and the enrolling browser's ?endpoint= stay on the switchboard origin.
+    expect(offer.endpoint).toBe('http://switchboard.local:8137');
+    expect(new URL('/pair', offer.endpoint).origin).toBe('http://switchboard.local:8137');
+    // The SAME code exchanges at the LOCAL door → proves dual registration.
+    expect(host.pairing.exchange(offer.pairing_code).pairing_token).toBeTruthy();
+    host.close();
+  });
+
+  it('degrades to a local-only code when the relay room cannot be reserved', async () => {
+    const room = mockRoom();
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable('ws://relay.test');
+    let dialed = false;
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async () => {
+        throw new Error('relay unreachable');
+      },
+      dialRoom: () => {
+        dialed = true;
+        return room.socket;
+      },
+      setTimeoutFn: () => 1 as unknown as ReturnType<typeof setTimeout>,
+      clearTimeoutFn: () => {},
+    });
+
+    // No throw: local pairing must never hard-depend on relay reachability.
+    const offer = await pairingHost.pair('http://127.0.0.1:8137');
+    expect(offer.doors).toBe('local');
+    expect(dialed).toBe(false); // no relay session opened on the degrade path
+    // The degraded code still opens the local door.
+    expect(host.pairing.exchange(offer.pairing_code).pairing_token).toBeTruthy();
+    host.close();
+  });
+
+  it('consuming the local door kills the pre-minted relay token (one shared grant)', async () => {
+    const room = mockRoom();
+    const timers = { fire: () => {} };
+    const { host, pairingHost } = makeHost(room, timers);
+    const offer = await pairingHost.pair();
+
+    // A local exchange rotates the token and clears the code, so the token the
+    // relay hello would carry can no longer complete: consume one door → both die.
+    host.pairing.exchange(offer.pairing_code);
+    const request = { ...host.keys.publicIdentity(), kind: 'device' as const };
+    expect(() => host.pairing.complete(offer.pairing_token, request)).toThrow();
     host.close();
   });
 });

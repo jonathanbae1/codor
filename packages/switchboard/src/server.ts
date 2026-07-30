@@ -54,7 +54,19 @@ export interface RelayAdmin {
   enable(url?: string): void;
   disable(): void;
   rotate(): string;
-  pair(): Promise<{ code: string; expires_at: string }>;
+  /**
+   * The universal mint: reserve a relay room and dual-register its code as a
+   * local grant, returning the full pairing offer (one code, both doors). Shape
+   * inlined to match PairingOffer without importing the sodium-bound module.
+   */
+  pair(endpoint?: string): Promise<{
+    endpoint: string;
+    pairing_token: string;
+    pairing_code: string;
+    expires_at: string;
+    switchboard_sign_pub: string;
+    doors: 'both' | 'local';
+  }>;
 }
 
 export interface ServerOptions {
@@ -472,13 +484,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
   });
 
-  app.post('/api/pairing/offers', (req, reply) => {
+  app.post('/api/pairing/offers', async (req, reply) => {
     const principal = authed(req, reply);
     if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
     if (!options.crypto) return reply.code(404).send({ error: 'pairing is not configured' });
     try {
       const { endpoint } = req.body as { endpoint: string };
-      return reply.header('cache-control', 'no-store').send(options.crypto.pairing.issue(endpoint));
+      // Relay enabled: mint the universal (dual-door) code so the Settings code
+      // opens both codor.app and the local door. Disabled: local-only, as before.
+      const offer = options.relay?.status().enabled
+        ? await options.relay.pair(endpoint)
+        : options.crypto.pairing.issue(endpoint);
+      return reply.header('cache-control', 'no-store').send(offer);
     } catch (error) {
       return reply.code(400).send({ error: String(error) });
     }
@@ -590,7 +607,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (!principal || !authorizeGlobal(principal, 'manage_devices', reply)) return;
     if (!options.relay) return reply.code(404).send({ error: 'relay is not configured' });
     try {
-      return reply.send(await options.relay.pair());
+      // Mint with the daemon's OWN address as the offer endpoint (the origin the
+      // caller reached), not the relay Worker — so a code exchanged at the local
+      // door resolves to a real pairing page. The CLI wants just the code line;
+      // carry `doors` so it can label a degraded (local-only) code honestly.
+      const localEndpoint = `${req.protocol}://${req.headers.host}`;
+      const offer = await options.relay.pair(localEndpoint);
+      return reply.send({ code: offer.pairing_code, expires_at: offer.expires_at, doors: offer.doors });
     } catch (error) {
       return reply.code(502).send({ error: String(error) });
     }

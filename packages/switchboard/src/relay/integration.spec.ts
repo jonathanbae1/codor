@@ -11,6 +11,7 @@ import {
   PairingChannel,
   PakeClaimant,
   SessionInitiator,
+  SessionResponder,
   StreamKind,
   StreamMux,
   decodePairingMessage,
@@ -104,8 +105,8 @@ describe('relay pairing end-to-end (pairing-host ↔ real claimant ↔ PairingSe
       now: () => 0,
     });
 
-    const { code } = await pairingHost.pair();
-    const { secret } = splitCode(code);
+    const offer = await pairingHost.pair();
+    const { secret } = splitCode(offer.pairing_code);
 
     const browser = new CryptoVault(join(dir, 'browser'));
     const browserId = browser.keys.publicIdentity();
@@ -155,8 +156,260 @@ describe('relay pairing end-to-end (pairing-host ↔ real claimant ↔ PairingSe
     expect(store.listDevices()[0]?.device_id).toBe(browserId.device_id);
     expect(store.clientStaticPubByKid(store.listDevices()[0].kid)).toBe(b64(clientStatic.publicKey));
     expect((enrolledResult as { room_keys?: unknown[] }).room_keys).toBeDefined();
+
+    // The relay enrollment burned the SINGLE shared grant, so the very same code
+    // no longer opens the local door: consuming one door dies at both.
+    expect(() => host.pairing.exchange(offer.pairing_code)).toThrow();
+
     host.close();
     browser.close();
+  });
+
+  it('fails the claimant (no silent hang) when enrollment hits a grant already consumed at the local door', async () => {
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable('wss://relay.test');
+
+    const room = new MockRoom();
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async () => ({ nameplate: 'AA' }),
+      dialRoom: () => room.hostSocket,
+      now: () => 0,
+    });
+
+    const offer = await pairingHost.pair();
+    const { secret } = splitCode(offer.pairing_code);
+    const browser = new CryptoVault(join(dir, 'browser'));
+    const clientStatic = generateTunnelKeypair();
+    const claimant = new PakeClaimant({ nameplate: 'AA', secret });
+
+    let channel: PairingChannel | undefined;
+    let claimClosed = false;
+    const settled = new Promise<void>((resolve, reject) => {
+      room.claimSocket.onClose(() => {
+        claimClosed = true; // host sent {type:'fail'} → room closed the claimant
+        resolve();
+      });
+      room.claimSocket.onMessage((data) => {
+        try {
+          if (!channel) {
+            if (data.length === 48) {
+              const { msgB, tagC } = claimant.receiveMsgA(data);
+              room.claimSocket.send(msgB);
+              room.claimSocket.send(tagC);
+            } else if (data.length === 32) {
+              claimant.receiveHostConfirmation(data);
+              channel = new PairingChannel(claimant.channel());
+            }
+            return;
+          }
+          const message = decodePairingMessage(claimant.channel().open(data));
+          if (message.type === 'hello') {
+            // Consume the shared grant at the LOCAL door first, so the relay's
+            // pre-minted token is now dead. The host must signal fail, not hang.
+            host.pairing.exchange(offer.pairing_code);
+            const enroll: PairingMessage = {
+              type: 'enroll',
+              request: { ...browser.keys.publicIdentity(), kind: 'device', label: 'phone' },
+              client_static_pub: b64(clientStatic.publicKey),
+              pairing_token: message.pairing_token,
+            };
+            room.claimSocket.send(channel.seal(enroll));
+          } else if (message.type === 'enrolled') {
+            reject(new Error('enrollment must not succeed against a dead grant'));
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    room.join();
+    await settled;
+    expect(claimClosed).toBe(true);
+    // The device was NOT enrolled, and the local door (already consumed) stays dead.
+    expect(host.keys.getPeer(browser.keys.publicIdentity().device_id)).toBeUndefined();
+    host.close();
+    browser.close();
+  });
+
+  it('N1: replays the cached enrolled to the same device after a lost ack, enrolling once', async () => {
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable('wss://relay.test');
+    const room = new MockRoom();
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async () => ({ nameplate: 'AA' }),
+      dialRoom: () => room.hostSocket,
+      now: () => 0,
+    });
+    const offer = await pairingHost.pair();
+    const { secret } = splitCode(offer.pairing_code);
+    const browser = new CryptoVault(join(dir, 'browser'));
+    const browserId = browser.keys.publicIdentity();
+    const firstStatic = generateTunnelKeypair();
+    // A REAL retry re-generates its tunnel static key (as a fresh browser does),
+    // so the replay must migrate key custody, not just re-send the message.
+    const retryStatic = generateTunnelKeypair();
+    const claimant = new PakeClaimant({ nameplate: 'AA', secret });
+    const enroll = (token: string, key: TunnelKeypair): PairingMessage => ({
+      type: 'enroll',
+      request: { ...browserId, kind: 'device', label: 'phone' },
+      client_static_pub: b64(key.publicKey),
+      pairing_token: token,
+    });
+
+    // A KK session handshake against the host's stored key for `device`: succeeds
+    // iff the store holds `key`'s static pub under its kid.
+    const handshakeSucceeds = (key: TunnelKeypair): boolean => {
+      const sid = new Uint8Array(32).fill(7);
+      const responder = new SessionResponder({
+        hostStatic: store.hostStatic,
+        sessionId: sid,
+        lookupClientStatic: (kid) => {
+          const pub = store.clientStaticPubByKid(Buffer.from(kid).toString('hex'));
+          return pub ? new Uint8Array(Buffer.from(pub, 'base64')) : undefined;
+        },
+      });
+      const initiator = new SessionInitiator({ clientStatic: key, hostStaticPub: store.hostStatic.publicKey, sessionId: sid });
+      try {
+        const msg2 = responder.receiveMsg1(initiator.start());
+        responder.receiveMsg3(initiator.receiveMsg2(msg2));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    let channel: PairingChannel | undefined;
+    let enrolledCount = 0;
+    let firstResult: unknown;
+    let lastResult: unknown;
+    const done = new Promise<void>((resolve, reject) => {
+      room.claimSocket.onMessage((data) => {
+        try {
+          if (!channel) {
+            if (data.length === 48) {
+              const { msgB, tagC } = claimant.receiveMsgA(data);
+              room.claimSocket.send(msgB);
+              room.claimSocket.send(tagC);
+            } else if (data.length === 32) {
+              claimant.receiveHostConfirmation(data);
+              channel = new PairingChannel(claimant.channel());
+            }
+            return;
+          }
+          const message = decodePairingMessage(claimant.channel().open(data));
+          if (message.type === 'hello') {
+            room.claimSocket.send(channel.seal(enroll(message.pairing_token, firstStatic)));
+          } else if (message.type === 'enrolled') {
+            enrolledCount += 1;
+            if (enrolledCount === 1) {
+              firstResult = message.result;
+              // Lost enrolled ack: the browser retries with a FRESH static key.
+              room.claimSocket.send(channel.seal(enroll('dead-token', retryStatic)));
+            } else {
+              lastResult = message.result;
+              resolve();
+            }
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    room.join();
+    await done;
+    expect(enrolledCount).toBe(2); // original enrolled + one replay
+    expect(lastResult).toEqual(firstResult); // same PairingResult (room keys bind the device identity)
+    expect(store.listDevices()).toHaveLength(1); // enrolled ONCE, not twice
+    expect(host.keys.getPeer(browserId.device_id)).toBeTruthy();
+    // Key custody MIGRATED to the retry's key: the end-to-end property is that a
+    // KK handshake with the NEW key succeeds and the OLD key is now stranded.
+    expect(store.clientStaticPubByKid(store.listDevices()[0]!.kid)).toBe(b64(retryStatic.publicKey));
+    expect(handshakeSucceeds(retryStatic)).toBe(true);
+    expect(handshakeSucceeds(firstStatic)).toBe(false);
+    host.close();
+    browser.close();
+  });
+
+  it('N1: a different device after success gets failed, not the cached replay', async () => {
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable('wss://relay.test');
+    const room = new MockRoom();
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async () => ({ nameplate: 'AA' }),
+      dialRoom: () => room.hostSocket,
+      now: () => 0,
+    });
+    const offer = await pairingHost.pair();
+    const { secret } = splitCode(offer.pairing_code);
+    const deviceA = new CryptoVault(join(dir, 'browserA'));
+    const deviceB = new CryptoVault(join(dir, 'browserB'));
+    const clientStatic = generateTunnelKeypair();
+    const claimant = new PakeClaimant({ nameplate: 'AA', secret });
+    const enroll = (id: typeof deviceA, token: string): PairingMessage => ({
+      type: 'enroll',
+      request: { ...id.keys.publicIdentity(), kind: 'device', label: 'phone' },
+      client_static_pub: b64(clientStatic.publicKey),
+      pairing_token: token,
+    });
+
+    let channel: PairingChannel | undefined;
+    let enrolledForA = false;
+    let claimClosed = false;
+    const settled = new Promise<void>((resolve, reject) => {
+      room.claimSocket.onClose(() => {
+        claimClosed = true; // host failed the second (different) device
+        resolve();
+      });
+      room.claimSocket.onMessage((data) => {
+        try {
+          if (!channel) {
+            if (data.length === 48) {
+              const { msgB, tagC } = claimant.receiveMsgA(data);
+              room.claimSocket.send(msgB);
+              room.claimSocket.send(tagC);
+            } else if (data.length === 32) {
+              claimant.receiveHostConfirmation(data);
+              channel = new PairingChannel(claimant.channel());
+            }
+            return;
+          }
+          const message = decodePairingMessage(claimant.channel().open(data));
+          if (message.type === 'hello') {
+            room.claimSocket.send(channel.seal(enroll(deviceA, message.pairing_token)));
+          } else if (message.type === 'enrolled') {
+            enrolledForA = true;
+            // A DIFFERENT device tries to reuse the burned grant → must fail, not replay.
+            room.claimSocket.send(channel.seal(enroll(deviceB, 'dead-token')));
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    room.join();
+    await settled;
+    expect(enrolledForA).toBe(true);
+    expect(claimClosed).toBe(true); // device B failed (fail → room closed the claimant)
+    expect(host.keys.getPeer(deviceA.keys.publicIdentity().device_id)).toBeTruthy();
+    expect(host.keys.getPeer(deviceB.keys.publicIdentity().device_id)).toBeUndefined();
+    host.close();
+    deviceA.close();
+    deviceB.close();
   });
 });
 

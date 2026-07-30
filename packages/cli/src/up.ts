@@ -142,7 +142,7 @@ export async function startCodor(options: UpOptions): Promise<RunningCodor> {
       relayLink?.restart();
       return id;
     },
-    pair: () => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(),
+    pair: (endpoint?: string) => new RelayPairingHost({ store: relayStore, pairing: crypto.pairing, identity: crypto.keys.publicIdentity() }).pair(endpoint),
   };
   const pushSubscriptions = new PushSubscriptionStore(dataDir, crypto.keys);
   const pushProducer = new PushProducer({
