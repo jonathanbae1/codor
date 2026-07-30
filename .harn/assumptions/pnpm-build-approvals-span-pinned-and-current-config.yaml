@@ -1,0 +1,13 @@
+id: pnpm-build-approvals-span-pinned-and-current-config
+hash: a-b3a8a1a7c479
+title: Required build scripts are approved by pinned and current pnpm config
+state: active
+statement: The pinned pnpm 10.9 package.json onlyBuiltDependencies list and the
+  pnpm 10.26+/11 pnpm-workspace allowBuilds map must remain additive and approve
+  the same better-sqlite3, esbuild, sodium-native, and udx-native build scripts,
+  with the release audit rejecting any divergence, because either supported pnpm
+  generation must produce usable native bindings and generated binaries without
+  silently ignoring a required install script.
+depends_on:
+  - workspace-gates-cover-all-buildable-projects
+created_by: reconcile-pr15-pnpm-build-approvals

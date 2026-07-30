@@ -57,6 +57,13 @@ importers:
       '@codor/protocol':
         specifier: workspace:*
         version: link:../../protocol
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
+    devDependencies:
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
 
   packages/adapters/copilot:
     dependencies:
@@ -78,6 +85,19 @@ importers:
         version: link:../../protocol
 
   packages/adapters/gemini:
+    dependencies:
+      '@codor/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
+    devDependencies:
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
+
+  packages/adapters/grok:
     dependencies:
       '@codor/protocol':
         specifier: workspace:*
@@ -193,6 +213,9 @@ importers:
       '@codor/adapter-gemini':
         specifier: workspace:*
         version: link:../adapters/gemini
+      '@codor/adapter-grok':
+        specifier: workspace:*
+        version: link:../adapters/grok
       '@codor/adapter-opencode':
         specifier: workspace:*
         version: link:../adapters/opencode

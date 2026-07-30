@@ -34,6 +34,14 @@ The interactive setup checks this computer, prepares private files, asks how the
 connect, starts Codor, verifies the daemon, and prints a QR, URL, eight-character pairing code, and
 expiry. It never sends channel data through a Codor-hosted service.
 
+<!-- harn:assume pnpm-install-docs-disclose-build-approval-boundaries ref=readme-pnpm-install-disclosure -->
+> [!NOTE]
+> On pnpm, install into a project rather than running `pnpm dlx @richhardry/codor install`. A tested
+> `pnpm dlx` install did not pick up the workspace `packageExtensions` and native build-approval
+> settings this install needs—see [Self-host: Prerequisites](docs/SELF-HOST.md#prerequisites) for
+> the settings.
+<!-- harn:end pnpm-install-docs-disclose-build-approval-boundaries -->
+
 Preview without changing the host:
 
 ```sh
@@ -106,6 +114,7 @@ Install and sign in to at least one supported agent:
 [Cursor](https://cursor.com/cli),
 [Antigravity](https://antigravity.google/docs/cli/getting-started) (`agy`),
 [Gemini](https://github.com/google-gemini/gemini-cli),
+[Grok Build](https://docs.x.ai/build/cli/headless-scripting),
 [Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli/cli-getting-started), or
 [OpenCode](https://opencode.ai/docs/).
 
@@ -116,6 +125,19 @@ Install and sign in to at least one supported agent:
 Tailscale lets you open Codor privately from your phone, tablet, or another computer—without
 putting it on the public internet. [Install Tailscale](https://tailscale.com/download) and sign in
 on both devices with the same account.
+
+<!-- harn:assume tailscale-serve-docs-disclose-certificate-transparency ref=readme-tailscale-certificate-disclosure -->
+> [!IMPORTANT]
+> Before this works, HTTPS certificates must be enabled for your tailnet at
+> [the admin console](https://console.tailscale.com/admin/dns). Until then, `tailscale serve` waits
+> for you to complete that setup in a browser instead of returning—if `codor install` looks frozen
+> at "configuring Tailscale", this is why. Enabling HTTPS only authorizes certificate issuance;
+> running `tailscale serve` (as `codor install` does) then issues one, which publishes this
+> machine's `*.ts.net` name to the public
+> [Certificate Transparency](https://tailscale.com/docs/how-to/set-up-https-certificates) log—a
+> disclosure that can't be undone, even if you disable HTTPS again later. If you'd rather skip this,
+> choose "On this computer only" during setup—you can add Tailscale access later.
+<!-- harn:end tailscale-serve-docs-disclose-certificate-transparency -->
 
 `codor install` can publish Codor privately over Tailscale automatically. If you skipped that step,
 run:
@@ -163,7 +185,7 @@ codor attach -r <channel-name> planner
 ```
 
 This opens the native resumable session and returns it to Codor when you exit. It supports
-resumable Claude Code, Codex, Gemini, OpenCode, and Copilot members. See the complete
+resumable Claude Code, Codex, Gemini, Grok, OpenCode, and Copilot members. See the complete
 [existing-session guide](docs/JOIN.md).
 <!-- harn:end readme-explains-existing-session-custody -->
 

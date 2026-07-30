@@ -14,6 +14,16 @@ machine. No hosted Codor component is required.
 - pnpm 10.9.0, selected by the repository's `packageManager` field through Corepack.
 - Optional: Tailscale for private HTTPS access from phones and other machines.
 
+<!-- harn:assume pnpm-install-docs-disclose-build-approval-boundaries ref=selfhost-pnpm-build-approval-disclosure -->
+On pnpm 10.1–10.25, `better-sqlite3`'s native build script needs approval via
+`onlyBuiltDependencies: [better-sqlite3]` in `pnpm-workspace.yaml` or the `package.json` `pnpm`
+field. On pnpm 10.26 and newer (including pnpm 11), that setting is `allowBuilds: { better-sqlite3:
+true }` in `pnpm-workspace.yaml`—`pnpm approve-builds` writes it interactively. Without approval,
+`pnpm install` reports `Ignored build scripts: better-sqlite3` and the service fails to start with
+no native binding. See [pnpm's settings reference](https://pnpm.io/settings) for the current option
+names.
+<!-- harn:end pnpm-install-docs-disclose-build-approval-boundaries -->
+
 Never expose port 8137 directly to the public internet. The browser token is a bearer credential;
 use loopback plus Tailscale Serve, another authenticated private tunnel, or a hardened reverse
 proxy you operate.
@@ -34,6 +44,14 @@ side-effect-free preview. Unattended mutation requires both `--yes` and
 `--access localhost|tailscale`; installation never guesses remote exposure from detection alone.
 `npx @richhardry/codor setup` remains available as a backward-compatible alias.
 <!-- harn:end public-npx-install-is-primary-install -->
+
+<!-- harn:assume pnpm-install-docs-disclose-build-approval-boundaries ref=selfhost-pnpm-dlx-disclosure -->
+On pnpm, install into a project (`pnpm add @richhardry/codor`) rather than
+`pnpm dlx @richhardry/codor install`. A tested `pnpm dlx` install did not pick up the workspace
+`packageExtensions` and native build-approval settings this install needs, including the
+`better-sqlite3` approval above—`pnpm dlx` does honor some workspace configuration (for example
+catalogs), but not this.
+<!-- harn:end pnpm-install-docs-disclose-build-approval-boundaries -->
 
 <!-- harn:assume source-cli-installers-remain-idempotent-fallback ref=selfhost-windows-cli-installer -->
 For source development, clone a stable ref and use the checkout installer:
@@ -209,7 +227,24 @@ For development diagnostics only, the single repository-relative fallback is
 
 ## Private access with Tailscale
 
-For the common single-operator setup, keep Codor on loopback and let Tailscale terminate HTTPS:
+For the common single-operator setup, keep Codor on loopback and let Tailscale terminate HTTPS.
+
+<!-- harn:assume tailscale-serve-docs-disclose-certificate-transparency ref=selfhost-tailscale-certificate-disclosure -->
+**Prerequisite:** HTTPS certificates must be enabled for your tailnet at
+[the admin console](https://console.tailscale.com/admin/dns) before `tailscale serve` will work
+non-interactively. Until that's done, `tailscale serve` blocks waiting for you to complete
+enablement in a browser instead of returning—this is the cause if `codor install` appears to hang
+at "configuring Tailscale". Enabling HTTPS **authorizes** certificate issuance for the tailnet, and
+running `tailscale serve` (as `codor install` does) **issues** one: the device's fully qualified
+`*.ts.net` name is written into the public Certificate Transparency log. Tailscale randomizes the
+tailnet DNS name so the ledger doesn't reveal your organization, but device names are published as
+chosen, and CT entries cannot be withdrawn. The feature itself is reversible—`tailscale serve reset`
+or disabling HTTPS breaks reliance on it but does not revoke already-issued certificates—the public
+disclosure is not. See
+[Tailscale's HTTPS certificate docs](https://tailscale.com/docs/how-to/set-up-https-certificates)
+for the full mechanism. Choosing localhost-only access during `codor install` skips Tailscale
+entirely.
+<!-- harn:end tailscale-serve-docs-disclose-certificate-transparency -->
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8137

@@ -1,0 +1,14 @@
+id: pnpm-install-docs-disclose-build-approval-boundaries
+hash: a-50784d52f1bb
+title: pnpm install guidance discloses execution and build-approval boundaries
+state: active
+statement: Public install documentation must direct pnpm users away from the
+  tested pnpm dlx path, explain that it did not receive required workspace
+  package extensions and native build approvals, and name the compatible legacy
+  onlyBuiltDependencies and current allowBuilds settings, because an apparently
+  successful install without required native scripts produces an unusable
+  runtime.
+depends_on:
+  - public-npx-install-is-primary-install
+  - pnpm-build-approvals-span-pinned-and-current-config
+created_by: reconcile-pr9-install-tailscale-disclosure

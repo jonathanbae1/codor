@@ -1,0 +1,13 @@
+id: grok-capability-truth
+hash: a-492e4c7d3a14
+title: Grok streaming events normalize into truthful bounded turn evidence
+state: active
+statement: Grok streaming-json and Responses-style events accepted by the
+  translator must normalize into bounded text, reasoning, and tool WireEvents;
+  retain a discovered session identifier; normalize reported input and output
+  usage without inventing absent usage; and emit exactly one truthful terminal
+  completion or failure, because downstream run evidence must reflect the
+  observable native stream rather than adapter guesses.
+depends_on:
+  - normalized-run-item-payload-contract
+created_by: reconcile-pr7-grok-truth
