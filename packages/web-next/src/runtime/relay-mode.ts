@@ -3,7 +3,7 @@
 // its fetch with the origin router, and exposes the connection extras
 // (relay origin + tunnel socketFactory) the app threads into ws.ts/api.ts.
 // Absent a relay record, everything stays on the direct local/tailnet path.
-import { relayAccessOrigin, storedRelayRecord } from './crypto.js';
+import { hydrateActiveRelay, relayAccessOrigin } from './crypto.js';
 import { setRelayTransport } from './relay-transport.js';
 import { TunnelClient, type TunnelState } from './relay.js';
 
@@ -14,7 +14,9 @@ let wsOrigin: string | undefined;
 /** Initialize relay mode if a relay record exists. Returns whether relay mode is active. */
 export async function initRelayMode(): Promise<boolean> {
   if (tunnel) return true;
-  const record = await storedRelayRecord();
+  // Migrate a legacy install and re-hydrate the ACTIVE computer's keys (archive
+  // is truth) before building its tunnel.
+  const record = await hydrateActiveRelay();
   if (!record) return false;
   tunnel = new TunnelClient(record);
   httpOrigin = relayAccessOrigin(record.relay_url);

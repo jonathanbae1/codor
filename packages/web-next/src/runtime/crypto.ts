@@ -9,6 +9,18 @@ import {
   type PairingMessage,
 } from '@codor/tunnel';
 import { relayFetch } from './relay-transport.js';
+import { type RelayComputer, selectActiveComputer } from './relay-records.js';
+import {
+  type Kv,
+  type RelayMaterial,
+  forgetComputerStore,
+  hydrateActive,
+  listComputers,
+  migrateIfNeeded,
+  recordPairedComputer,
+  renameComputer,
+  switchToComputer,
+} from './relay-store.js';
 
 export interface BrowserPublicIdentity {
   device_id: string;
@@ -161,6 +173,33 @@ async function readAllState(): Promise<unknown[]> {
   }
 }
 
+async function listStateKeys(): Promise<string[]> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<string[]>((resolve, reject) => {
+      const request = database.transaction(STORE).objectStore(STORE).getAllKeys();
+      request.onsuccess = () => resolve(request.result as string[]);
+      request.onerror = () => reject(request.error ?? new Error('IndexedDB read failed'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+/** The IndexedDB `state` store as the KV seam the multi-computer store runs over.
+ *  `lock` serializes every index mutation and the boot hydrate across tabs via the
+ *  Web Locks API (a single named lock) so two tabs on one IndexedDB can't race an
+ *  index read-modify-write; absent the API, it degrades to a straight pass-through. */
+const browserKv: Kv = {
+  get: (key) => readState(key),
+  put: writeState,
+  delete: deleteState,
+  keys: listStateKeys,
+  lock: <T,>(fn: () => Promise<T>): Promise<T> => (typeof navigator !== 'undefined' && navigator.locks
+    ? (navigator.locks.request('codor-relay-store', fn) as Promise<T>)
+    : fn()),
+};
+
 // harn:assume single-crypto-suite-libsodium ref=browser-libsodium-suite
 export async function ensureBrowserIdentity(): Promise<BrowserPublicIdentity> {
   await sodium.ready;
@@ -208,6 +247,36 @@ async function persistBrowserPairing(result: PairingResult, origin: string): Pro
   await storeBrowserAccess({ origin: new URL(origin).origin, authority: 'device' });
 }
 
+/**
+ * Build a paired computer's complete archive material DIRECTLY from the enrolled
+ * pairing result (fable) — the same key-set persistBrowserPairing would write to
+ * the globals, but returned as data so the add path archives it WITHOUT ever
+ * touching the shared global cache. Room keys are unsealed here, as in persist.
+ */
+async function relayMaterial(
+  result: PairingResult,
+  relay: StoredRelayRecord,
+  origin: string,
+): Promise<RelayMaterial> {
+  const rooms: RelayMaterial['rooms'] = [];
+  for (const sealed of result.room_keys) {
+    rooms.push({
+      room: sealed.room,
+      value: {
+        room: sealed.room,
+        generation: sealed.generation,
+        key: encode(await openForBrowser(sealed.sealed_key)),
+      } satisfies StoredBrowserRoomKey,
+    });
+  }
+  return {
+    relay,
+    peer: { ...result.switchboard, kind: 'switchboard' } satisfies BrowserPeer,
+    access: { origin: new URL(origin).origin, authority: 'device' } satisfies StoredBrowserAccess,
+    rooms,
+  };
+}
+
 /** Browser-side relay tunnel record (PLAN §4.5). */
 export interface StoredRelayRecord {
   relay_url: string;
@@ -221,15 +290,57 @@ export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined
 }
 
 /**
- * Forget ONLY the relay pairing record (relay session + tunnel keys) and its
- * switchboard access token, dropping the browser back to code entry to re-pair —
- * WITHOUT the nuclear unpairBrowser() (which also purges service workers, caches,
- * and localStorage). The recovery surface's "Re-pair this browser" calls this;
- * a subsequent pairThroughRelay overwrites the switchboard peer and room keys.
+ * Boot: migrate a legacy single-record install into the v2 index (idempotent),
+ * then re-hydrate the global slots from the ACTIVE computer's archive (archive is
+ * the truth). Returns the active relay record, or undefined when unpaired. Called
+ * by initRelayMode before it builds the tunnel.
+ */
+export async function hydrateActiveRelay(): Promise<StoredRelayRecord | undefined> {
+  const legacyPeer = await readState<BrowserPeer>('peer:switchboard');
+  await migrateIfNeeded(browserKv, {
+    id: legacyPeer?.device_id ?? 'legacy',
+    label: 'Computer 1',
+    paired_at: new Date().toISOString(),
+  });
+  await hydrateActive(browserKv);
+  return readState<StoredRelayRecord>('relay');
+}
+
+/** The paired computers + the active id, for the switcher UI. */
+export async function listPairedComputers(): Promise<{ computers: RelayComputer[]; active_id?: string }> {
+  const index = await listComputers(browserKv);
+  return { computers: index.computers, active_id: index.active_id };
+}
+
+/** Switch the active computer (caller reloads afterward). */
+export async function switchComputer(id: string): Promise<void> {
+  await switchToComputer(browserKv, id);
+}
+
+/** Rename a paired computer's label in place. */
+export async function renamePairedComputer(id: string, label: string): Promise<void> {
+  await renameComputer(browserKv, id, label);
+}
+
+/** Forget one specific paired computer (per-computer Forget in the switcher). */
+export async function forgetPairedComputer(id: string): Promise<void> {
+  await forgetComputerStore(browserKv, id);
+}
+
+/**
+ * Forget the ACTIVE relay pairing (the recovery surface's / Settings' "Re-pair
+ * this browser") — WITHOUT the nuclear unpairBrowser(). With multiple computers
+ * this falls back to the next paired computer; with one it clears the globals and
+ * drops to code entry. A subsequent pairThroughRelay records a fresh computer.
  */
 export async function forgetRelayPairing(): Promise<void> {
-  await deleteState('relay');
-  await deleteState('access:switchboard');
+  const active = selectActiveComputer(await listComputers(browserKv));
+  if (active) {
+    await forgetComputerStore(browserKv, active.id);
+  } else {
+    await deleteState('relay');
+    await deleteState('access:switchboard');
+  }
   setActiveBrowserAccessToken('');
 }
 
@@ -302,13 +413,26 @@ export async function pairThroughRelay(
               };
               socket.send(channel.seal(enroll));
             } else if (message.type === 'enrolled') {
-              await persistBrowserPairing(message.result as PairingResult, relayAccessOrigin(relayUrl));
-              await writeState('relay', {
+              const result = message.result as PairingResult;
+              const relay: StoredRelayRecord = {
                 relay_url: relayUrl,
                 session_id: hello!.session_id,
                 client_static: { pub: encode(clientStatic.publicKey), priv: encode(clientStatic.secretKey) },
                 host_static_pub: hello!.host_static_pub,
-              } satisfies StoredRelayRecord);
+              };
+              // Archive this computer's generation DIRECTLY from the pairing result
+              // — never by snapshotting the shared globals — so a concurrent active
+              // session in another tab can't contaminate it and this pairing can't
+              // clobber another computer's rooms. No global slots are touched here;
+              // the post-pairing reload's boot hydrate populates them from the
+              // now-active generation. Label defaults to "Computer N" (a re-pair of
+              // the same switchboard keeps its label).
+              const material = await relayMaterial(result, relay, relayAccessOrigin(relayUrl));
+              const existing = await listComputers(browserKv);
+              const id = result.switchboard.device_id;
+              const label = existing.computers.find((c) => c.id === id)?.label
+                ?? `Computer ${existing.computers.length + 1}`;
+              await recordPairedComputer(browserKv, { id, label, paired_at: new Date().toISOString() }, material);
               socket.send(channel.seal({ type: 'done' }));
               settled = true;
               if (deadline) clearTimeout(deadline);
@@ -457,13 +581,13 @@ export async function storedBrowserRoomKey(room: string): Promise<StoredBrowserR
 }
 
 export async function storedBrowserRoomKeys(): Promise<StoredBrowserRoomKey[]> {
-  return (await readAllState()).filter((value): value is StoredBrowserRoomKey => {
-    if (typeof value !== 'object' || value === null) return false;
-    const candidate = value as Partial<StoredBrowserRoomKey>;
-    return typeof candidate.room === 'string' &&
-      typeof candidate.generation === 'number' &&
-      typeof candidate.key === 'string';
-  });
+  // Filter by KEY PREFIX, never by value shape — the per-computer archives
+  // (`computer:<id>:<gen>:room:*`) hold identically-shaped values, and must stay
+  // invisible to every legacy reader. Only the active computer's global `room:*`
+  // keys count.
+  const keys = (await listStateKeys()).filter((k) => k.startsWith('room:'));
+  const values = await Promise.all(keys.map((k) => readState<StoredBrowserRoomKey>(k)));
+  return values.filter((value): value is StoredBrowserRoomKey => value !== undefined);
 }
 
 export async function persistBrowserRoomKey(

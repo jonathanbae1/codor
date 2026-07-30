@@ -17,6 +17,7 @@ import { useRoomSummaries, type RoomSummary } from '../app/summary.js';
 import { roomSlice, useClientStore } from '../app/store.js';
 import { ContextPanel } from './ContextPanel.js';
 import { Chip, IconButton, Eyebrow, Modal, StatusPill } from '../primitives/primitives.js';
+import { ComputerSwitcher } from './ComputerSwitcher.js';
 import { compactCount, memberAccent, relativeTime } from '../primitives/identity.js';
 import { Composer } from './Composer.js';
 import { CreateChannelDialog } from './CreateChannel.js';
@@ -306,6 +307,7 @@ function ChannelRail(props: {
             <span className="nx-conn-dot" aria-hidden="true" />
             {connected ? 'Connected' : 'Reconnecting…'}
           </span>
+          <ComputerSwitcher />
         </span>
         <IconButton icon={Settings} label="Settings" variant="quiet" onClick={() => { window.location.href = `/settings?room=${props.activeRoom}`; }} />
       </footer>

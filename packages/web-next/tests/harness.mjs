@@ -32,6 +32,7 @@ const readPort = (name, fallback) => {
   return value;
 };
 const API_PORT = readPort('CODOR_NEXT_E2E_API_PORT', 28_137);
+const API_PORT_B = readPort('CODOR_NEXT_E2E_API_PORT_B', 28_237);
 const CONTROL_PORT = readPort('CODOR_NEXT_E2E_CONTROL_PORT', 28_138);
 // A SEPARATE origin serving the SPA, distinct from the switchboard — the
 // production topology (codor.app on Pages vs a self-hosted switchboard). Every
@@ -1173,6 +1174,11 @@ daemon.store.postMessage('eng', {
 let mockRelay;
 let relayStore;
 let relayLink;
+// P3: a SECOND switchboard ("computer B") sharing the one mock relay (multiplexed
+// by session_id), so the browser can pair two computers and drive the switcher.
+let cryptoB;
+let relayStoreB;
+let relayLinkB;
 
 // ── Control endpoint: tests script upcoming fake turns just-in-time ──────
 createServer((req, res) => {
@@ -1334,6 +1340,13 @@ createServer((req, res) => {
         relayLink.start();
         payload = { ok: true };
       }
+      if (url.pathname === '/relay-pair-b') {
+        const host = new RelayPairingHost({ store: relayStoreB, pairing: cryptoB.pairing, identity: cryptoB.keys.publicIdentity() });
+        const offer = await host.pair(`http://127.0.0.1:${API_PORT_B}`);
+        payload = { ...offer, code: offer.pairing_code, relayUrl: mockRelay.url };
+      }
+      if (url.pathname === '/relay-down-b') { relayLinkB.stop(); payload = { ok: true }; }
+      if (url.pathname === '/relay-up-b') { relayLinkB.start(); payload = { ok: true }; }
       if (url.pathname === '/fixture-ids') {
         payload = {
           oldInboxMention: oldInboxMention.id,
@@ -1533,6 +1546,42 @@ crypto.keys.onPeerRevoked((deviceId) => {
   relayStore.removeDevice(deviceId);
 });
 relayLink.start();
+
+// ── Computer B: a second switchboard (own loopback + relay session) ──────────
+const dirB = mkdtempSync(join(tmpdir(), 'codor-next-e2e-b-'));
+cryptoB = new CryptoVault(dirB);
+const daemonB = new Daemon({
+  dbPath: join(dirB, 'db.sqlite'),
+  blobRoot: join(dirB, 'blobs'),
+  adapters: [new FakeAdapter('fake')],
+  ledger: new LedgerManager({ dataDir: dirB }),
+});
+// A room id host A does NOT have, so the two-host e2e proves each computer's
+// archive holds only its own rooms — never another computer's.
+daemonB.createRoom({ id: 'switcher-b', name: 'Host B', owner: { handle: 'richard', display_name: 'Richard' } });
+cryptoB.roomKeys.ensureRoom('switcher-b');
+relayStoreB = new RelayStore(dirB);
+relayStoreB.enable(mockRelay.url);
+relayLinkB = new RelayLink({
+  store: relayStoreB,
+  loopbackPort: API_PORT_B,
+  isDeviceActive: (deviceId) => cryptoB.keys.getPeer(deviceId) !== undefined,
+});
+cryptoB.keys.onPeerRevoked((deviceId) => { relayLinkB.dropDevice(deviceId); relayStoreB.removeDevice(deviceId); });
+relayLinkB.start();
+await startServer({
+  daemon: daemonB,
+  token: TOKEN,
+  port: API_PORT_B,
+  crypto: cryptoB,
+  relay: {
+    status: () => ({ enabled: relayStoreB.enabled, relay_url: relayStoreB.relayUrl, session_id: relayStoreB.sessionId, devices: relayStoreB.listDevices().length }),
+    enable: (u) => { relayStoreB.enable(u); relayLinkB.restart(); },
+    disable: () => { relayStoreB.disable(); relayLinkB.restart(); },
+    rotate: () => { const id = relayStoreB.rotate(); relayLinkB.restart(); return id; },
+    pair: (endpoint) => new RelayPairingHost({ store: relayStoreB, pairing: cryptoB.pairing, identity: cryptoB.keys.publicIdentity() }).pair(endpoint),
+  },
+});
 
 // A stub voice provider: the real /api/voice/transcribe endpoint, but a
 // distinct counter-suffixed transcript per call (so multi-segment assertions are
