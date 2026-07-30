@@ -304,6 +304,22 @@ distinct from the [Public Web Push relay](#public-web-push-relay) below: the tun
 Cloudflare Worker in `relay-worker/`, configured with `CODOR_TUNNEL_URL` / `codor relay …`, whereas
 the push relay is the sealed Web Push forwarder configured with `CODOR_RELAY_URL`.
 
+**Canonical hostname — a correction learned in deployment.** A *page load* to
+`https://relay.codor.app` uses Encrypted Client Hello, so its SNI is hidden and `/healthz` loads even
+from an SNI-filtering network. A browser **WebSocket upgrade does NOT get ECH**, so
+`wss://relay.codor.app` is reset mid-handshake on those same networks *despite* `/healthz` working —
+the failure is invisible to a plain reachability check. The shipping relay URL is therefore the
+workers.dev alias (`wss://codor-relay.<subdomain>.workers.dev`), which is not SNI-filtered; it is what
+codor.app bakes in (`VITE_CODOR_RELAY_URL`) and what the switchboard host uses (`CODOR_TUNNEL_URL`),
+and `"workers_dev": true` is pinned in `wrangler.jsonc` so a deploy cannot silently disable it. Both
+hostnames terminate at the same Worker and Durable Objects, so a host on the alias and a browser on
+either name meet in the same rooms/sessions.
+
+Pre-launch check: **browser WS upgrade on the canonical hostname verified from an unfiltered
+network** — confirm a real browser (not curl/Node, which expose SNI and get reset) completes the
+`wss://` session handshake on the baked relay URL from a network that is NOT SNI-filtered, since a
+filtered network hides this failure behind a working page load.
+
 1. Deploy the Worker to `relay.codor.app` (`wrangler deploy`) and confirm it is reachable: `wrangler
    tail` shows Worker invocations with request metadata only — method, path, and status such as
    `101`/`200` on `/v1/pair/rooms`, `/v1/pair/:np/ws`, and `/v1/session/:id/ws`. That is all
