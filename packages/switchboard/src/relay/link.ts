@@ -2,6 +2,8 @@ import WebSocketImpl from 'ws';
 
 import {
   AeadChannel,
+  Keepalive,
+  RELAY_KEEPALIVE_INTERVAL_MS,
   MessageReassembler,
   MuxStream,
   SessionResponder,
@@ -58,6 +60,9 @@ function pickHeaders(headers: Record<string, string>): Record<string, string> {
 export interface RelaySocket {
   send(data: Uint8Array | string): void;
   close(code?: number, reason?: string): void;
+  /** Force-destroy without the closing handshake — a half-open socket's graceful
+   *  close() never completes, so keepalive death must not wait on it. */
+  terminate?(): void;
   onMessage(cb: (data: Uint8Array, isBinary: boolean) => void): void;
   onOpen(cb: () => void): void;
   onClose(cb: (code?: number, reason?: string) => void): void;
@@ -70,6 +75,7 @@ export function dialWs(url: string): RelaySocket {
   return {
     send: (data) => ws.send(data),
     close: (code, reason) => ws.close(code, reason),
+    terminate: () => ws.terminate(),
     onMessage: (cb) => ws.on('message', (data: Buffer, isBinary: boolean) => cb(new Uint8Array(data), isBinary)),
     onOpen: (cb) => ws.on('open', cb),
     onClose: (cb) => ws.on('close', (code: number, reason: Buffer) => cb(code, reason?.toString())),
@@ -89,6 +95,10 @@ export interface RelayLinkDeps {
   now?: () => number;
   setTimeoutFn?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void;
+  /** §4.1 keepalive probe cadence on the session socket; injectable for tests. */
+  keepaliveMs?: number;
+  setIntervalFn?: (callback: () => void, ms: number) => ReturnType<typeof setInterval>;
+  clearIntervalFn?: (handle: ReturnType<typeof setInterval>) => void;
   /** jitter in [0,1); defaults to Math.random. */
   jitter?: () => number;
   onError?: (error: unknown) => void;
@@ -107,6 +117,7 @@ interface ConnState {
 export class RelayLink {
   private readonly deps: Required<Omit<RelayLinkDeps, 'onError'>> & Pick<RelayLinkDeps, 'onError'>;
   private socket?: RelaySocket;
+  private keepalive?: Keepalive;
   private conns = new Map<number, ConnState>();
   private attempt = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -120,6 +131,9 @@ export class RelayLink {
       now: Date.now,
       setTimeoutFn: (cb, ms) => setTimeout(cb, ms),
       clearTimeoutFn: (h) => clearTimeout(h),
+      keepaliveMs: RELAY_KEEPALIVE_INTERVAL_MS,
+      setIntervalFn: (cb, ms) => setInterval(cb, ms),
+      clearIntervalFn: (h) => clearInterval(h),
       jitter: Math.random,
       ...deps,
     };
@@ -139,6 +153,8 @@ export class RelayLink {
     this.running = false;
     if (this.reconnectTimer) this.deps.clearTimeoutFn(this.reconnectTimer);
     this.reconnectTimer = undefined;
+    this.keepalive?.stop();
+    this.keepalive = undefined;
     for (const conn of [...this.conns.values()]) this.teardownConn(conn);
     this.conns.clear();
     this.socket?.close(1000, 'shutdown');
@@ -186,17 +202,48 @@ export class RelayLink {
     this.socket = socket;
     socket.onOpen(() => {
       this.attempt = 0;
+      // Probe the idle session link so a silently half-open socket (relay or NAT
+      // dropping state without a close frame) is surfaced and reconnected rather
+      // than stranding every client that later tries to reach this host.
+      this.keepalive?.stop();
+      this.keepalive = new Keepalive({
+        send: (ping) => socket.send(ping),
+        // A half-open socket's graceful close() never completes, so tear down
+        // immediately and idempotently rather than waiting on a close event that
+        // will never arrive; terminate() (best-effort) forces the wire shut.
+        onDead: () => {
+          try {
+            (socket.terminate ?? socket.close).call(socket);
+          } catch {
+            // socket already gone
+          }
+          this.handleSocketDown(socket);
+        },
+        intervalMs: this.deps.keepaliveMs,
+        setIntervalFn: this.deps.setIntervalFn,
+        clearIntervalFn: this.deps.clearIntervalFn,
+      });
     });
-    socket.onMessage((data, isBinary) => this.onRelayMessage(data, isBinary));
+    socket.onMessage((data, isBinary) => {
+      this.keepalive?.noteActivity();
+      this.onRelayMessage(data, isBinary);
+    });
     socket.onError((error) => this.deps.onError?.(error));
-    socket.onClose(() => {
-      if (this.socket === socket) {
-        this.socket = undefined;
-        for (const conn of [...this.conns.values()]) this.teardownConn(conn);
-        this.conns.clear();
-        this.scheduleReconnect();
-      }
-    });
+    socket.onClose(() => this.handleSocketDown(socket));
+  }
+
+  /** Tear down a dead session socket and schedule a reconnect, exactly once.
+   *  Called by the close event AND by keepalive death (which cannot wait on the
+   *  close event of a half-open socket); the current-socket guard makes the
+   *  second caller a no-op. */
+  private handleSocketDown(socket: RelaySocket): void {
+    if (this.socket !== socket) return;
+    this.keepalive?.stop();
+    this.keepalive = undefined;
+    this.socket = undefined;
+    for (const conn of [...this.conns.values()]) this.teardownConn(conn);
+    this.conns.clear();
+    this.scheduleReconnect();
   }
 
   private scheduleReconnect(): void {

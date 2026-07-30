@@ -4,12 +4,12 @@ import { createRoot } from 'react-dom/client';
 import { applyThemeChoice } from '@runtime/theme.js';
 
 import { pageParams, resolveAccessToken } from './app/session.js';
-import { initRelayMode } from '@runtime/relay-mode.js';
+import { initRelayMode, relayActive } from '@runtime/relay-mode.js';
 import {
-  fetchAuthorizedRooms,
   forgetRoom,
   rememberedRoom,
   rememberRoom,
+  resolveAuthorizedRooms,
   resolveStartupRoom,
 } from './app/startup.js';
 import { checkBrowserCompatibility, CompatibilityGate } from './app/compatibility.js';
@@ -74,7 +74,15 @@ async function render(): Promise<void> {
     // any of them early meant Settings opened `room: ""` and Ledger requested
     // /api/rooms//ledger — the same phantom-room class as `default`.
     const explicit = pageParams().room;
-    const authorized = await fetchAuthorizedRooms(token).catch(() => undefined);
+    // One bounded attempt, then the extended relay-only retry (a relay host can
+    // take up to a keepalive cycle to notice a stale link and reconnect). The
+    // direct path keeps its fast-fail, so an offline direct switchboard shows the
+    // unavailable screen at once instead of a blank root for minutes.
+    const authorized = await resolveAuthorizedRooms(token, {
+      relayMode: relayActive(),
+      explicit,
+      remembered: rememberedRoom(),
+    });
 
     // A failed lookup is UNKNOWN state, not an authorized empty set. Offline is
     // the installed shell's whole point, so fall back to what this device

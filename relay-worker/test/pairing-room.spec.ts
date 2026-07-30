@@ -118,6 +118,13 @@ describe('PairingRoom relaying', () => {
     expect(await host.nextJson()).toEqual({ type: 'peer-joined', role: 'claim' });
   });
 
+  it('auto-answers the pairing host codor-ping without invoking the object', async () => {
+    await reserve('BK');
+    const host = await connect('/v1/pair/BK/ws?role=host');
+    host.send('codor-ping');
+    expect(await host.next()).toEqual({ type: 'msg', data: 'codor-pong' });
+  });
+
   it('rejects a second concurrent claimant with 4002', async () => {
     await reserve('BD');
     await connect('/v1/pair/BD/ws?role=claim');

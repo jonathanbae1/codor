@@ -64,6 +64,13 @@ function handlePairing(np, role, ws, rooms) {
     room.host?.send(JSON.stringify({ type: 'peer-joined', role: 'claim' }));
   }
   ws.on('message', (data, isBinary) => {
+    // §4.1 keepalive: answer codor-ping at the relay (before any JSON.parse),
+    // mirroring the DO's setWebSocketAutoResponse so the pairing host's probe is
+    // met and never mis-parsed as control.
+    if (!isBinary && data.toString() === 'codor-ping') {
+      ws.send('codor-pong');
+      return;
+    }
     const other = role === 'host' ? room.claim : room.host;
     if (isBinary) {
       other?.send(data, { binary: true });
@@ -96,6 +103,10 @@ function handleSession(sid, role, ws, sessions) {
     s.host = ws;
     for (const conn of s.clients.keys()) ws.send(JSON.stringify({ type: 'client-connected', conn }));
     ws.on('message', (data, isBinary) => {
+      if (!isBinary && data.toString() === 'codor-ping') {
+        ws.send('codor-pong'); // answer the host link's keepalive probe
+        return;
+      }
       if (!isBinary || data.length < 4) return;
       s.clients.get(data.readUInt32BE(0))?.send(data.subarray(4), { binary: true });
     });
@@ -109,6 +120,10 @@ function handleSession(sid, role, ws, sessions) {
     s.host?.send(JSON.stringify({ type: 'client-connected', conn }));
     ws.send(JSON.stringify({ type: s.host ? 'host-connected' : 'host-disconnected' }));
     ws.on('message', (data, isBinary) => {
+      if (!isBinary && data.toString() === 'codor-ping') {
+        ws.send('codor-pong'); // answer the browser client's keepalive probe
+        return;
+      }
       if (!isBinary) return;
       const framed = Buffer.allocUnsafe(4 + data.length);
       framed.writeUInt32BE(conn, 0);

@@ -78,8 +78,5 @@ anchors:
       action: change
       reason: RelayPairingSession runs the shared Keepalive on the room socket across
         the mint-to-claim window.
-lock:
-  locked_at: 2026-07-30T04:21:43.335Z
-  base_commit: 56ab0a7411ef4c249792747fa413eaa15fb682da
-  hash: 19b418998d24ad8b717d7626e4bae2f702fffeb6f476e164415639a59c4aa30c
-  dirty_at_lock: false
+applied:
+  applied_at: 2026-07-30T06:04:40.493Z

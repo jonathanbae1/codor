@@ -1,7 +1,10 @@
 import {
+  Keepalive,
   PairingChannel,
   PakeError,
   PakeHost,
+  RELAY_KEEPALIVE_INTERVAL_MS,
+  RELAY_KEEPALIVE_PONG,
   composeCode,
   formatCode,
   generateSecret,
@@ -33,6 +36,10 @@ export interface RelayPairingHostDeps {
   randomSecret?: () => string;
   setTimeoutFn?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void;
+  /** §4.1 keepalive probe cadence on the room socket; injectable for tests. */
+  keepaliveMs?: number;
+  setIntervalFn?: (callback: () => void, ms: number) => ReturnType<typeof setInterval>;
+  clearIntervalFn?: (handle: ReturnType<typeof setInterval>) => void;
   onError?: (error: unknown) => void;
 }
 
@@ -56,6 +63,9 @@ export class RelayPairingHost {
       randomSecret: generateSecret,
       setTimeoutFn: (cb, ms) => setTimeout(cb, ms),
       clearTimeoutFn: (handle) => clearTimeout(handle),
+      keepaliveMs: RELAY_KEEPALIVE_INTERVAL_MS,
+      setIntervalFn: (cb, ms) => setInterval(cb, ms),
+      clearIntervalFn: (handle) => clearInterval(handle),
       ...deps,
     };
   }
@@ -86,6 +96,7 @@ class RelayPairingSession {
   private attempts = 0;
   private closed = false;
   private readonly deadline: ReturnType<typeof setTimeout>;
+  private keepalive?: Keepalive;
 
   constructor(
     private readonly socket: RelaySocket,
@@ -93,9 +104,27 @@ class RelayPairingSession {
     private readonly secret: string,
     private readonly deps: RelayPairingHost['deps'],
   ) {
-    socket.onMessage((data, isBinary) => this.onMessage(data, isBinary));
+    socket.onMessage((data, isBinary) => {
+      this.keepalive?.noteActivity();
+      this.onMessage(data, isBinary);
+    });
     socket.onError((error) => this.deps.onError?.(error));
     socket.onClose(() => this.shutdown());
+    // Probe the room socket across the idle mint-to-claim window so a silently
+    // dropped host socket is surfaced rather than leaving a code that can never
+    // be claimed. Armed on open (not in the constructor) so the immediate probe
+    // never sends on a not-yet-open socket and false-counts a healthy room dead.
+    // PairingRoom auto-answers the ping.
+    socket.onOpen(() => {
+      this.keepalive?.stop();
+      this.keepalive = new Keepalive({
+        send: (ping) => this.socket.send(ping),
+        onDead: () => this.shutdown(),
+        intervalMs: this.deps.keepaliveMs,
+        setIntervalFn: this.deps.setIntervalFn,
+        clearIntervalFn: this.deps.clearIntervalFn,
+      });
+    });
     // The host enforces the 10-minute pairing window itself: a malicious relay
     // cannot extend the guessing window by never burning the room.
     this.deadline = this.deps.setTimeoutFn(() => this.shutdown(), PAIRING_WINDOW_MS);
@@ -108,6 +137,7 @@ class RelayPairingSession {
   private shutdown(): void {
     if (this.closed) return;
     this.closed = true;
+    this.keepalive?.stop();
     this.deps.clearTimeoutFn(this.deadline);
     this.socket.close();
   }
@@ -124,8 +154,13 @@ class RelayPairingSession {
   private onMessage(data: Uint8Array, isBinary: boolean): void {
     if (this.closed) return;
     try {
-      if (isBinary) this.onBinary(data);
-      else this.onControl(JSON.parse(new TextDecoder().decode(data)) as { type?: string });
+      if (isBinary) {
+        this.onBinary(data);
+        return;
+      }
+      const text = new TextDecoder().decode(data);
+      if (text === RELAY_KEEPALIVE_PONG) return; // keepalive answer; liveness already noted
+      this.onControl(JSON.parse(text) as { type?: string });
     } catch (error) {
       this.deps.onError?.(error);
     }
@@ -211,7 +246,8 @@ class RelayPairingSession {
     if (message.type !== 'done') throw new Error(`expected done, got ${message.type}`);
     this.sendText({ type: 'success' });
     this.phase = 'idle';
-    // Success: stop the deadline and go inert; the relay burns the room.
+    // Success: stop the deadline and keepalive and go inert; the relay burns the room.
+    this.keepalive?.stop();
     this.deps.clearTimeoutFn(this.deadline);
     this.closed = true;
   }

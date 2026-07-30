@@ -1,4 +1,4 @@
-import { RELAY_CLOSE, type BurnReason, type PairingRole } from './control.js';
+import { RELAY_CLOSE, RELAY_KEEPALIVE_PING, RELAY_KEEPALIVE_PONG, type BurnReason, type PairingRole } from './control.js';
 import type { Env } from './index.js';
 
 // harn:assume pairing-room-lifecycle ref=pairing-room-behavior
@@ -27,6 +27,10 @@ export class PairingRoom {
     private readonly env: Env,
   ) {
     void this.env;
+    // Answer the pairing host's §4.1 codor-ping at the runtime, mirroring
+    // SessionRelay, so an idle mint-to-claim window can't leave the host's room
+    // socket silently half-open. Re-armed on every wake (hibernation).
+    this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(RELAY_KEEPALIVE_PING, RELAY_KEEPALIVE_PONG));
   }
 
   async fetch(request: Request): Promise<Response> {

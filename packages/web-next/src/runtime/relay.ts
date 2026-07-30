@@ -4,6 +4,7 @@
 // framing — so both ends stay byte-identical by construction. Real browser
 // WebCrypto runs here (noble + globalThis.crypto).
 import {
+  Keepalive,
   MessageReassembler,
   MuxStream,
   SessionInitiator,
@@ -119,10 +120,17 @@ export class TunnelClient {
   private ws?: WebSocket;
   private mux?: StreamMux;
   private channel?: ReturnType<SessionInitiator['channel']>;
+  private keepalive?: Keepalive;
   private stateValue: TunnelState = 'disconnected';
   private retryMs = 500;
   private disposed = false;
   private readonly liveSockets = new Set<TunnelSocket>();
+  /** Rejecters for in-flight tunneled fetches, so a session drop fails their
+   *  promises instead of leaving them (and the bootstrap) pending forever. */
+  private readonly pendingHttp = new Set<(error: Error) => void>();
+  private readonly keepaliveMs?: number;
+  private readonly handshakeMs: number;
+  private readonly makeSocket: (url: string) => WebSocket;
   private readonly clientStatic: TunnelKeypair;
   private readonly hostStaticPub: Uint8Array;
   private readonly sessionIdBytes: Uint8Array;
@@ -131,10 +139,16 @@ export class TunnelClient {
 
   onStateChange?: (state: TunnelState) => void;
 
-  constructor(private readonly record: TunnelRecord) {
+  constructor(
+    private readonly record: TunnelRecord,
+    opts: { keepaliveMs?: number; handshakeMs?: number; socketFactory?: (url: string) => WebSocket } = {},
+  ) {
     this.clientStatic = { publicKey: fromB64(record.client_static.pub), secretKey: fromB64(record.client_static.priv) };
     this.hostStaticPub = fromB64(record.host_static_pub);
     this.sessionIdBytes = fromHex(record.session_id);
+    this.keepaliveMs = opts.keepaliveMs;
+    this.handshakeMs = opts.handshakeMs ?? 10_000;
+    this.makeSocket = opts.socketFactory ?? ((url) => new WebSocket(url));
     this.firstConnect = new Promise<void>((resolve) => {
       this.firstConnectResolve = resolve;
     });
@@ -153,7 +167,7 @@ export class TunnelClient {
     if (this.disposed || this.mux) return;
     this.setState('connecting');
     const base = this.record.relay_url.replace(/\/$/, '').replace(/^http/, 'ws');
-    const ws = new WebSocket(`${base}/v1/session/${this.record.session_id}/ws?role=client`);
+    const ws = this.makeSocket(`${base}/v1/session/${this.record.session_id}/ws?role=client`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     const initiator = new SessionInitiator({
@@ -162,8 +176,18 @@ export class TunnelClient {
       sessionId: this.sessionIdBytes,
     });
     let handshakeDone = false;
+    // A stale-but-buffered host can swallow msg1 without any error or close ever
+    // reaching us, stranding the connect in the pre-handshake window (before the
+    // keepalive even arms). Bound that window: if the KK handshake hasn't
+    // completed in time, abandon and reconnect on the normal backoff path.
+    const handshakeTimer = setTimeout(() => {
+      if (!handshakeDone) fail();
+    }, this.handshakeMs);
     ws.onopen = () => ws.send(initiator.start());
     ws.onmessage = (event) => {
+      // Any inbound frame — mux data, presence, or the codor-pong — proves the
+      // session link is still alive, so the keepalive should not declare it dead.
+      this.keepalive?.noteActivity();
       // The relay multiplexes JSON presence/control frames (§4.1) alongside the
       // binary handshake + mux ciphertext. With binaryType 'arraybuffer' a text
       // frame arrives as a string; treat only ArrayBuffer payloads as wire bytes.
@@ -189,9 +213,22 @@ export class TunnelClient {
           onStream: () => {},
         });
         handshakeDone = true;
+        clearTimeout(handshakeTimer);
         this.retryMs = 500;
         this.setState('connected');
         this.firstConnectResolve();
+        // Probe the idle session so a silently half-open link (the relay/NAT
+        // dropping state over idle hours) is surfaced and reconnected rather than
+        // stranding the app on a dead socket. SessionRelay auto-answers the ping.
+        // A half-open socket's close() never completes, so death drives the
+        // once-guarded fail() teardown directly, with close() as best-effort.
+        this.keepalive = new Keepalive({
+          send: (ping) => ws.send(ping),
+          // fail() detaches handlers, closes the socket, and reconnects — all
+          // without waiting on a close event the half-open socket never sends.
+          onDead: () => fail(),
+          intervalMs: this.keepaliveMs,
+        });
         return;
       }
       this.mux!.receivePacket(this.channel!.open(bytes));
@@ -204,7 +241,17 @@ export class TunnelClient {
     const fail = (): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(handshakeTimer);
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      // Close the abandoned socket centrally: the deadline and keepalive paths
+      // call fail() on a LIVE socket, and leaving it open leaks a client slot
+      // toward the relay's per-session cap on every retry. Best-effort — a
+      // double-close from the onclose path is a harmless no-op.
+      try {
+        ws.close();
+      } catch {
+        // already gone
+      }
       this.onDisconnect(ws);
     };
     ws.onclose = fail;
@@ -215,8 +262,16 @@ export class TunnelClient {
     // Ignore a drop from a socket we have already replaced — only the current
     // session's failure drives the reconnect.
     if (this.disposed || this.ws !== ws) return;
+    this.keepalive?.stop();
+    this.keepalive = undefined;
     this.mux = undefined;
     this.channel = undefined;
+    // Reject every in-flight tunneled fetch: the mux is gone, so their streams
+    // will never see onEnd/onReset. Leaving them pending would hang the caller
+    // (e.g. the bootstrap channel-list load) forever — the dead-end the retry is
+    // meant to escape. Rejecting lets the caller's retry/backoff advance.
+    for (const reject of [...this.pendingHttp]) reject(new Error('tunnel session lost'));
+    this.pendingHttp.clear();
     // Surface a close on every live app-WS socket so the connector's OWN
     // reconnect re-opens a stream on the NEXT session — never silently
     // re-attach to a session the connector believes is still live.
@@ -262,6 +317,17 @@ export class TunnelClient {
       let status = 0;
       let responseHeaders: Record<string, string> = {};
       const chunks: Uint8Array[] = [];
+      // Register a rejecter so a session drop (onDisconnect) fails this fetch
+      // instead of leaving it pending on a mux that no longer exists.
+      const abort = (error: Error): void => {
+        this.pendingHttp.delete(abort);
+        reject(error);
+      };
+      const settle = <T>(value: T, done: (value: T) => void): void => {
+        this.pendingHttp.delete(abort);
+        done(value);
+      };
+      this.pendingHttp.add(abort);
       stream.onHead = (head) => {
         const h = head as { status: number; headers: Record<string, string> };
         status = h.status;
@@ -271,8 +337,8 @@ export class TunnelClient {
         chunks.push(chunk);
         stream.consume(chunk.length);
       };
-      stream.onEnd = () => resolve(new Response(concatBytes(chunks) as unknown as BodyInit, { status, headers: responseHeaders }));
-      stream.onReset = (reason) => reject(new Error(`tunnel http reset: ${reason}`));
+      stream.onEnd = () => settle(new Response(concatBytes(chunks) as unknown as BodyInit, { status, headers: responseHeaders }), resolve);
+      stream.onReset = (reason) => abort(new Error(`tunnel http reset: ${reason}`));
       stream.sendHead({ method, target, headers });
       if (init.body !== undefined && init.body !== null) stream.write(bodyToBytes(init.body));
       stream.end();
@@ -281,8 +347,20 @@ export class TunnelClient {
 
   dispose(): void {
     this.disposed = true;
+    // onDisconnect is guarded out once disposed, so run the same teardown here:
+    // reject in-flight fetches and terminate live app sockets rather than
+    // stranding them, then stop the keepalive and drop the mux + ws.
+    this.keepalive?.stop();
+    this.keepalive = undefined;
+    for (const reject of [...this.pendingHttp]) reject(new Error('tunnel disposed'));
+    this.pendingHttp.clear();
+    for (const socket of [...this.liveSockets]) socket.terminate();
+    this.liveSockets.clear();
     this.mux?.close('disposed');
+    this.mux = undefined;
+    this.channel = undefined;
     this.ws?.close();
+    this.ws = undefined;
   }
 }
 
