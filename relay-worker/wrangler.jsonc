@@ -14,6 +14,12 @@
   "routes": [
     { "pattern": "relay.codor.app", "custom_domain": true }
   ],
+  // Keep the workers.dev alias (codor-relay.<subdomain>.workers.dev) ON. It is
+  // the shipping relay URL for SNI-filtered networks — including the switchboard
+  // host — which cannot reach relay.codor.app directly. wrangler DEFAULTS this
+  // off and a routine `wrangler deploy` silently disables it otherwise, breaking
+  // every browser and host that uses the alias; pin it so config matches reality.
+  "workers_dev": true,
   "durable_objects": {
     "bindings": [
       { "name": "PAIRING_ROOM", "class_name": "PairingRoom" },
