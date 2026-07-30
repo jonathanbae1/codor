@@ -40,15 +40,19 @@ function canonicalizeRoom(path: string, room: string): void {
 }
 
 async function surfaceFor(path: string, room: string, token: string) {
+  const { RecoveryOverlay } = await import('./surfaces/RecoveryOverlay.js');
+  // Wrap ONLY the surfaces that own a live connector (RoomPage, SettingsPage) —
+  // LedgerPage is REST-only with no session, so the recovery state can't apply,
+  // and landing/pairing/no-channels are their own terminal screens.
   if (path === '/settings') {
     const { SettingsPage } = await import('./surfaces/SettingsPage.js');
-    return <SettingsPage room={room} token={token} refreshToken={resolveAccessToken} />;
+    return <RecoveryOverlay><SettingsPage room={room} token={token} refreshToken={resolveAccessToken} /></RecoveryOverlay>;
   }
   if (path === '/ledger') {
     const { LedgerPage } = await import('./surfaces/LedgerPage.js');
     return <LedgerPage room={room} token={token} />;
   }
-  return <RoomPage room={room} token={token} refreshToken={resolveAccessToken} />;
+  return <RecoveryOverlay><RoomPage room={room} token={token} refreshToken={resolveAccessToken} /></RecoveryOverlay>;
 }
 
 async function render(): Promise<void> {

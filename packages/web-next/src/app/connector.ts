@@ -211,6 +211,9 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         // lifecycle resume and no deliberate reconnect leaves it. Re-pairing
         // (a fresh page) is the only way out.
         state = 'parked-auth';
+        // Positive pairing-dead evidence for the recovery surface: the host is up
+        // (we had a working session) and turned this browser's credential away.
+        useClientStore.getState().setAuthRefused(true);
         setActiveBrowserAccessToken('');
         return;
       }

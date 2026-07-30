@@ -1,6 +1,7 @@
 import { Check, Copy, Laptop, LockKeyhole, Network, Pause, Play, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
 import { exchangeBrowserPairingCode, pairThroughRelay, tryTrustedBrowserPairing } from '@runtime/crypto.js';
 import { relayUrlConfigured } from '@runtime/relay-mode.js';
 
@@ -152,17 +153,31 @@ export function LandingPage() {
                 busy={pairing}
                 error={failure}
                 onSubmit={(code) => {
+                  // A device-network problem must never be blamed on the code.
+                  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                    setFailure(SESSION_COPY['device-offline'].body);
+                    return;
+                  }
                   setPairing(true);
                   setFailure(undefined);
                   const relayUrl = relayUrlConfigured();
+                  // pairThroughRelay carries its own abortable deadline, so a dead
+                  // room (host never joins) rejects here instead of hanging forever.
                   const flow = relayUrl
                     ? pairThroughRelay(code, relayUrl).then(() => window.location.replace('/'))
                     : exchangeBrowserPairingCode(code).then((url) => window.location.assign(url.toString()));
                   void flow.catch(() => {
                     setPairing(false);
+                    // Offline AT rejection time is a device problem, not a bad code.
+                    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                      setFailure(SESSION_COPY['device-offline'].body);
+                      return;
+                    }
                     setFailure(
                       relayUrl
-                        ? 'Relay pairing failed. Check the code and that Codor is running, then try again.'
+                        // Pairing-time host-never-joins/code-bad (incl. the dead-room
+                        // case): a fresh code, not re-pair. Single-sourced copy.
+                        ? PAIRING_TIME_COPY['code-bad'].body
                         : 'Pairing code not found. Run setup again for a fresh code.',
                     );
                   });

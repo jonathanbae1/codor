@@ -134,6 +134,20 @@ async function writeState(key: string, value: unknown): Promise<void> {
   }
 }
 
+async function deleteState(key: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.objectStore(STORE).delete(key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB delete failed'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
 async function readAllState(): Promise<unknown[]> {
   const database = await openDatabase();
   try {
@@ -206,6 +220,19 @@ export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined
   return readState<StoredRelayRecord>('relay');
 }
 
+/**
+ * Forget ONLY the relay pairing record (relay session + tunnel keys) and its
+ * switchboard access token, dropping the browser back to code entry to re-pair —
+ * WITHOUT the nuclear unpairBrowser() (which also purges service workers, caches,
+ * and localStorage). The recovery surface's "Re-pair this browser" calls this;
+ * a subsequent pairThroughRelay overwrites the switchboard peer and room keys.
+ */
+export async function forgetRelayPairing(): Promise<void> {
+  await deleteState('relay');
+  await deleteState('access:switchboard');
+  setActiveBrowserAccessToken('');
+}
+
 /** The stable access origin used to key relay-paired switchboard access. */
 export function relayAccessOrigin(relayUrl: string): string {
   return new URL(relayUrl.replace(/^ws/, 'http')).origin;
@@ -217,7 +244,11 @@ export function relayAccessOrigin(relayUrl: string): string {
  * pairing, and persists the relay tunnel record. Real browser WebCrypto (noble
  * + libsodium) runs throughout.
  */
-export async function pairThroughRelay(code: string, relayUrl: string): Promise<void> {
+export async function pairThroughRelay(
+  code: string,
+  relayUrl: string,
+  deadlineMs = (typeof window !== 'undefined' && window.__CODOR_PAIR_DEADLINE_MS) || 20_000,
+): Promise<void> {
   const normalized = normalizeCode(code);
   if (!normalized) throw new Error('invalid pairing code');
   const { nameplate, secret } = splitCode(normalized);
@@ -234,11 +265,15 @@ export async function pairThroughRelay(code: string, relayUrl: string): Promise<
 
   try {
     await new Promise<void>((resolve, reject) => {
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       const fail = (error: unknown) => {
         if (settled) return;
         settled = true;
+        if (deadline) clearTimeout(deadline);
         reject(error instanceof Error ? error : new Error(String(error)));
       };
+      // A dead room (host never joins) would otherwise leave this pending forever.
+      deadline = setTimeout(() => fail(new Error('relay pairing timed out — the host never joined the room')), deadlineMs);
       socket.onerror = () => fail(new Error('relay pairing connection failed'));
       socket.onclose = () => fail(new Error('relay pairing closed before completion'));
       socket.onmessage = (event) => {
@@ -276,6 +311,7 @@ export async function pairThroughRelay(code: string, relayUrl: string): Promise<
               } satisfies StoredRelayRecord);
               socket.send(channel.seal({ type: 'done' }));
               settled = true;
+              if (deadline) clearTimeout(deadline);
               resolve();
             }
           } catch (error) {

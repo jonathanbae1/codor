@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   fetchDevices,
+  fetchRelayStatus,
   fetchPushConfig,
   mintPairingOffer,
   revokeDevice,
@@ -11,7 +12,8 @@ import {
   type PairingOffer,
   type PushConfig,
 } from '@runtime/api.js';
-import { currentBrowserAccessToken, ensureBrowserIdentity, unpairBrowser } from '@runtime/crypto.js';
+import { currentBrowserAccessToken, ensureBrowserIdentity, forgetRelayPairing, unpairBrowser } from '@runtime/crypto.js';
+import { relayActive } from '@runtime/relay-mode.js';
 import { enablePushNotifications, notificationPermission } from '@runtime/notifications.js';
 import {
   applyThemeChoice,
@@ -273,11 +275,17 @@ function DevicesSection(props: { token: () => string }) {
   const [qr, setQr] = useState<string>();
   const [revoking, setRevoking] = useState<DeviceSummary>();
   const [error, setError] = useState<string>();
+  // Only a code minted while the relay is ENABLED but came back local is degraded;
+  // a relay-disabled switchboard's local code is normal and gets no warning.
+  const [relayEnabled, setRelayEnabled] = useState(false);
 
   const refresh = (): void => {
     void fetchDevices({ token: props.token() })
       .then(setDevices)
       .catch(() => setError('Couldn’t load paired devices.'));
+    void fetchRelayStatus({ token: props.token() })
+      .then((status) => setRelayEnabled(status.enabled))
+      .catch(() => setRelayEnabled(false));
   };
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -337,6 +345,11 @@ function DevicesSection(props: { token: () => string }) {
           <p className="nx-dialog-body">Scan from the new device, or type the code at <Code>{offer.endpoint}/pair</Code>.</p>
           {qr !== undefined && <img className="nx-pair-qr" src={qr} alt="Pairing QR code" />}
           <p className="nx-pair-code" data-testid="pairing-code"><Code>{offer.pairing_code}</Code></p>
+          {relayEnabled && offer.doors === 'local' ? (
+            <p className="nx-field-note" data-testid="pairing-doors-local">
+              The relay is unreachable right now — this code works on your network only, not codor.app yet.
+            </p>
+          ) : null}
           <p className="nx-field-note">offer expires {clockTime(offer.expires_at)}</p>
         </Modal>
       )}
@@ -389,6 +402,18 @@ function PrivacySection() {
       <h2 id="s-privacy">Privacy</h2>
       <p className="nx-settings-sub">Unpairing deletes this browser’s keys and local state.</p>
       <div className="nx-settings-actions">
+        {relayActive() ? (
+          <Button
+            variant="quiet"
+            data-testid="repair-browser"
+            onClick={() => {
+              // Forget only the relay record (keeps SW/caches) → reload into code entry.
+              void forgetRelayPairing().finally(() => window.location.assign('/'));
+            }}
+          >
+            Re-pair this browser
+          </Button>
+        ) : null}
         <Button variant="danger" data-testid="unpair-browser" onClick={() => setConfirming(true)}>
           Unpair this browser
         </Button>

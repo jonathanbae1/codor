@@ -113,6 +113,13 @@ export interface PairingOffer {
   pairing_code: string;
   expires_at: string;
   switchboard_sign_pub: string;
+  /**
+   * Which doors this code opens: 'both' (works at codor.app AND locally) when the
+   * relay reserved a room, or 'local' when the relay was unreachable and the mint
+   * degraded to a local-only code. Absent on older switchboards → treat as 'both'
+   * to preserve today's copy. Surfaced honestly in Settings.
+   */
+  doors?: 'both' | 'local';
 }
 
 // harn:assume starting-agent-name-derives-one-valid-identity-v6 ref=actionable-rest-errors
@@ -234,6 +241,15 @@ export async function fetchLocalDirectories(
 
 export async function fetchDevices(options: ApiOptions): Promise<DeviceSummary[]> {
   return (await fetchJson<{ devices: DeviceSummary[] }>('/api/devices', options)).devices;
+}
+
+/**
+ * Whether the switchboard's blind relay is enabled. Lets Settings tell a NORMAL
+ * relay-disabled local code (doors:'local', no warning) apart from a DEGRADED
+ * relay-unreachable one (relay enabled but the mint couldn't reserve a room).
+ */
+export async function fetchRelayStatus(options: ApiOptions): Promise<{ enabled: boolean }> {
+  return fetchJson<{ enabled: boolean }>('/api/relay/status', options);
 }
 
 // harn:assume pairing-code-enrollment-surfaces ref=pairing-code-client-api
