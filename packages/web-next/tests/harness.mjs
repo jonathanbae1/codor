@@ -1530,6 +1530,25 @@ crypto.keys.onPeerRevoked((deviceId) => {
 });
 relayLink.start();
 
+// A stub voice provider: the real /api/voice/transcribe endpoint, but a
+// distinct counter-suffixed transcript per call (so multi-segment assertions are
+// real) with a small delay (so the "waiting for transcription" state is
+// observable) instead of any paid upstream call.
+let voiceCall = 0;
+const voiceProviders = [{
+  id: 'codex',
+  label: 'Codex (ChatGPT login)',
+  status: async () => ({ available: true }),
+  create: () => ({
+    id: 'codex',
+    label: 'Codex (ChatGPT login)',
+    transcribe: async () => {
+      const nth = (voiceCall += 1);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      return { text: `dictation ${String(nth)}` };
+    },
+  }),
+}];
 await startServer({
   daemon,
   token: TOKEN,
@@ -1547,6 +1566,8 @@ await startServer({
     { token: VIEWER_TOKEN, member_id: viewer.id },
     { token: RECOVERY_VIEWER_TOKEN, member_id: onlooker.id },
   ],
+  voiceProvider: 'codex',
+  voiceProviders,
 });
 console.log(`  relay:  ${mockRelay.url}`);
 
