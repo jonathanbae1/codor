@@ -128,6 +128,7 @@ async function requestError(response: Response): Promise<Error> {
 // harn:end starting-agent-name-derives-one-valid-identity-v6
 
 async function fetchJson<T>(path: string, options: ApiOptions): Promise<T> {
+  // relayFetch tunnels this to the relay in relay mode (page origin or not).
   const origin = options.origin ?? window.location.origin;
   const res = await relayFetch(`${origin}${path}`, {
     headers: { authorization: `Bearer ${options.token}` },
@@ -142,6 +143,7 @@ async function sendJson<T>(
   body: unknown,
   options: ApiOptions,
 ): Promise<T> {
+  // relayFetch tunnels this to the relay in relay mode (page origin or not).
   const origin = options.origin ?? window.location.origin;
   const response = await relayFetch(`${origin}${path}`, {
     method,

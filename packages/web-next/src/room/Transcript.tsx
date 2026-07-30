@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import type { Connection } from '@runtime/ws.js';
 
 import { fetchMessageHistory } from '@runtime/api.js';
+import { relayFetch } from '@runtime/relay-transport.js';
 import {
   compactRunRow,
   diffStat,
@@ -147,7 +148,7 @@ export function Transcript(props: { room: string; token: () => string; connectio
   useEffect(() => {
     let live = true;
     setHydratedPins([]);
-    void fetch(`/api/rooms/${encodeURIComponent(props.room)}/messages?pinned=1`, {
+    void relayFetch(`/api/rooms/${encodeURIComponent(props.room)}/messages?pinned=1`, {
       headers: { authorization: `Bearer ${props.token()}` },
     })
       .then((res) => (res.ok ? res.json() as Promise<{ messages: Message[] }> : { messages: [] }))

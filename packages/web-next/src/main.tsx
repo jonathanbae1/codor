@@ -13,6 +13,7 @@ import {
   resolveStartupRoom,
 } from './app/startup.js';
 import { checkBrowserCompatibility, CompatibilityGate } from './app/compatibility.js';
+import { StartupConnecting } from './surfaces/StartupConnecting.js';
 import { RoomPage } from './room/RoomPage.js';
 import './styles/tokens.css';
 import './styles/base.css';
@@ -51,6 +52,12 @@ async function surfaceFor(path: string, room: string, token: string) {
 }
 
 async function render(): Promise<void> {
+  // Paint a visible connecting state immediately so the root is never blank
+  // during the bootstrap — the relay path can await a full keepalive cycle while
+  // a stale host reconnects, and deferring the whole React render left a paired
+  // browser staring at nothing for minutes.
+  const reactRoot = createRoot(rootElement);
+  reactRoot.render(<StrictMode><StartupConnecting /></StrictMode>);
   await initRelayMode(); // relay-paired browsers route transport through the tunnel
   const token = await resolveAccessToken();
   if (token !== '') await checkBrowserCompatibility(token);
@@ -115,7 +122,7 @@ async function render(): Promise<void> {
     canonicalizeRoom(path, startup);
     return surfaceFor(path, startup, token);
   })();
-  createRoot(rootElement).render(
+  reactRoot.render(
     <StrictMode><CompatibilityGate>{page}</CompatibilityGate></StrictMode>,
   );
 }

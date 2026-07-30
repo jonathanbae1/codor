@@ -6,9 +6,9 @@
 // serves) at it.
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -33,6 +33,11 @@ const readPort = (name, fallback) => {
 };
 const API_PORT = readPort('CODOR_NEXT_E2E_API_PORT', 28_137);
 const CONTROL_PORT = readPort('CODOR_NEXT_E2E_CONTROL_PORT', 28_138);
+// A SEPARATE origin serving the SPA, distinct from the switchboard — the
+// production topology (codor.app on Pages vs a self-hosted switchboard). Every
+// other test serves the SPA from the switchboard itself, which masks bugs where
+// a REST call must go through the tunnel rather than the page origin.
+const SPA_PORT = readPort('CODOR_NEXT_E2E_SPA_PORT', 28_139);
 const TOKEN = 'next-e2e-token';
 
 const dir = mkdtempSync(join(tmpdir(), 'codor-next-e2e-'));
@@ -1544,6 +1549,36 @@ await startServer({
   ],
 });
 console.log(`  relay:  ${mockRelay.url}`);
+
+// Separate SPA origin: serve dist/ files, and fall back to index.html for every
+// other path (Cloudflare Pages' `/* /index.html 200`). A direct /api/* fetch here
+// therefore returns HTML 200, exactly like production — so the relay journey run
+// against this origin proves REST actually tunnels rather than accidentally
+// succeeding against a same-origin switchboard.
+const SPA_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json',
+};
+createServer((req, res) => {
+  const urlPath = new URL(req.url, 'http://x').pathname;
+  const filePath = join(staticRoot, urlPath);
+  if (urlPath !== '/' && filePath.startsWith(staticRoot) && existsSync(filePath) && statSync(filePath).isFile()) {
+    res.writeHead(200, { 'content-type': SPA_MIME[extname(filePath)] ?? 'application/octet-stream' });
+    res.end(readFileSync(filePath));
+    return;
+  }
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(readFileSync(join(staticRoot, 'index.html')));
+}).listen(SPA_PORT, '127.0.0.1');
+console.log(`  spa-origin: http://127.0.0.1:${SPA_PORT} (separate from the switchboard)`);
 
 console.log(`web-next harness ready
   data:   ${dir}

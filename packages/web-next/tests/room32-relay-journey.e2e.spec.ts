@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
+// The SPA is served from its OWN origin, distinct from the switchboard — the
+// production topology (codor.app on Pages vs the self-hosted switchboard). This
+// is what forces every REST call through the tunnel: a direct fetch to this
+// origin's /api/* hits the Pages-style index.html fallback (HTML 200), which is
+// the exact failure that same-origin test harnesses masked.
+const SPA_ORIGIN = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_SPA_PORT ?? '28139'}`;
 
 async function control<T = unknown>(path: string): Promise<T> {
   const response = await fetch(`${CONTROL}${path}`, {
@@ -30,7 +36,16 @@ test.describe('relay tunnel journey', () => {
       (window as unknown as { __CODOR_RELAY_URL?: string }).__CODOR_RELAY_URL = url;
     }, relayUrl);
 
-    await page.goto('/');
+    // Any direct /api/* request to the SPA origin means a REST call escaped the
+    // tunnel — the production bug. Fail the run if even one is attempted.
+    const directApiHits: string[] = [];
+    page.on('request', (request) => {
+      const url = request.url();
+      if (url.startsWith(`${SPA_ORIGIN}/api/`)) directApiHits.push(url);
+    });
+
+    // Load the SPA from its OWN origin (not the switchboard) — production topology.
+    await page.goto(`${SPA_ORIGIN}/`);
     await expect(page.getByTestId('landing-page')).toBeVisible();
 
     // Pair through the relay — real browser CPace PAKE runs here (webcrypto).
@@ -67,5 +82,12 @@ test.describe('relay tunnel journey', () => {
     await expect(page.getByTestId('composer-send')).toBeEnabled({ timeout: 30_000 });
     await input.press('Enter');
     await expect(page.getByTestId('timeline')).toContainText('back after recovery', { timeout: 20_000 });
+
+    // The relay-mode data path — channel list, summary, compatibility, message
+    // history, posts — all went over the tunnel; nothing leaked to a direct /api
+    // fetch on the hosted origin. (The pre-pairing landing's local trusted-pairing
+    // probe runs before relay mode exists and is a separate, harmless concern.)
+    const dataLeaks = directApiHits.filter((u) => !u.includes('/api/pairing/'));
+    expect(dataLeaks, `REST escaped the tunnel to the page origin: ${dataLeaks.join(', ')}`).toEqual([]);
   });
 });
