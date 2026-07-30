@@ -4,6 +4,8 @@
 // is one batch, mirroring attachments.ts. Framework-free so the encoder and the
 // dictation state machine are unit-testable without a DOM or a network.
 
+import { relayFetch } from '@runtime/relay-transport.js';
+
 export interface VoiceProviderMetadata {
   id: string;
   label: string;
@@ -16,9 +18,9 @@ export interface VoiceCatalog {
   providers: VoiceProviderMetadata[];
 }
 
-/** GET the operator-selected provider catalog (bearer auth, same origin). */
+/** GET the operator-selected provider catalog (bearer auth; tunnels in relay mode). */
 export async function fetchVoiceProviders(token: string): Promise<VoiceCatalog> {
-  const res = await fetch('/api/voice/providers', {
+  const res = await relayFetch('/api/voice/providers', {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`voice catalog failed (${String(res.status)})`);
@@ -28,7 +30,7 @@ export async function fetchVoiceProviders(token: string): Promise<VoiceCatalog> 
 /** POST the WAV bytes as a raw body; returns the transcript or throws the
  *  server's `{ error }` message (same shape as uploadAttachment). */
 export async function transcribeVoice(token: string, wav: Uint8Array): Promise<string> {
-  const res = await fetch('/api/voice/transcribe', {
+  const res = await relayFetch('/api/voice/transcribe', {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'audio/wav' },
     body: wav as BodyInit,
