@@ -32,6 +32,7 @@ import {
 import { SETUP_STAGE_TITLES, renderPairingCard, type SetupAccessOption } from './setup-ui.js';
 import { renderTerminalQr } from './terminal-qr.js';
 import { copyToClipboard } from './clipboard.js';
+import { defaultLauncherIo, installLauncher, type LauncherIo } from './launcher-install.js';
 
 const HARNESSES = ['claude', 'codex', 'opencode', 'gemini', 'copilot', 'cursor-agent', 'agy'] as const;
 const LAUNCH_AGENT_LABEL = 'app.codor.switchboard';
@@ -63,6 +64,7 @@ export interface SetupOverrides {
   probe?(endpoint: string): Promise<boolean>;
   runtime?: RuntimePaths;
   installIo?: InstallIo;
+  launcherIo?: LauncherIo;
   sleep?(milliseconds: number): Promise<void>;
   streams?: SetupSessionStreams;
   uid?: number;
@@ -677,6 +679,8 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   // still read from the source runtime, which exists now.
   const version = overrides.version ?? runtimeVersion(runtime);
   const installIo = overrides.installIo ?? defaultInstallIo;
+  const launcherIo = overrides.launcherIo ?? defaultLauncherIo;
+  const pathEntries = (options.env.PATH ?? '').split(platform === 'win32' ? ';' : ':').filter((entry) => entry !== '');
   const installSource = resolveInstallSource(runtime);
   const serviceLocation = installSource.durable ? installSource.installRoot : durableRuntimeLocation(dataDir);
   const serviceRuntime = installSource.durable ? runtime : packageRuntimePaths(installedCliRoot(serviceLocation));
@@ -851,6 +855,17 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       ? `using the Codor runtime in place at ${result.location}`
       : `${result.action} the Codor ${result.version} runtime at ${result.location}`);
     prepareStep(log);
+    // Install the user-facing `codor` launcher pinned to the SAME Node + CLI the
+    // service runs, and make ~/.local/bin resolvable, so `codor` works in a new shell
+    // after setup. POSIX only — Windows launcher/PATH handling is out of scope.
+    if (platform !== 'win32') {
+      const launcher = installLauncher({
+        home, nodePath, cliEntrypoint: serviceRuntime.cliEntrypoint, platform, pathEntries, log, io: launcherIo,
+      });
+      log(launcher.action === 'unchanged'
+        ? `codor launcher up to date at ${launcher.path}`
+        : `${launcher.action} the codor launcher at ${launcher.path}`);
+    }
     return `Codor ${result.version} at ${result.location}`;
   };
   // harn:end setup-installs-durable-per-user-runtime-atomically
