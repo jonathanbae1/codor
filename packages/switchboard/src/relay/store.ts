@@ -12,6 +12,11 @@ import { privateJsonWrite } from '../crypto/keys.js';
 // across restarts so paired devices keep connecting; rotate() replaces session_id
 // (paired devices must then re-pair).
 export const DEFAULT_RELAY_URL = 'https://relay.codor.app';
+// The workers.dev alias terminates at the same Worker + Durable Objects as the
+// canonical hostname, but its SNI is NOT filtered on networks that reset the vanity
+// name for non-browser TLS (a Node dial exposes SNI; a browser gets ECH and does not).
+// So a Node switchboard can reach the relay here when relay.codor.app is unreachable.
+export const DEFAULT_RELAY_ALIAS = 'https://codor-relay.junweixiong.workers.dev';
 const RELAY_FILE = 'relay.json';
 const SESSION_ID_BYTES = 32;
 
@@ -33,6 +38,10 @@ export interface RelayRecord {
   session_id: string;
   host_static: { pub: string; priv: string };
   devices: RelayDeviceRecord[];
+  /** The dial URL that last established a session — the reachability "winner",
+   *  a member of {DEFAULT_RELAY_URL, DEFAULT_RELAY_ALIAS}. Meaningful only while
+   *  relay_url is the default canonical; absent means dial the configured URL. */
+  dial_url?: string;
 }
 
 export interface RelayStoreOptions {
@@ -98,6 +107,46 @@ export class RelayStore {
     return this.record.relay_url;
   }
 
+  /**
+   * The URL RelayLink should dial: the cached winner when the configured URL is the
+   * default canonical AND the winner is a member of the {canonical, alias} pair;
+   * otherwise the configured URL. It NEVER serves an alias winner for a custom
+   * relay_url — the store, not the caller, enforces that scope.
+   */
+  get dialUrl(): string {
+    if (
+      this.record.relay_url === DEFAULT_RELAY_URL &&
+      (this.record.dial_url === DEFAULT_RELAY_URL || this.record.dial_url === DEFAULT_RELAY_ALIAS)
+    ) {
+      return this.record.dial_url;
+    }
+    return this.record.relay_url;
+  }
+
+  /** The other member of the {canonical, alias} pair to fail over to, or undefined for
+   *  a custom relay_url (which must never fall back to our alias). */
+  get dialFallback(): string | undefined {
+    if (this.record.relay_url !== DEFAULT_RELAY_URL) return undefined;
+    return this.dialUrl === DEFAULT_RELAY_ALIAS ? DEFAULT_RELAY_URL : DEFAULT_RELAY_ALIAS;
+  }
+
+  /** Cache the URL that established a session as the winner. A no-op unless the
+   *  configured URL is the default canonical and `url` is a member of the pair; a
+   *  custom relay_url instead drops any stale winner. */
+  setDialWinner(url: string): void {
+    if (this.record.relay_url !== DEFAULT_RELAY_URL) {
+      if (this.record.dial_url !== undefined) {
+        this.record.dial_url = undefined;
+        this.write();
+      }
+      return;
+    }
+    if (url !== DEFAULT_RELAY_URL && url !== DEFAULT_RELAY_ALIAS) return;
+    if (this.record.dial_url === url) return;
+    this.record.dial_url = url;
+    this.write();
+  }
+
   /** 64-hex session id (empty before first enable). */
   get sessionId(): string {
     return this.record.session_id;
@@ -121,7 +170,10 @@ export class RelayStore {
 
   /** Enable the relay tier, generating session id + host static keypair on first use. */
   enable(relayUrl?: string): void {
-    if (relayUrl) this.record.relay_url = relayUrl;
+    if (relayUrl && relayUrl !== this.record.relay_url) {
+      this.record.relay_url = relayUrl;
+      this.record.dial_url = undefined; // a URL change invalidates the cached winner
+    }
     this.ensureMaterial();
     this.record.enabled = true;
     this.write();
@@ -136,6 +188,7 @@ export class RelayStore {
   setRelayUrl(url: string): void {
     if (this.record.relay_url === url) return;
     this.record.relay_url = url;
+    this.record.dial_url = undefined; // a URL change invalidates the cached winner
     this.write();
   }
 

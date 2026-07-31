@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deviceKeyId } from '@codor/tunnel';
 
-import { DEFAULT_RELAY_URL, RelayStore } from './store.js';
+import { DEFAULT_RELAY_ALIAS, DEFAULT_RELAY_URL, RelayStore } from './store.js';
 
 let dir: string;
 beforeEach(() => {
@@ -88,5 +88,52 @@ describe('RelayStore', () => {
     store.disable();
     expect(store.enabled).toBe(false);
     expect(new RelayStore(dir).sessionId).toBe(store.sessionId); // material retained
+  });
+});
+
+describe('RelayStore dial winner (P6b, scoped to the default canonical)', () => {
+  const enableDefault = (): RelayStore => {
+    const store = new RelayStore(dir, { randomBytes: seq([fill(0x11, 32), fill(0x22, 32)]) });
+    store.enable(); // no URL → keeps DEFAULT_RELAY_URL
+    return store;
+  };
+
+  it('defaults to the canonical URL with the alias as the fallback partner', () => {
+    const store = enableDefault();
+    expect(store.dialUrl).toBe(DEFAULT_RELAY_URL);
+    expect(store.dialFallback).toBe(DEFAULT_RELAY_ALIAS);
+  });
+
+  it('caches an alias winner and flips the fallback, persisting across reloads', () => {
+    const store = enableDefault();
+    store.setDialWinner(DEFAULT_RELAY_ALIAS);
+    expect(store.dialUrl).toBe(DEFAULT_RELAY_ALIAS);
+    expect(store.dialFallback).toBe(DEFAULT_RELAY_URL); // symmetric: can find its way back
+    const reloaded = new RelayStore(dir);
+    expect(reloaded.dialUrl).toBe(DEFAULT_RELAY_ALIAS);
+  });
+
+  it('ignores a winner that is not a member of the canonical/alias pair', () => {
+    const store = enableDefault();
+    store.setDialWinner('https://evil.example');
+    expect(store.dialUrl).toBe(DEFAULT_RELAY_URL);
+  });
+
+  it('never serves a cached winner for a custom relay_url, and never offers a fallback', () => {
+    const store = new RelayStore(dir, { randomBytes: seq([fill(0x11, 32), fill(0x22, 32)]) });
+    store.enable(); // default canonical first
+    store.setDialWinner(DEFAULT_RELAY_ALIAS); // stale winner cached
+    store.setRelayUrl('wss://relay.mine.example'); // operator switches to a custom relay
+    expect(store.dialUrl).toBe('wss://relay.mine.example'); // NOT the alias winner
+    expect(store.dialFallback).toBeUndefined(); // a custom URL never falls back to our alias
+    store.setDialWinner(DEFAULT_RELAY_ALIAS); // and can't be re-poisoned
+    expect(store.dialUrl).toBe('wss://relay.mine.example');
+    expect(new RelayStore(dir).dialUrl).toBe('wss://relay.mine.example'); // stale winner dropped on disk
+  });
+
+  it('back-compat: a record without a winner dials the configured URL', () => {
+    const store = new RelayStore(dir, { randomBytes: seq([fill(0x11, 32), fill(0x22, 32)]) });
+    store.enable();
+    expect(store.dialUrl).toBe(DEFAULT_RELAY_URL); // absent dial_url ⇒ configured URL
   });
 });

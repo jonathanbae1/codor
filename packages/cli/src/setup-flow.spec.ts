@@ -1,6 +1,13 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
+import { RelayStore, type PairingOffer } from '@codor/switchboard';
+
 import { SetupFlow } from './setup-flow.js';
+import { runSetup, type SetupOverrides } from './setup.js';
 
 const flow = () => new SetupFlow([
   { title: 'Check this computer' },
@@ -147,5 +154,99 @@ describe('completion', () => {
     f.markDone(0);
     f.next();
     expect(f.complete).toBe(false);
+  });
+});
+
+// A POSIX runSetup harness with mocked service commands + probe, so the full flow
+// runs to the pairing step without a real daemon. relayOffer is injected to control
+// the universal-mint path.
+function posixOverrides(root: string, relayOffer?: SetupOverrides['relayOffer']): SetupOverrides {
+  const repoRoot = join(root, 'repo');
+  mkdirSync(join(repoRoot, 'packages', 'cli', 'dist'), { recursive: true });
+  mkdirSync(join(repoRoot, 'packages', 'web-next', 'dist'), { recursive: true });
+  mkdirSync(join(repoRoot, 'packaging', 'systemd'), { recursive: true });
+  writeFileSync(join(repoRoot, 'packages', 'cli', 'dist', 'index.js'), '', 'utf8');
+  writeFileSync(join(repoRoot, 'packages', 'web-next', 'dist', 'index.html'), '', 'utf8');
+  writeFileSync(
+    join(repoRoot, 'packaging', 'systemd', 'codor.service'),
+    'WorkingDirectory=/x\nEnvironmentFile=/x\nExecStart=/usr/bin/node\n',
+    'utf8',
+  );
+  return {
+    exec: () => '',
+    home: join(root, 'home'),
+    nodePath: join(root, 'node'),
+    platform: 'linux',
+    randomToken: () => 'a'.repeat(64),
+    renderQr: () => '[qr]',
+    repoRoot,
+    probe: async () => true,
+    sleep: async () => undefined,
+    which: () => undefined,
+    relayOffer,
+  };
+}
+
+const runPosix = async (root: string, opts: { noRelay?: boolean; relayOffer?: SetupOverrides['relayOffer'] }): Promise<string[]> => {
+  const out: string[] = [];
+  await runSetup({
+    dryRun: false,
+    yes: true,
+    access: 'localhost',
+    noRelay: opts.noRelay,
+    env: { HOME: join(root, 'home'), PATH: '/usr/bin' },
+    out: (line) => out.push(line),
+    overrides: posixOverrides(root, opts.relayOffer),
+  });
+  return out;
+};
+
+const universalOffer: PairingOffer = {
+  endpoint: 'https://sw.test',
+  pairing_token: 'tok',
+  pairing_code: 'AB23-CD45',
+  expires_at: 'later',
+  switchboard_sign_pub: 'sp',
+  doors: 'both',
+};
+
+describe('runSetup relay-on-by-default (P6b)', () => {
+  it('enables the relay and mints a universal first code through the daemon by default', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-setup-relay-'));
+    try {
+      let hit = false;
+      const out = await runPosix(root, { relayOffer: async () => { hit = true; return universalOffer; } });
+      const text = out.join('\n');
+      expect(hit).toBe(true); // minted through the daemon offers API
+      expect(text).toContain('AB23-CD45');
+      expect(text).toMatch(/works at codor\.app/);
+      expect(new RelayStore(join(root, 'home', '.codor')).enabled).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('with noRelay leaves the relay off and mints a local-only code without calling the daemon', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-setup-norelay-'));
+    try {
+      let hit = false;
+      const out = await runPosix(root, { noRelay: true, relayOffer: async () => { hit = true; return universalOffer; } });
+      expect(hit).toBe(false); // opt-out never reaches the daemon
+      expect(out.join('\n')).toMatch(/network only/);
+      expect(new RelayStore(join(root, 'home', '.codor')).enabled).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('degrades to a labelled local-only code when the relay is enabled but the offer is unavailable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-setup-degrade-'));
+    try {
+      const out = await runPosix(root, { relayOffer: async () => undefined });
+      expect(out.join('\n')).toMatch(/network only/);
+      expect(new RelayStore(join(root, 'home', '.codor')).enabled).toBe(true); // enabled, but offer degraded
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

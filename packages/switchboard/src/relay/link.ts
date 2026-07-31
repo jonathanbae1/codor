@@ -122,6 +122,8 @@ export class RelayLink {
   private attempt = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private running = false;
+  private opened = false;        // did the current session socket reach onOpen?
+  private failoverNext = false;  // the next connect should try the other {canonical,alias} member
 
   constructor(deps: RelayLinkDeps) {
     this.deps = {
@@ -183,24 +185,34 @@ export class RelayLink {
     return base + Math.floor(this.deps.jitter() * BACKOFF_BASE_MS);
   }
 
-  private sessionUrl(): string {
-    const { store } = this.deps;
-    const base = store.relayUrl.replace(/\/$/, '');
-    return `${base}/v1/session/${store.sessionId}/ws?role=host`;
+  private sessionUrl(base: string): string {
+    const trimmed = base.replace(/\/$/, '');
+    return `${trimmed}/v1/session/${this.deps.store.sessionId}/ws?role=host`;
   }
 
   private connect(): void {
     if (!this.running) return;
+    const { store } = this.deps;
+    // Dial the store's cached winner; after a connect failure alternate to the OTHER
+    // member of the {canonical, alias} pair (default-URL only — a custom relay_url has
+    // no fallback). Symmetric: whichever member opens becomes the cached winner, so a
+    // host can find its way back to canonical after its network stops filtering.
+    const base = this.failoverNext && store.dialFallback ? store.dialFallback : store.dialUrl;
+    this.opened = false;
     let socket: RelaySocket;
     try {
-      socket = this.deps.dialSession(this.sessionUrl());
+      socket = this.deps.dialSession(this.sessionUrl(base));
     } catch (error) {
+      this.failoverNext = store.dialFallback !== undefined ? !this.failoverNext : false;
       this.scheduleReconnect();
       this.deps.onError?.(error);
       return;
     }
     this.socket = socket;
     socket.onOpen(() => {
+      this.opened = true;
+      this.failoverNext = false;
+      store.setDialWinner(base); // cache whichever member established the session
       this.attempt = 0;
       // Probe the idle session link so a silently half-open socket (relay or NAT
       // dropping state without a close frame) is surfaced and reconnected rather
@@ -243,6 +255,12 @@ export class RelayLink {
     this.socket = undefined;
     for (const conn of [...this.conns.values()]) this.teardownConn(conn);
     this.conns.clear();
+    // A socket that never opened is a connect failure → alternate to the other member
+    // next time (default-URL only). A socket that HAD opened is a mid-session drop →
+    // reconnect to the same cached winner (it worked; the drop is likely transient).
+    if (!this.opened && this.deps.store.dialFallback !== undefined) {
+      this.failoverNext = !this.failoverNext;
+    }
     this.scheduleReconnect();
   }
 

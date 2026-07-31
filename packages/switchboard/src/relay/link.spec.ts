@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionInitiator, generateTunnelKeypair } from '@codor/tunnel';
 
 import { RelayLink, type RelaySocket } from './link.js';
-import { RelayStore } from './store.js';
+import { DEFAULT_RELAY_ALIAS, RelayStore } from './store.js';
 
 let dir: string;
 beforeEach(() => {
@@ -197,6 +197,58 @@ describe('RelayLink keepalive (§4.1 half-open detection)', () => {
       relay.deliver(new TextEncoder().encode('codor-pong')); // a pong resets the probe
     }
     expect(reconnects).toHaveLength(0); // never declared dead
+    link.stop();
+  });
+});
+
+describe('RelayLink dial failover (P6b, default canonical only)', () => {
+  const failoverLink = (store: RelayStore) => {
+    const dialed: string[] = [];
+    const socks: ReturnType<typeof fakeSocket>[] = [];
+    let pending: (() => void) | undefined;
+    const link = new RelayLink({
+      store,
+      loopbackPort: 1,
+      isDeviceActive: () => true,
+      jitter: () => 0,
+      dialSession: (url) => {
+        dialed.push(url);
+        const f = fakeSocket();
+        socks.push(f);
+        return f.socket;
+      },
+      setTimeoutFn: (cb) => {
+        pending = cb;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeoutFn: () => {},
+    });
+    return { link, dialed, socks, fire: () => pending?.() };
+  };
+
+  it('fails over canonical→alias on a connect failure and caches the alias winner', () => {
+    const store = new RelayStore(dir);
+    store.enable(); // default canonical
+    const { link, dialed, socks, fire } = failoverLink(store);
+    link.start();
+    expect(dialed[0]).toContain('relay.codor.app'); // dials the canonical winner first
+    socks[0].socket.close(); // connect failure — never opened
+    fire(); // the scheduled reconnect runs
+    expect(dialed[1]).toContain('workers.dev'); // alternated to the alias
+    socks[1].open(); // the alias establishes the session
+    expect(store.dialUrl).toBe(DEFAULT_RELAY_ALIAS); // winner cached for next time
+    link.stop();
+  });
+
+  it('a custom relay_url never falls back to the alias', () => {
+    const store = new RelayStore(dir);
+    store.enable('wss://relay.mine.example');
+    const { link, dialed, socks, fire } = failoverLink(store);
+    link.start();
+    socks[0].socket.close();
+    fire();
+    expect(dialed.every((url) => url.includes('relay.mine.example'))).toBe(true);
+    expect(dialed.some((url) => url.includes('workers.dev'))).toBe(false);
     link.stop();
   });
 });

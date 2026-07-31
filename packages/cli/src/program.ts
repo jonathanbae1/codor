@@ -548,12 +548,15 @@ export function createProgram(context: CliContext = {}): Command {
     .description('install and start the local switchboard service, then pair your first browser')
     .option('--dry-run', 'print every action and generated service content without changing the host')
     .option('--yes', 'approve every setup mutation for unattended use')
+    .option('--no-relay', 'keep the blind relay off; mint a local-only first code (works on your network only)')
     .addOption(new Option('--access <method>', 'browser access method').choices(['localhost', 'tailscale']))
-    .action(async (options: { access?: SetupAccess; dryRun?: boolean; yes?: boolean }) => {
+    .action(async (options: { access?: SetupAccess; dryRun?: boolean; yes?: boolean; relay?: boolean }) => {
       await runSetup({
         access: options.access,
         dryRun: options.dryRun === true,
         env,
+        // Commander maps --no-relay to `relay === false`; default (flag absent) is undefined → relay on.
+        noRelay: options.relay === false,
         out,
         overrides: {
           ...context.setup,
