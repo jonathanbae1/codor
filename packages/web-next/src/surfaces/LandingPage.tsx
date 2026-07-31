@@ -87,6 +87,10 @@ export function LandingPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // Trusted same-origin enrollment only makes sense on a self-hosted,
+    // switchboard-served SPA. The hosted app's origin is the relay (no switchboard
+    // to trust), so skip the probe there rather than fire a cross-purpose request.
+    if (relayUrlConfigured()) return undefined;
     let current = true;
     void tryTrustedBrowserPairing().then(
       (paired) => { if (current && paired) window.location.replace('/'); },

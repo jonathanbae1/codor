@@ -446,3 +446,39 @@ The switchboard accepts at most five exchange attempts per client connection
 identity in a rolling minute. Treat the displayed code as a secret until the
 new browser finishes pairing.
 <!-- harn:end pairing-codes-redacted-from-content -->
+
+## One code, every door
+
+The code from `codor pair` is universal: the **same** `XXXX-XXXX` pairs a browser
+whether it reaches this switchboard directly (localhost, or across your Tailscale
+network) or through the hosted app at codor.app over the blind relay. You do not pick
+a "relay code" versus a "local code" — you paste one code into whichever browser you
+are pairing, and it works.
+
+Under the hood the code is a single pairing grant registered at both doors; consuming
+either door burns it, so a code can pair exactly one browser once. If the relay is
+unreachable when you run `codor pair`, the code degrades to local-only (LAN/Tailscale)
+rather than failing — it still pairs a browser on your private network. The wire
+mechanics are documented in the [relay protocol reference](RELAY-PROTOCOL.md).
+
+## Multiple computers (hosted app)
+
+When you use the hosted app at codor.app, it remembers **every** computer you have
+paired, not just the last one. Each computer is its own switchboard reached over its
+own tunnel; the app keeps their keys in separate namespaces and shows a switcher in
+the channel rail:
+
+- **Add a computer** — run `codor pair` on the other machine and paste its code into
+  "Add a computer". The newly paired computer becomes active; the app reloads into it.
+- **Switch** — pick a computer from the switcher to reload into its session and tunnel.
+  The most recently paired computer is the default on a fresh load.
+- **Rename** — double-click a computer's name to give it a label (it defaults to
+  "Computer 1", "Computer 2", …).
+- **Forget** — remove a computer; the app falls back to the next one, or to the pairing
+  screen when the last is forgotten.
+
+Every switch and pairing is crash-safe: the app never presents one computer's identity
+with another's channel keys, and switching between tabs cannot corrupt the stored set
+(see the [relay protocol reference](RELAY-PROTOCOL.md)).
+A self-hosted, switchboard-served browser (the direct path) pairs to one switchboard
+and shows no switcher.

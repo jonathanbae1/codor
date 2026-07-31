@@ -142,6 +142,13 @@ describe('relay-store (generation-swapped)', () => {
     expect(activeRelay(kv)).toBe('A');
   });
 
+  it('rejects a computer id containing the key-path separator', async () => {
+    const kv = mapKv();
+    await expect(recordPairedComputer(kv, { id: 'a:b', label: 'x', paired_at: '1' }, material('a:b'))).rejects.toThrow(/must not contain/);
+    // Nothing was written — the guard fires before any archive/index mutation.
+    expect(kv.dump().size).toBe(0);
+  });
+
   it('leaves a direct-paired browser (no relay index) untouched on boot', async () => {
     const kv = mapKv();
     // A self-hosted/direct pairing: peer + rooms + access in the globals, but NO

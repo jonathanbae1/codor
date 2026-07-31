@@ -343,6 +343,33 @@ filtered network hides this failure behind a working page load.
 6. Over one day of normal use, sanity-check the relay's request count against the `PLAN` §5 budget
    (idle heartbeat plus session frames) to confirm there is no runaway polling.
 
+## Universal pairing code and multi-computer switcher
+
+Status: **not run — pair this with the blind tunnel relay check above** (needs a real relay-reachable
+switchboard for the relay door, plus a LAN/Tailscale reach for the local door). Verifies the P1
+universal code (one code, both doors) and the P3 hosted multi-computer switcher end to end. See
+[docs/RELAY-PROTOCOL.md](docs/RELAY-PROTOCOL.md) §8–§9 for the contract.
+
+1. **One code, both doors are alternates.** Run `codor pair` once. Paste the single code into the
+   hosted app at codor.app (relay door) and confirm it pairs. Run `codor pair` again for a fresh code;
+   this time paste it into a browser opened directly on the LAN/Tailscale origin (local door) and
+   confirm it pairs. Then prove exclusivity: mint one code, consume it at one door, and confirm the
+   *same* code is refused at the other door (one grant, one burn) and after ten minutes (expiry).
+2. **Relay-unreachable degrade.** With the relay disabled/unreachable, run `codor pair` and confirm it
+   still prints a code that pairs a browser on the LAN/Tailscale origin (local-only degrade), rather
+   than failing.
+3. **Add a second computer.** In the hosted app, pair computer A. On a second machine run `codor pair`
+   and use the switcher's "Add a computer" to paste B's code. Confirm B becomes the active computer
+   (last-paired default), a message round-trips over B's tunnel, and the switcher lists both.
+4. **Switch and isolate.** Switch back to A, post a message, and confirm it round-trips over A's own
+   tunnel — not B's. Confirm each computer shows its own channels; neither inherits the other's.
+5. **Rename and forget.** Rename a computer inline and confirm the label persists across a reload.
+   Forget B and confirm it disappears while A stays active; forget the last computer and confirm the
+   app drops to the pairing screen.
+6. **Direct pairing survives a reboot.** On a self-hosted, switchboard-served browser (direct path,
+   no relay), pair once, then fully reload. Confirm the browser is still paired (it authenticates and
+   reaches its channel, never dropping to the pairing screen) and that no computer switcher renders.
+
 ## Public Web Push relay
 
 Status on 2026-07-11: **not run**, by the M3 operator directive. This verifies the self-hosted

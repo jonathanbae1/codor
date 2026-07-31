@@ -57,6 +57,17 @@ const GLOBAL_SINGLETONS = ['relay', 'peer:switchboard', 'access:switchboard'] as
 const genRoot = (id: string, gen: number): string => `computer:${id}:${gen}:`;
 const archiveKey = (id: string, gen: number, cls: string): string => `${genRoot(id, gen)}${cls}`;
 
+/**
+ * The id is a PATH SEGMENT in `computer:<id>:<gen>:*`, so a colon inside it would
+ * let one computer's `computer:<id>:` prefix match another computer's archive
+ * (and confuse the generation parse). Device ids are colon-free base64url, so this
+ * only fires on a contract violation — but it makes the key-path invariant explicit
+ * and unbreakable rather than merely conventional.
+ */
+function assertPlainId(id: string): void {
+  if (id.includes(':')) throw new Error(`relay computer id must not contain ':' (got ${JSON.stringify(id)})`);
+}
+
 function isRelayIndex(value: unknown): value is RelayIndex {
   return (
     typeof value === 'object' && value !== null &&
@@ -160,6 +171,7 @@ export async function recordPairedComputer(
   computer: Omit<RelayComputer, 'gen'>,
   material: RelayMaterial,
 ): Promise<void> {
+  assertPlainId(computer.id);
   return serialize(kv, async () => {
     const index = await readIndex(kv);
     const gen = (index.computers.find((c) => c.id === computer.id)?.gen ?? 0) + 1;
@@ -210,6 +222,7 @@ export async function forgetComputerStore(kv: Kv, id: string): Promise<RelayComp
  * wipe a direct pairing's globals.
  */
 export async function migrateIfNeeded(kv: Kv, legacy: Omit<RelayComputer, 'gen'>): Promise<void> {
+  assertPlainId(legacy.id);
   return serialize(kv, async () => {
     if ((await kv.get(INDEX_KEY)) !== undefined) return;
     if ((await kv.get('relay')) === undefined) return;
