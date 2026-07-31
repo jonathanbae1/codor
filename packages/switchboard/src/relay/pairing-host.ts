@@ -81,26 +81,37 @@ export class RelayPairingHost {
   async pair(endpoint?: string): Promise<PairingOffer> {
     const { store } = this.deps;
     const secret = this.deps.randomSecret();
-    let nameplate: string;
-    try {
-      ({ nameplate } = await this.deps.reserveRoom(store.relayUrl));
-    } catch (error) {
-      // Relay unreachable: degrade to a local-only code, no relay session. The
-      // caller sees doors:'local' — dual-door whenever the relay answers, local
-      // always works.
-      this.deps.onError?.(error);
+    // Reserve AND dial the room through the store's REACHABLE dial URL, failing over
+    // to the other {canonical, alias} member on failure (default URL only) and caching
+    // whichever reaches the relay — so the first-code mint works on SNI-filtered
+    // networks, exactly like the host session. store.relayUrl alone would hit the
+    // blocked canonical and degrade even when the alias is reachable.
+    const candidates = store.dialFallback !== undefined ? [store.dialUrl, store.dialFallback] : [store.dialUrl];
+    let reserved: { nameplate: string; base: string } | undefined;
+    for (const base of candidates) {
+      try {
+        const { nameplate } = await this.deps.reserveRoom(base);
+        reserved = { nameplate, base };
+        store.setDialWinner(base); // cache the endpoint that reached the relay
+        break;
+      } catch (error) {
+        this.deps.onError?.(error);
+      }
+    }
+    if (reserved === undefined) {
+      // No relay endpoint reachable: degrade to a local-only code (doors:'local').
+      // Local pairing must never hard-depend on relay reachability.
       return this.deps.pairing.issue(endpoint ?? store.relayUrl);
     }
     // The room's nameplate+secret IS the pairing code; register it as a local
     // pairing grant and reuse the minted token for the relay hello so consuming
-    // either door burns the single shared grant. Preserve the CALLER's endpoint
-    // (symmetric with the degrade branch) so Settings' link/QR and the enrolling
-    // browser's ?endpoint= stay on the switchboard origin, not the relay Worker.
-    const offer = this.deps.pairing.issueForCode(composeCode(nameplate, secret), endpoint ?? store.relayUrl);
-
-    const wsBase = store.relayUrl.replace(/\/$/, '').replace(/^http/, 'ws');
-    const socket = this.deps.dialRoom(`${wsBase}/v1/pair/${nameplate}/ws?role=host`);
-    new RelayPairingSession(socket, nameplate, secret, offer.pairing_token, this.deps);
+    // either door burns the single shared grant. Preserve the CALLER's endpoint so
+    // Settings' link/QR and the enrolling browser's ?endpoint= stay on the switchboard
+    // origin, not the relay Worker.
+    const offer = this.deps.pairing.issueForCode(composeCode(reserved.nameplate, secret), endpoint ?? store.relayUrl);
+    const wsBase = reserved.base.replace(/\/$/, '').replace(/^http/, 'ws');
+    const socket = this.deps.dialRoom(`${wsBase}/v1/pair/${reserved.nameplate}/ws?role=host`);
+    new RelayPairingSession(socket, reserved.nameplate, secret, offer.pairing_token, this.deps);
     return { ...offer, doors: 'both' };
   }
 }

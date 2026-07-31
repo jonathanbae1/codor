@@ -251,4 +251,17 @@ describe('RelayLink dial failover (P6b, default canonical only)', () => {
     expect(dialed.some((url) => url.includes('workers.dev'))).toBe(false);
     link.stop();
   });
+
+  it('fails over after the winner opens then dies (post-open blackhole), not just pre-open', () => {
+    const store = new RelayStore(dir);
+    store.enable(); // default canonical
+    const { link, dialed, socks, fire } = failoverLink(store);
+    link.start();
+    expect(dialed[0]).toContain('relay.codor.app'); // canonical winner first
+    socks[0].open(); // a proxy upgrades the socket (winner cached = canonical) …
+    socks[0].socket.close(); // … then blackholes it — dies AFTER opening
+    fire();
+    expect(dialed[1]).toContain('workers.dev'); // alternates to the sibling despite having opened
+    link.stop();
+  });
 });

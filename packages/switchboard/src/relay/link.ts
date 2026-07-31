@@ -122,7 +122,6 @@ export class RelayLink {
   private attempt = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private running = false;
-  private opened = false;        // did the current session socket reach onOpen?
   private failoverNext = false;  // the next connect should try the other {canonical,alias} member
 
   constructor(deps: RelayLinkDeps) {
@@ -198,7 +197,6 @@ export class RelayLink {
     // no fallback). Symmetric: whichever member opens becomes the cached winner, so a
     // host can find its way back to canonical after its network stops filtering.
     const base = this.failoverNext && store.dialFallback ? store.dialFallback : store.dialUrl;
-    this.opened = false;
     let socket: RelaySocket;
     try {
       socket = this.deps.dialSession(this.sessionUrl(base));
@@ -210,7 +208,6 @@ export class RelayLink {
     }
     this.socket = socket;
     socket.onOpen(() => {
-      this.opened = true;
       this.failoverNext = false;
       store.setDialWinner(base); // cache whichever member established the session
       this.attempt = 0;
@@ -255,10 +252,12 @@ export class RelayLink {
     this.socket = undefined;
     for (const conn of [...this.conns.values()]) this.teardownConn(conn);
     this.conns.clear();
-    // A socket that never opened is a connect failure → alternate to the other member
-    // next time (default-URL only). A socket that HAD opened is a mid-session drop →
-    // reconnect to the same cached winner (it worked; the drop is likely transient).
-    if (!this.opened && this.deps.store.dialFallback !== undefined) {
+    // Alternate to the other {canonical, alias} member on ANY death (default-URL only),
+    // whether or not the socket opened: a winner that upgrades then blackholes every
+    // session must fail over to its sibling instead of reconnecting to the dead
+    // endpoint forever. A session that stays up re-caches its endpoint as the winner
+    // on open, so a healthy link still prefers what works.
+    if (this.deps.store.dialFallback !== undefined) {
       this.failoverNext = !this.failoverNext;
     }
     this.scheduleReconnect();

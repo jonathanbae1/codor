@@ -786,6 +786,12 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       ? `[dry-run] use the Codor runtime in place at ${serviceLocation}`
       : `[dry-run] install a durable Codor runtime -> ${serviceLocation}`);
     options.out(`[dry-run] create ${configDir} and ${dataDir} mode 700; create ${tokenPath} mode 600 if absent`);
+    if (platform !== 'win32') {
+      options.out(`[dry-run] install codor launcher -> ${join(home, '.local', 'bin', 'codor')} (exec ${nodePath} ${serviceRuntime.cliEntrypoint})`);
+      if (platform === 'darwin') {
+        options.out(`[dry-run] add ${join(home, '.local', 'bin')} to PATH in ${join(home, '.zprofile')} if absent`);
+      }
+    }
     if (platform === 'linux') {
       options.out(`[dry-run] install ${runtime.serviceTemplate} -> ${userUnitPath} mode 600`);
       options.out('[dry-run] unit content:');
@@ -823,6 +829,20 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       options.out('[dry-run] tailscale serve status');
     } else {
       options.out('[dry-run] access localhost; skip Tailscale Serve');
+    }
+    // Report the relay enable/stay-off decision and the resulting first-code exposure —
+    // the most security-relevant new default (RelayStore's constructor only reads).
+    const relayPreview = new RelayStore(dataDir);
+    if (options.noRelay) {
+      options.out(relayPreview.enabled
+        ? '[dry-run] disable the relay (--no-relay); first code works on your network only'
+        : '[dry-run] relay stays off (--no-relay); first code works on your network only');
+    } else if (relayPreview.enabled) {
+      options.out('[dry-run] relay already enabled; first code works at codor.app and on your network');
+    } else if (relayPreview.sessionId === '') {
+      options.out('[dry-run] enable the relay; first code works at codor.app and on your network');
+    } else {
+      options.out('[dry-run] relay stays off (you disabled it); first code works on your network only');
     }
     options.out('[dry-run] wait for Codor pairing status, then generate a ten-minute QR, URL, and pairing code');
     return;
@@ -868,14 +888,26 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       chmodSync(tokenPath, 0o600);
     }
     // harn:assume setup-enables-relay-for-universal-first-code ref=setup-relay-enable
-    // Enable the blind relay by default (Richard's locked Q3) so the first code minted
-    // below is universal — works at codor.app AND locally — before the service starts,
-    // so the daemon boots relay-connected. --no-relay opts out (local-only, as today).
-    if (!options.noRelay) {
+    // Relay-on-by-default (Richard's locked Q3) so the first code minted below is
+    // universal, before the service starts so the daemon boots relay-connected — but
+    // honor explicit choices. --no-relay DISABLES an already-enabled relay (not just
+    // skips enabling). Auto-enable fires ONLY for a NEVER-configured relay (no session
+    // material); an operator who ran `codor relay disable` (disabled but with material)
+    // stays off, so re-running setup never re-enables an explicit disable.
+    {
       const relay = new RelayStore(dataDir);
-      if (!relay.enabled) {
-        relay.enable();
-        log('relay enabled — your pairing code will work at codor.app');
+      if (options.noRelay) {
+        if (relay.enabled) {
+          relay.disable();
+          log('relay disabled (--no-relay) — pairing codes will work on your network only');
+        }
+      } else if (!relay.enabled) {
+        if (relay.sessionId === '') {
+          relay.enable();
+          log('relay enabled — your pairing code will work at codor.app');
+        } else {
+          log('relay stays off (you disabled it) — run `codor relay enable` for codor.app codes');
+        }
       }
     }
     // harn:end setup-enables-relay-for-universal-first-code

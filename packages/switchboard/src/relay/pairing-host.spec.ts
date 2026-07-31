@@ -276,3 +276,52 @@ describe('RelayPairingHost universal mint (one code, both doors)', () => {
     host.close();
   });
 });
+
+describe('RelayPairingHost reachability failover (P6d, Codex #1)', () => {
+  const noTimer = { setTimeoutFn: () => 1 as unknown as ReturnType<typeof setTimeout>, clearTimeoutFn: () => {} };
+
+  it('reserves and dials through the alias when the canonical is blocked, still minting a dual-door code', async () => {
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable(); // DEFAULT canonical → alias fallback available
+    const room = mockRoom();
+    const reserveTargets: string[] = [];
+    let dialedBase: string | undefined;
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async (url: string) => {
+        reserveTargets.push(url);
+        if (url.includes('relay.codor.app')) throw new Error('SNI reset'); // canonical blocked here
+        return { nameplate: 'AA' };
+      },
+      dialRoom: (url: string) => { dialedBase = url; return room.socket; },
+      ...noTimer,
+    });
+    const offer = await pairingHost.pair('http://127.0.0.1:8137');
+    expect(offer.doors).toBe('both'); // NOT degraded to local
+    expect(reserveTargets[0]).toContain('relay.codor.app'); // tried the canonical first
+    expect(reserveTargets[1]).toContain('workers.dev'); // failed over to the alias
+    expect(dialedBase).toContain('workers.dev'); // dialed the room on the reachable member
+    expect(store.dialUrl).toContain('workers.dev'); // cached the winner for next time
+    host.close();
+  });
+
+  it('degrades to a local-only code when neither member reserves', async () => {
+    const host = new CryptoVault(join(dir, 'host'));
+    const store = new RelayStore(join(dir, 'host'));
+    store.enable();
+    const pairingHost = new RelayPairingHost({
+      store,
+      pairing: host.pairing,
+      identity: host.keys.publicIdentity(),
+      reserveRoom: async () => { throw new Error('relay unreachable'); },
+      dialRoom: () => mockRoom().socket,
+      ...noTimer,
+    });
+    const offer = await pairingHost.pair('http://127.0.0.1:8137');
+    expect(offer.doors).toBe('local'); // never a hard failure
+    host.close();
+  });
+});

@@ -250,3 +250,70 @@ describe('runSetup relay-on-by-default (P6b)', () => {
     }
   });
 });
+
+describe('runSetup relay opt-out and dry-run (P6d gate fixes)', () => {
+  it('--no-relay disables an already-enabled relay and mints a local-only code', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-p6d-disable-'));
+    try {
+      const dataDir = join(root, 'home', '.codor');
+      mkdirSync(dataDir, { recursive: true });
+      new RelayStore(dataDir).enable(); // relay already on before setup
+      const out = await runPosix(root, { noRelay: true, relayOffer: async () => universalOffer });
+      expect(new RelayStore(dataDir).enabled).toBe(false); // --no-relay turned it OFF
+      expect(out.join('\n')).toMatch(/relay disabled/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('re-running setup leaves an explicitly-disabled relay off (never re-enables a disable)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-p6d-stayoff-'));
+    try {
+      const dataDir = join(root, 'home', '.codor');
+      mkdirSync(dataDir, { recursive: true });
+      const store = new RelayStore(dataDir);
+      store.enable();
+      store.disable(); // disabled, but with session material (an explicit `codor relay disable`)
+      const out = await runPosix(root, { relayOffer: async () => universalOffer }); // NO --no-relay
+      expect(new RelayStore(dataDir).enabled).toBe(false); // stays off — the disable is respected
+      expect(out.join('\n')).toMatch(/relay stays off/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  const dryRun = async (root: string, noRelay?: boolean): Promise<string> => {
+    const out: string[] = [];
+    await runSetup({
+      dryRun: true,
+      yes: true,
+      access: 'localhost',
+      noRelay,
+      env: { HOME: join(root, 'home'), PATH: '/usr/bin' },
+      out: (line) => out.push(line),
+      overrides: posixOverrides(root),
+    });
+    return out.join('\n');
+  };
+
+  it('dry-run reports the launcher, PATH edit, and the universal first-code decision', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-p6d-dry-'));
+    try {
+      const text = await dryRun(root);
+      expect(text).toMatch(/install codor launcher/);
+      expect(text).toMatch(/enable the relay; first code works at codor\.app/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('dry-run with --no-relay reports a local-only first code (the exposure default is visible)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-p6d-drynorelay-'));
+    try {
+      const text = await dryRun(root, true);
+      expect(text).toMatch(/first code works on your network only/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
