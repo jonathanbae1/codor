@@ -89,13 +89,48 @@ export const SESSION_COPY: Record<Exclude<SessionConnectionState, 'online'>, { t
   },
   'agent-offline-extended': {
     title: 'Still can’t reach your agent',
-    body: 'If it’s just off, we’ll keep trying. If you’ve re-installed it or paired it elsewhere, re-pair this browser.',
+    body: 'If it’s just off, we’ll keep trying.',
   },
   'pairing-dead': {
     title: 'This pairing no longer works',
     body: 'Your agent turned this browser away. Re-pair this browser to reconnect.',
   },
 };
+
+/**
+ * Fullscreen (boot terminal) copy. Same states, but framed for a card with NO live
+ * connector retrying beneath it: the body points at the manual "Retry now" instead of
+ * claiming automatic retries. The one exception is `device-offline`, whose fullscreen
+ * card DOES auto-recover — it reloads when the `online` event fires — so its copy keeps
+ * the "on its own" promise honestly. Single-sourced alongside SESSION_COPY.
+ */
+export const SESSION_TERMINAL_COPY: Record<Exclude<SessionConnectionState, 'online'>, { title: string; body: string }> = {
+  'device-offline': {
+    title: 'You appear to be offline',
+    body: 'Check your internet connection — this page will reconnect on its own once you’re back.',
+  },
+  'agent-offline': {
+    title: 'Your agent looks offline',
+    body: 'We couldn’t reach your agent. Select “Retry now” to try again.',
+  },
+  'agent-offline-extended': {
+    title: 'Still can’t reach your agent',
+    body: 'We couldn’t reach your agent. Select “Retry now” to try again.',
+  },
+  'pairing-dead': {
+    title: 'This pairing no longer works',
+    body: 'Your agent turned this browser away. Re-pair this browser to reconnect.',
+  },
+};
+
+/**
+ * Trailing re-pair hint, appended by RecoveryCard ONLY when the re-pair action is
+ * actually offered (agent-offline-extended in relay mode). Kept out of the bodies so
+ * the copy can never promise re-pair while the button is withheld — text and button are
+ * driven by the same `offerRepair`. (pairing-dead keeps its own body: it always offers
+ * the button, so its sentence is honest as-is.)
+ */
+export const SESSION_REPAIR_HINT = 'If you’ve re-installed it or paired it elsewhere, re-pair this browser.';
 
 export const PAIRING_TIME_COPY: Record<PairingTimeState, { title: string; body: string }> = {
   joining: {

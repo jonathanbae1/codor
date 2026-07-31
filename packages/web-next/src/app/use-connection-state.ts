@@ -6,6 +6,7 @@ import {
   type SessionConnectionState,
 } from './connection-state.js';
 import { useClientStore } from './store.js';
+import { useNavigatorOnLine } from './use-navigator-online.js';
 
 declare global {
   interface Window {
@@ -16,21 +17,6 @@ declare global {
     /** e2e-only: shorten pairThroughRelay's dead-room deadline. */
     __CODOR_PAIR_DEADLINE_MS?: number;
   }
-}
-
-function useNavigatorOnLine(): boolean {
-  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
-  useEffect(() => {
-    const update = (): void => setOnline(navigator.onLine);
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
-    update();
-    return () => {
-      window.removeEventListener('online', update);
-      window.removeEventListener('offline', update);
-    };
-  }, []);
-  return online;
 }
 
 /**

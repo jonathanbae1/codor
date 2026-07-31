@@ -622,6 +622,17 @@ export async function storedBrowserAccess(): Promise<StoredBrowserAccess | undef
   return readState<StoredBrowserAccess>('access:switchboard');
 }
 
+/**
+ * Pure storage-presence check — is there a persisted access record for this origin?
+ * NO network, NO challenge. Boot uses it to tell a paired browser (direct device OR
+ * operator `?token=` cold-launch) apart from a genuinely-unpaired one, so a failed
+ * token resolution shows the recovery card instead of the "never paired" landing.
+ */
+export async function hasStoredBrowserAccess(origin: string): Promise<boolean> {
+  const stored = await storedBrowserAccess();
+  return stored !== undefined && stored.origin === new URL(origin).origin;
+}
+
 // harn:assume unpair-purges-all-browser-state ref=browser-unpair-purge
 export async function unpairBrowser(): Promise<void> {
   activeAccessToken = '';
