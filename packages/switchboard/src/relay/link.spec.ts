@@ -252,16 +252,35 @@ describe('RelayLink dial failover (P6b, default canonical only)', () => {
     link.stop();
   });
 
-  it('fails over after the winner opens then dies (post-open blackhole), not just pre-open', () => {
+  it('escalates to the sibling after repeated early deaths (open-then-blackhole)', () => {
     const store = new RelayStore(dir);
     store.enable(); // default canonical
     const { link, dialed, socks, fire } = failoverLink(store);
     link.start();
     expect(dialed[0]).toContain('relay.codor.app'); // canonical winner first
-    socks[0].open(); // a proxy upgrades the socket (winner cached = canonical) …
-    socks[0].socket.close(); // … then blackholes it — dies AFTER opening
+    // First early death: opened (proxy upgrade) but no activity → does NOT alternate yet.
+    socks[0].open();
+    socks[0].socket.close();
     fire();
-    expect(dialed[1]).toContain('workers.dev'); // alternates to the sibling despite having opened
+    expect(dialed[1]).toContain('relay.codor.app'); // still the winner (transient-tolerant)
+    // Second consecutive early death → escalate to the sibling.
+    socks[1].open();
+    socks[1].socket.close();
+    fire();
+    expect(dialed[2]).toContain('workers.dev'); // failed over after EARLY_DEATH_LIMIT
+    link.stop();
+  });
+
+  it('a healthy winner that drops reconnects to the same winner, never ping-ponging', () => {
+    const store = new RelayStore(dir);
+    store.enable(); // default canonical
+    const { link, dialed, socks, fire } = failoverLink(store);
+    link.start();
+    socks[0].open();
+    socks[0].deliver(new TextEncoder().encode('codor-pong')); // inbound activity → proves healthy
+    socks[0].socket.close(); // a transient mid-session drop
+    fire();
+    expect(dialed[1]).toContain('relay.codor.app'); // stays on the winner (no alternate)
     link.stop();
   });
 });

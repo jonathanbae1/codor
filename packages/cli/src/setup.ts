@@ -831,16 +831,18 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       options.out('[dry-run] access localhost; skip Tailscale Serve');
     }
     // Report the relay enable/stay-off decision and the resulting first-code exposure —
-    // the most security-relevant new default (RelayStore's constructor only reads).
+    // the most security-relevant new default. Uses the SAME file-presence rule as the
+    // real run (RelayStore's constructor only reads; existsSync does not mutate).
+    const relayExisted = existsSync(join(dataDir, 'crypto', 'relay.json'));
     const relayPreview = new RelayStore(dataDir);
     if (options.noRelay) {
       options.out(relayPreview.enabled
         ? '[dry-run] disable the relay (--no-relay); first code works on your network only'
         : '[dry-run] relay stays off (--no-relay); first code works on your network only');
+    } else if (!relayExisted) {
+      options.out('[dry-run] enable the relay; first code works at codor.app and on your network');
     } else if (relayPreview.enabled) {
       options.out('[dry-run] relay already enabled; first code works at codor.app and on your network');
-    } else if (relayPreview.sessionId === '') {
-      options.out('[dry-run] enable the relay; first code works at codor.app and on your network');
     } else {
       options.out('[dry-run] relay stays off (you disabled it); first code works on your network only');
     }
@@ -888,26 +890,27 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       chmodSync(tokenPath, 0o600);
     }
     // harn:assume setup-enables-relay-for-universal-first-code ref=setup-relay-enable
-    // Relay-on-by-default (Richard's locked Q3) so the first code minted below is
-    // universal, before the service starts so the daemon boots relay-connected — but
-    // honor explicit choices. --no-relay DISABLES an already-enabled relay (not just
-    // skips enabling). Auto-enable fires ONLY for a NEVER-configured relay (no session
-    // material); an operator who ran `codor relay disable` (disabled but with material)
-    // stays off, so re-running setup never re-enables an explicit disable.
+    // Relay-on-by-default (Richard's locked Q3) so the first code is universal, before
+    // the service starts so the daemon boots relay-connected — but honor explicit
+    // choices. The STICKY marker is the relay.json FILE: auto-enable ONLY when it does
+    // not exist (never configured). Any existing record — enabled, or disabled by
+    // `codor relay disable` or a prior --no-relay — is respected verbatim on a default
+    // re-run. --no-relay PERSISTS enabled:false (writing the file even on a fresh
+    // machine) so the opt-out is durable across later default runs.
     {
+      const relayExisted = existsSync(join(dataDir, 'crypto', 'relay.json'));
       const relay = new RelayStore(dataDir);
       if (options.noRelay) {
-        if (relay.enabled) {
-          relay.disable();
-          log('relay disabled (--no-relay) — pairing codes will work on your network only');
-        }
+        const wasEnabled = relay.enabled;
+        if (wasEnabled || !relayExisted) relay.disable(); // persist the sticky opt-out marker
+        log(wasEnabled
+          ? 'relay disabled (--no-relay) — pairing codes will work on your network only'
+          : 'relay stays off (--no-relay) — pairing codes will work on your network only');
+      } else if (!relayExisted) {
+        relay.enable();
+        log('relay enabled — your pairing code will work at codor.app');
       } else if (!relay.enabled) {
-        if (relay.sessionId === '') {
-          relay.enable();
-          log('relay enabled — your pairing code will work at codor.app');
-        } else {
-          log('relay stays off (you disabled it) — run `codor relay enable` for codor.app codes');
-        }
+        log('relay stays off (you disabled it) — run `codor relay enable` for codor.app codes');
       }
     }
     // harn:end setup-enables-relay-for-universal-first-code

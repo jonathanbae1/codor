@@ -317,3 +317,21 @@ describe('runSetup relay opt-out and dry-run (P6d gate fixes)', () => {
     }
   });
 });
+
+describe('runSetup relay sticky opt-out (P6e, file is the marker)', () => {
+  it('a fresh --no-relay persists as a durable opt-out that a later default run respects', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-p6e-sticky-'));
+    try {
+      const dataDir = join(root, 'home', '.codor');
+      // Fresh machine (no relay.json): --no-relay must WRITE the file as a sticky marker.
+      await runPosix(root, { noRelay: true, relayOffer: async () => universalOffer });
+      expect(new RelayStore(dataDir).enabled).toBe(false);
+      // A later DEFAULT run (no --no-relay) must respect the file, never re-enabling.
+      const out = await runPosix(root, { relayOffer: async () => universalOffer });
+      expect(new RelayStore(dataDir).enabled).toBe(false); // stayed off
+      expect(out.join('\n')).toMatch(/relay stays off/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

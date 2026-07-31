@@ -26,6 +26,10 @@ import type { RelayStore } from './store.js';
 // and /api stack unchanged while the relay only ever sees ciphertext.
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 60_000;
+// After this many consecutive sessions that open but die before proving healthy, treat
+// the next reconnect as connect-class and alternate to the sibling endpoint — so a
+// winner that upgrades then blackholes escapes to its working sibling.
+const EARLY_DEATH_LIMIT = 2;
 const HTTP_CHUNK = 64 * 1024;
 const MAX_HTTP_RESPONSE = 32 * 1024 * 1024;
 const HEADER_ALLOW = new Set(['content-type', 'accept', 'authorization', 'content-length']);
@@ -123,6 +127,9 @@ export class RelayLink {
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private running = false;
   private failoverNext = false;  // the next connect should try the other {canonical,alias} member
+  private opened = false;        // did the current session socket reach onOpen?
+  private sessionHealthy = false; // has the current session proved healthy (received activity)?
+  private earlyDeaths = 0;       // consecutive sessions that opened but died before proving healthy
 
   constructor(deps: RelayLinkDeps) {
     this.deps = {
@@ -197,6 +204,8 @@ export class RelayLink {
     // no fallback). Symmetric: whichever member opens becomes the cached winner, so a
     // host can find its way back to canonical after its network stops filtering.
     const base = this.failoverNext && store.dialFallback ? store.dialFallback : store.dialUrl;
+    this.opened = false;
+    this.sessionHealthy = false;
     let socket: RelaySocket;
     try {
       socket = this.deps.dialSession(this.sessionUrl(base));
@@ -208,6 +217,7 @@ export class RelayLink {
     }
     this.socket = socket;
     socket.onOpen(() => {
+      this.opened = true;
       this.failoverNext = false;
       store.setDialWinner(base); // cache whichever member established the session
       this.attempt = 0;
@@ -234,6 +244,10 @@ export class RelayLink {
       });
     });
     socket.onMessage((data, isBinary) => {
+      // Any inbound frame proves the session is actually usable (not an open-then-
+      // blackhole), so it clears the early-death escalation and re-affirms the winner.
+      this.sessionHealthy = true;
+      this.earlyDeaths = 0;
       this.keepalive?.noteActivity();
       this.onRelayMessage(data, isBinary);
     });
@@ -252,13 +266,24 @@ export class RelayLink {
     this.socket = undefined;
     for (const conn of [...this.conns.values()]) this.teardownConn(conn);
     this.conns.clear();
-    // Alternate to the other {canonical, alias} member on ANY death (default-URL only),
-    // whether or not the socket opened: a winner that upgrades then blackholes every
-    // session must fail over to its sibling instead of reconnecting to the dead
-    // endpoint forever. A session that stays up re-caches its endpoint as the winner
-    // on open, so a healthy link still prefers what works.
+    // Decide whether to alternate to the other {canonical, alias} member (default-URL
+    // only): a pre-open connect failure alternates at once (connect-class); a socket
+    // that opened but died before proving healthy is an early death — count them, and
+    // after EARLY_DEATH_LIMIT in a row escalate to the sibling (a winner that upgrades
+    // then blackholes); a healthy session that drops is transient, so reset the counter
+    // and reconnect to the same winner.
     if (this.deps.store.dialFallback !== undefined) {
-      this.failoverNext = !this.failoverNext;
+      if (!this.opened) {
+        this.failoverNext = !this.failoverNext;
+      } else if (!this.sessionHealthy) {
+        this.earlyDeaths += 1;
+        if (this.earlyDeaths >= EARLY_DEATH_LIMIT) {
+          this.failoverNext = !this.failoverNext;
+          this.earlyDeaths = 0;
+        }
+      } else {
+        this.earlyDeaths = 0;
+      }
     }
     this.scheduleReconnect();
   }
