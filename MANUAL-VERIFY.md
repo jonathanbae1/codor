@@ -370,6 +370,26 @@ universal code (one code, both doors) and the P3 hosted multi-computer switcher 
    no relay), pair once, then fully reload. Confirm the browser is still paired (it authenticates and
    reaches its channel, never dropping to the pairing screen) and that no computer switcher renders.
 
+## Relay-onboard: `codor` command and universal code out of the box
+
+Status: **not run** — verifies the P6 relay-onboard round on a fresh machine (macOS is
+the live case). Pairs with the blind-relay check above.
+
+1. **Launcher + PATH.** On a fresh machine, `npx @richhardry/codor install`. In a NEW
+   terminal, confirm `codor --help` runs (macOS: only after opening a new terminal, since
+   setup added `~/.local/bin` to `~/.zprofile`). Re-run install and confirm the launcher +
+   PATH block are refreshed idempotently, not duplicated.
+2. **Universal first code by default.** Confirm setup prints that the code works at
+   codor.app, then pair a phone at codor.app with that code over cellular (not the home
+   network) and confirm the channel loads — no manual `codor relay enable` needed.
+3. **SNI-filtered reachability.** On a network that resets `relay.codor.app` for non-browser
+   TLS, confirm the switchboard still connects (it falls back to the `workers.dev` alias and
+   caches the winner in `relay.json`); confirm a later `codor relay status` reflects it.
+4. **Opt-out + degrade.** `codor install --no-relay` mints a local-only code and leaves the
+   relay off; `codor pair` with the relay off prints the "works on your network only" notice
+   and the `codor relay enable` hint. With the relay enabled but unreachable, setup degrades
+   to a labelled local-only code rather than failing.
+
 ## Public Web Push relay
 
 Status on 2026-07-11: **not run**, by the M3 operator directive. This verifies the self-hosted

@@ -482,3 +482,24 @@ with another's channel keys, and switching between tabs cannot corrupt the store
 (see the [relay protocol reference](RELAY-PROTOCOL.md)).
 A self-hosted, switchboard-served browser (the direct path) pairs to one switchboard
 and shows no switcher.
+
+## Out of the box: `codor` on PATH and a universal first code
+
+`npx @richhardry/codor install` sets both of these up for you, so a fresh machine is
+ready without extra steps:
+
+- **A `codor` command in your next shell.** Setup writes an executable launcher to
+  `~/.local/bin/codor` pinned to the same Node the service runs. On macOS, where zsh
+  omits `~/.local/bin` from PATH, setup appends a marked, idempotent block to
+  `~/.zprofile` and tells you to open a new terminal; on Linux `~/.local/bin` is
+  already on PATH. (Windows: add `~/.local/bin` to PATH yourself for now.)
+- **A universal first code, by default.** Setup enables the blind relay before minting
+  your first pairing code and mints it through the running daemon, so the printed code
+  works at **codor.app** *and* on your network. If the relay is unreachable it degrades
+  to a clearly-labelled local-only code rather than failing. Opt out with
+  `codor install --no-relay` (or `codor relay disable` later) for a local-only setup;
+  a `codor pair` run with the relay off says the code is local-only and how to enable it.
+
+Node reaches the relay even on networks that reset the `relay.codor.app` name for
+non-browser TLS: the switchboard automatically falls back to the `workers.dev` alias
+and remembers whichever endpoint worked (see the [relay protocol reference](RELAY-PROTOCOL.md)).
