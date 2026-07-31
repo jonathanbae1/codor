@@ -80,6 +80,25 @@ test.describe('startup recovery (boot path)', () => {
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
   });
 
+  test('pairing falls back to the alias when the primary relay URL is blocked (P7)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await control('/relay-up');
+    const { code, relayUrl } = await control<{ code: string; relayUrl: string }>('/relay-pair');
+    await page.addInitScript((url) => {
+      const w = window as unknown as Record<string, unknown>;
+      w.__CODOR_RELAY_URL = 'ws://127.0.0.1:9'; // blocked primary: nothing listens there
+      w.__CODOR_RELAY_ALIAS = url; // the alias member passes
+    }, relayUrl);
+    await page.goto(`${SPA_ORIGIN}/`);
+    await expect(page.getByTestId('landing-page')).toBeVisible();
+    await pasteCode(page, code);
+    await page.getByTestId('pairing-code-submit').click();
+    // The claim dies instantly on the dead primary, retries through the alias,
+    // and the recorded dial_url winner carries the SESSION too — fully live,
+    // across the post-pairing reload.
+    await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
+  });
+
   test('a genuinely-unpaired browser still gets the landing page, never the recovery card', async ({ page }) => {
     test.setTimeout(60_000);
     // Relay is CONFIGURED (hosted origin) but this browser has NEVER paired — no relay

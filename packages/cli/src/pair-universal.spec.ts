@@ -127,6 +127,72 @@ describe('codor relay pair honesty + codor pair delegation', () => {
       await close(httpd);
     }
   });
+
+  it('sends a JSON body with codor relay pair (fastify 400s a bodyless JSON POST)', async () => {
+    let body: string | undefined;
+    const httpd = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/relay/pair') {
+        let chunks = '';
+        req.on('data', (chunk: Buffer) => { chunks += chunk.toString(); });
+        req.on('end', () => {
+          body = chunks;
+          res.end(JSON.stringify({ code: 'AB23-CD45', expires_at: 'soon', doors: 'both' }));
+        });
+        return;
+      }
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    const port = await listen(httpd);
+    const out: string[] = [];
+    try {
+      await runCli(
+        ['node', 'codor', '--url', `http://127.0.0.1:${port}`, '--token', 't', 'relay', 'pair'],
+        { stdout: (line) => out.push(line) },
+      );
+      // The empty string is exactly what fastify rejects with 400 Bad Request.
+      expect(body).toBeDefined();
+      expect(body!.length).toBeGreaterThan(0);
+      expect(() => JSON.parse(body!)).not.toThrow();
+      expect(out.join('\n')).toContain('AB23-CD45');
+    } finally {
+      await close(httpd);
+    }
+  });
+
+  it('renders the setup pairing card on a TTY with the doors it opens', async () => {
+    const canned = {
+      endpoint: 'https://sw.test',
+      pairing_token: 'tok',
+      pairing_code: 'AB23-CD45',
+      expires_at: 'later',
+      switchboard_sign_pub: 'sp',
+      doors: 'both',
+    };
+    const httpd = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url?.startsWith('/api/relay/status')) return void res.end(JSON.stringify({ enabled: true }));
+      if (req.url?.startsWith('/api/pairing/offers')) return void res.end(JSON.stringify(canned));
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    const port = await listen(httpd);
+    const out: string[] = [];
+    try {
+      await runCli(
+        ['node', 'codor', '--data-dir', dir, '--url', `http://127.0.0.1:${port}`, '--token', 't', 'pair', '--no-qr'],
+        { stdout: (line) => out.push(line), isTTY: true },
+      );
+      const rendered = out.join('\n');
+      expect(rendered).toContain('╭'); // the setup card's border
+      expect(rendered).toContain('AB23-CD45');
+      expect(rendered).toContain('This code works at codor.app and on your network.');
+      expect(rendered).not.toContain('code: AB23-CD45'); // card replaces the plain lines
+    } finally {
+      await close(httpd);
+    }
+  });
 });
 
 describe('F4: token resolution for installed deployments', () => {

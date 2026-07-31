@@ -8,6 +8,7 @@ import {
   splitCode,
   type PairingMessage,
 } from '@codor/tunnel';
+import { relayDialCandidates } from './relay-dial.js';
 import { relayFetch } from './relay-transport.js';
 import { type RelayComputer, selectActiveComputer } from './relay-records.js';
 import {
@@ -283,6 +284,10 @@ export interface StoredRelayRecord {
   session_id: string; // 64-hex
   client_static: { pub: string; priv: string }; // base64url
   host_static_pub: string; // base64url
+  /** The {primary, alias} member that actually reached the relay at pairing
+   *  time (P7). Absent when the primary won. Sessions dial it first; relay_url
+   *  stays the identity/keying origin so stored access is never re-keyed. */
+  dial_url?: string;
 }
 
 export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined> {
@@ -364,29 +369,92 @@ export async function pairThroughRelay(
   if (!normalized) throw new Error('invalid pairing code');
   const { nameplate, secret } = splitCode(normalized);
   const identity = await ensureBrowserIdentity();
+  // P7: some networks kill connections that openly name the canonical relay
+  // host. Try each member of the dial pair, moving on ONLY when the room was
+  // never contacted (a connect-level failure says nothing about the code); the
+  // winner lands in the stored record's dial_url so sessions dial it directly.
+  const candidates = relayDialCandidates(relayUrl);
+  let lastError: unknown;
+  for (const [index, dialUrl] of candidates.entries()) {
+    try {
+      await claimThroughRoom({
+        nameplate,
+        secret,
+        identity,
+        relayUrl,
+        dialUrl,
+        deadlineMs,
+        // Bound a silently-blackholed connect only while another candidate remains.
+        contactTimeoutMs: index < candidates.length - 1 ? 5_000 : undefined,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof RelayNeverContacted)) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** A claim attempt that failed before the pairing room ever answered — the
+ *  signal to try the other dial-pair member; never a verdict on the code. */
+class RelayNeverContacted extends Error {}
+
+async function claimThroughRoom(args: {
+  nameplate: string;
+  secret: string;
+  identity: BrowserPublicIdentity;
+  /** The identity/keying URL the stored record carries. */
+  relayUrl: string;
+  /** The URL actually dialed (a member of the {primary, alias} pair). */
+  dialUrl: string;
+  deadlineMs: number;
+  /** When set, a connect that has not heard from the room by then fails as
+   *  RelayNeverContacted instead of eating the whole deadline. */
+  contactTimeoutMs?: number;
+}): Promise<void> {
+  const { nameplate, secret, identity, relayUrl, dialUrl, deadlineMs } = args;
   const clientStatic = generateTunnelKeypair();
   const claimant = new PakeClaimant({ nameplate, secret });
 
-  const wsBase = relayUrl.replace(/\/$/, '').replace(/^http/, 'ws');
+  const wsBase = dialUrl.replace(/\/$/, '').replace(/^http/, 'ws');
   const socket = new WebSocket(`${wsBase}/v1/pair/${nameplate}/ws?role=claim`);
   socket.binaryType = 'arraybuffer';
   let channel: PairingChannel | undefined;
   let hello: { session_id: string; host_static_pub: string } | undefined;
   let settled = false;
+  let contacted = false;
 
   try {
     await new Promise<void>((resolve, reject) => {
       let deadline: ReturnType<typeof setTimeout> | undefined;
+      let contactTimer: ReturnType<typeof setTimeout> | undefined;
       const fail = (error: unknown) => {
         if (settled) return;
         settled = true;
         if (deadline) clearTimeout(deadline);
+        if (contactTimer) clearTimeout(contactTimer);
         reject(error instanceof Error ? error : new Error(String(error)));
       };
       // A dead room (host never joins) would otherwise leave this pending forever.
       deadline = setTimeout(() => fail(new Error('relay pairing timed out — the host never joined the room')), deadlineMs);
-      socket.onerror = () => fail(new Error('relay pairing connection failed'));
-      socket.onclose = () => fail(new Error('relay pairing closed before completion'));
+      if (args.contactTimeoutMs !== undefined) {
+        contactTimer = setTimeout(() => {
+          if (!contacted) fail(new RelayNeverContacted('relay unreachable (connect timed out)'));
+        }, args.contactTimeoutMs);
+      }
+      // A completed upgrade proves the room answered — connect-level failure is
+      // only ever BEFORE open, so a reserved-but-silent room (host missing)
+      // still gets the honest dead-room deadline instead of a failover.
+      socket.onopen = () => {
+        contacted = true;
+      };
+      socket.onerror = () => fail(contacted
+        ? new Error('relay pairing connection failed')
+        : new RelayNeverContacted('relay pairing connection failed'));
+      socket.onclose = () => fail(contacted
+        ? new Error('relay pairing closed before completion')
+        : new RelayNeverContacted('relay pairing closed before completion'));
       socket.onmessage = (event) => {
         void (async () => {
           try {
@@ -419,6 +487,9 @@ export async function pairThroughRelay(
                 session_id: hello!.session_id,
                 client_static: { pub: encode(clientStatic.publicKey), priv: encode(clientStatic.secretKey) },
                 host_static_pub: hello!.host_static_pub,
+                // Remember which pair member actually reached the relay so the
+                // session tunnel dials it first; relay_url stays the keying origin.
+                ...(dialUrl !== relayUrl ? { dial_url: dialUrl } : {}),
               };
               // Archive this computer's generation DIRECTLY from the pairing result
               // — never by snapshotting the shared globals — so a concurrent active

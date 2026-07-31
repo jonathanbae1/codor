@@ -141,3 +141,73 @@ describe('TunnelClient resilience', () => {
     client.dispose();
   });
 });
+
+// P7: some networks kill the canonical relay host while the alias passes. The
+// session dial must alternate pair members on pre-handshake failures, keep the
+// member that completed a handshake, honor a pairing-time dial_url, and never
+// invent a fallback for a custom relay URL.
+describe('TunnelClient dial failover (P7)', () => {
+  const PRIMARY = 'wss://relay.test';
+  const ALIAS = 'wss://alias.test';
+
+  function urlTracker() {
+    const urls: string[] = [];
+    const dialed: FakeWs[] = [];
+    return {
+      urls,
+      dialed,
+      socketFactory: (url: string) => {
+        urls.push(url);
+        const ws = new FakeWs();
+        dialed.push(ws);
+        return ws as unknown as WebSocket;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = {
+      __CODOR_RELAY_URL: PRIMARY,
+      __CODOR_RELAY_ALIAS: ALIAS,
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  it('alternates to the alias after a pre-handshake failure, then keeps the working member', () => {
+    const { urls, dialed, socketFactory } = urlTracker();
+    const client = new TunnelClient(record, { keepaliveMs: 60_000, handshakeMs: 10_000, socketFactory });
+    client.connect();
+    expect(urls[0]!.startsWith(`${PRIMARY}/`)).toBe(true);
+    dialed[0]!.onerror?.({}); // blocked member: dies before the handshake
+    vi.advanceTimersByTime(1_000); // reconnect backoff
+    expect(urls[1]!.startsWith(`${ALIAS}/`)).toBe(true);
+    completeHandshake(dialed[1]!);
+    expect(client.state).toBe('connected');
+    // A LIVE session dropping is not a reachability verdict: the winner stays.
+    dialed[1]!.close();
+    vi.advanceTimersByTime(1_000);
+    expect(urls[2]!.startsWith(`${ALIAS}/`)).toBe(true);
+    client.dispose();
+  });
+
+  it('dials a pairing-time dial_url winner first', () => {
+    const { urls, socketFactory } = urlTracker();
+    const client = new TunnelClient({ ...record, dial_url: ALIAS }, { socketFactory });
+    client.connect();
+    expect(urls[0]!.startsWith(`${ALIAS}/`)).toBe(true);
+    client.dispose();
+  });
+
+  it('never falls back from a custom relay URL', () => {
+    const { urls, dialed, socketFactory } = urlTracker();
+    const client = new TunnelClient({ ...record, relay_url: 'wss://my-own-relay.example' }, { socketFactory });
+    client.connect();
+    dialed[0]!.onerror?.({});
+    vi.advanceTimersByTime(1_000);
+    expect(urls).toHaveLength(2);
+    expect(urls.every((url) => url.startsWith('wss://my-own-relay.example/'))).toBe(true);
+    client.dispose();
+  });
+});

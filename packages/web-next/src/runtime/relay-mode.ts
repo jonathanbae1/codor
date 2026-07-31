@@ -34,22 +34,9 @@ export function relayActive(): boolean {
   return tunnel !== undefined;
 }
 
-declare global {
-  interface Window {
-    __CODOR_RELAY_URL?: string;
-  }
-}
-
-/**
- * The relay URL when relay pairing is INTENDED — the hosted codor.app bakes
- * VITE_CODOR_RELAY_URL; e2e sets window.__CODOR_RELAY_URL at runtime. Undefined
- * on a self-hosted switchboard (local pairing), so no default is returned here.
- */
-export function relayUrlConfigured(): string | undefined {
-  const runtime = typeof window !== 'undefined' ? window.__CODOR_RELAY_URL : undefined;
-  const built = (import.meta.env as { VITE_CODOR_RELAY_URL?: string }).VITE_CODOR_RELAY_URL;
-  return runtime || built || undefined;
-}
+// Dial-time URL config + candidate selection live in relay-dial.ts (P7);
+// re-exported here so existing import sites keep working.
+export { relayAliasConfigured, relayUrlConfigured } from './relay-dial.js';
 
 /** The origin relay-paired switchboard access + REST are keyed on (undefined when direct). */
 export function relayAccessOriginActive(): string | undefined {

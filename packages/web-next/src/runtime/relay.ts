@@ -13,6 +13,7 @@ import {
   frameMessage,
   type TunnelKeypair,
 } from '@codor/tunnel';
+import { relayDialCandidates } from './relay-dial.js';
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const fromUtf8 = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -40,6 +41,9 @@ export interface TunnelRecord {
   session_id: string; // 64-hex
   client_static: { pub: string; priv: string }; // base64
   host_static_pub: string; // base64
+  /** The {primary, alias} member that reached the relay at pairing time (P7);
+   *  sessions dial it first, falling back to the other pair member. */
+  dial_url?: string;
 }
 
 /** Minimal WebSocket-shaped view the connector consumes from socketFactory. */
@@ -123,6 +127,10 @@ export class TunnelClient {
   private keepalive?: Keepalive;
   private stateValue: TunnelState = 'disconnected';
   private retryMs = 500;
+  /** P7 dial alternation: flipped after an attempt that died before the KK
+   *  handshake completed, so a blocked pair member yields to the other on the
+   *  next retry; a live session keeps its winner across reconnects. */
+  private dialFlip = false;
   private disposed = false;
   private readonly liveSockets = new Set<TunnelSocket>();
   /** Rejecters for in-flight tunneled fetches, so a session drop fails their
@@ -166,7 +174,9 @@ export class TunnelClient {
   connect(): void {
     if (this.disposed || this.mux) return;
     this.setState('connecting');
-    const base = this.record.relay_url.replace(/\/$/, '').replace(/^http/, 'ws');
+    const candidates = relayDialCandidates(this.record.dial_url ?? this.record.relay_url);
+    const target = candidates[this.dialFlip && candidates.length > 1 ? 1 : 0]!;
+    const base = target.replace(/\/$/, '').replace(/^http/, 'ws');
     const ws = this.makeSocket(`${base}/v1/session/${this.record.session_id}/ws?role=client`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
@@ -252,16 +262,22 @@ export class TunnelClient {
       } catch {
         // already gone
       }
-      this.onDisconnect(ws);
+      this.onDisconnect(ws, handshakeDone);
     };
     ws.onclose = fail;
     ws.onerror = fail;
   }
 
-  private onDisconnect(ws: WebSocket): void {
+  private onDisconnect(ws: WebSocket, handshakeCompleted: boolean): void {
     // Ignore a drop from a socket we have already replaced — only the current
     // session's failure drives the reconnect.
     if (this.disposed || this.ws !== ws) return;
+    // An attempt that never completed the handshake may have hit a blocked pair
+    // member — alternate for the next retry (P7). A live session that dropped
+    // keeps its winner.
+    if (!handshakeCompleted && relayDialCandidates(this.record.dial_url ?? this.record.relay_url).length > 1) {
+      this.dialFlip = !this.dialFlip;
+    }
     this.keepalive?.stop();
     this.keepalive = undefined;
     this.mux = undefined;

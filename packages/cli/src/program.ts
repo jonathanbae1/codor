@@ -33,6 +33,7 @@ import { ProtocolClient, type ProtocolClientOptions } from './connection.js';
 import { detectSession } from './detect.js';
 import { parseMirrorHook } from './mirror.js';
 import { operatorTokenPath, runSetup, type SetupAccess, type SetupOverrides } from './setup.js';
+import { renderPairingCard } from './setup-ui.js';
 import { renderTerminalQr } from './terminal-qr.js';
 import { parseLine, startOutpost, startCodor, waitForShutdown } from './up.js';
 
@@ -45,6 +46,8 @@ export interface CliContext {
   attachHeartbeatMs?: number;
   renderQr?(payload: string): string;
   setup?: SetupOverrides;
+  /** Overrides the TTY probe that picks `codor pair`'s card vs plain output. */
+  isTTY?: boolean;
 }
 
 interface GlobalOptions {
@@ -1153,13 +1156,15 @@ export function createProgram(context: CliContext = {}): Command {
     .option('--endpoint <url>', 'switchboard browser endpoint', 'http://127.0.0.1:8137')
     .option('--no-qr', 'print the plain pairing URL without a terminal QR')
     .action(async (options: { endpoint: string; qr: boolean }) => {
-      const emit = (offer: {
+      type PairOffer = {
         endpoint: string;
         pairing_token: string;
         pairing_code: string;
         expires_at: string;
         switchboard_sign_pub: string;
-      }): void => {
+        doors?: 'both' | 'local';
+      };
+      const emit = (offer: PairOffer): void => {
         const url = pairingUrl(offer);
         if (options.qr) out((context.renderQr ?? renderTerminalQr)(url));
         out(url);
@@ -1167,6 +1172,27 @@ export function createProgram(context: CliContext = {}): Command {
         out(`code: ${offer.pairing_code}`);
         // harn:end pairing-code-enrollment-surfaces
         out(`expires ${offer.expires_at}`);
+      };
+      // On a TTY, present the offer as the SAME bordered card the setup flow
+      // ends on (code, clickable link, expiry, QR), with an instruction naming
+      // which doors the code opens. Piped/non-TTY output keeps the plain lines
+      // above, so scripts and tests see an unchanged surface.
+      const tty = context.isTTY ?? process.stdout.isTTY === true;
+      const present = (offer: PairOffer): void => {
+        if (!tty) {
+          emit(offer);
+          return;
+        }
+        const url = pairingUrl(offer);
+        out(renderPairingCard({
+          code: offer.pairing_code,
+          url,
+          expires: offer.expires_at,
+          qr: options.qr ? (context.renderQr ?? renderTerminalQr)(url) : '',
+          instruction: offer.doors === 'both'
+            ? 'This code works at codor.app and on your network. Scan the QR or enter the code in your browser to finish pairing.'
+            : 'This code works on your network only (run `codor relay enable` for codor.app codes). Scan the QR or enter the code in your browser to finish pairing.',
+        }, process.stdout.columns ?? 80));
       };
       // When the relay is enabled, delegate to the daemon's universal mint so the
       // printed code opens BOTH codor.app and the local door. If the daemon is
@@ -1178,20 +1204,12 @@ export function createProgram(context: CliContext = {}): Command {
         relayEnabled = false;
       }
       if (relayEnabled) {
-        emit((await postJson('/api/pairing/offers', { endpoint: options.endpoint })) as {
-          endpoint: string;
-          pairing_token: string;
-          pairing_code: string;
-          expires_at: string;
-          switchboard_sign_pub: string;
-        });
+        present((await postJson('/api/pairing/offers', { endpoint: options.endpoint })) as PairOffer);
         return;
       }
-      // NOTE (ledger): a "code works locally only" degrade notice belongs here, but
-      // it can't fire accurately without knowing whether the relay is configured
-      // (which needs the daemon), and the CLI test helper folds stderr into stdout
-      // so any notice breaks anchored pair tests outside this plan. Deferred.
-      withCrypto((crypto) => emit(crypto.pairing.issue(options.endpoint)));
+      // NOTE (ledger): a daemon-off local mint can't know whether a relay is
+      // configured, so its card uses the local-only instruction (doors absent).
+      withCrypto((crypto) => present(crypto.pairing.issue(options.endpoint)));
     });
   // harn:end terminal-pairing-qr-matches-plain-url
 
@@ -1292,7 +1310,9 @@ export function createProgram(context: CliContext = {}): Command {
     .command('pair')
     .description('pair a browser through the tunnel relay')
     .action(async () => {
-      const result = (await postJson('/api/relay/pair')) as {
+      // The body must be `{}`: postJson always sends a JSON content-type, and
+      // fastify 400s a bodyless POST that declares one.
+      const result = (await postJson('/api/relay/pair', {})) as {
         code: string;
         expires_at: string;
         doors?: 'both' | 'local';
