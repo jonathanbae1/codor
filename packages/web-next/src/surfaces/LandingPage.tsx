@@ -36,7 +36,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
 import { Chip, StatusPill, TypingDots } from '../primitives/primitives.js';
@@ -47,8 +47,23 @@ import { relayUrlConfigured } from '@runtime/relay-mode.js';
 import { PairingCodeInput } from './PairingCodeInput.js';
 
 const INSTALL_COMMAND = 'npx @richhardry/codor setup';
-const DEMO_INTERVAL_MS = 1_120;
+const DEMO_INTERVAL_MS = 1_180;
 const FINAL_PHASE = 38;
+
+// Thinking beats scale with the size of the response that follows. Short
+// handoffs stay brisk; plans, reviews, and fixes get enough time to feel like
+// actual work instead of a metronome advancing every line at one speed.
+const DEMO_PHASE_DELAYS: Partial<Record<number, number>> = {
+  1: 2_500,
+  5: 1_750,
+  6: 1_900,
+  18: 1_550,
+  20: 1_550,
+  23: 2_300,
+  30: 2_050,
+  35: 2_100,
+  37: 1_650,
+};
 
 const HARNESSES = [
   'claude-code',
@@ -112,6 +127,32 @@ const WORKFLOWS = [
       { name: 'Luna', role: 'Signal desk', accent: 'green' as const, icon: Search, harness: 'gemini', slot: 'observe', weight: 'support', responsibilities: ['Correlate logs', 'Pin reproduction'], output: 'Root cause' },
       { name: 'Opus', role: 'Repair track', accent: 'violet' as const, icon: Code2, harness: 'cursor', slot: 'repair', weight: 'primary', responsibilities: ['Patch live path', 'Prepare rollback'], output: 'Candidate fix' },
       { name: 'GPT 5.6 Sol', role: 'Recovery verifier', accent: 'indigo' as const, icon: Eye, harness: 'codex', slot: 'verify', weight: 'support', responsibilities: ['Replay the failure', 'Watch recovery'], output: 'Recovery proof' },
+    ],
+  },
+  {
+    label: 'Parallel worktrees',
+    outcome: 'Three isolated branches move at once, then one integration gate lands the result.',
+    layout: 'worktrees',
+    routes: ['M50 23 V29 H17 V35', 'M50 23 V35', 'M50 29 H83 V35', 'M17 66 V72 H50 V78', 'M50 66 V78', 'M83 66 V72 H50 V78'],
+    roles: [
+      { name: 'Fable 5', role: 'Worktree coordinator', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'worklead', weight: 'lead', responsibilities: ['Split non-overlapping scopes', 'Track shared assumptions', 'Sequence integration'], output: 'Parallel brief' },
+      { name: 'Opus 1', role: 'relay-link worktree', accent: 'violet' as const, icon: GitBranch, harness: 'claude-code', slot: 'treea', weight: 'primary', responsibilities: ['Own failover path', 'Test reconnects'], output: 'relay-link branch' },
+      { name: 'Opus 2', role: 'setup worktree', accent: 'violet' as const, icon: GitBranch, harness: 'cursor', slot: 'treeb', weight: 'primary', responsibilities: ['Own install path', 'Test degrade'], output: 'setup branch' },
+      { name: 'Luna', role: 'web worktree', accent: 'green' as const, icon: GitBranch, harness: 'gemini', slot: 'treec', weight: 'support', responsibilities: ['Own recovery UI', 'Run journeys'], output: 'web branch' },
+      { name: 'GPT 5.6 Sol', role: 'Integration gate', accent: 'indigo' as const, icon: GitCompareArrows, harness: 'codex', slot: 'integrate', weight: 'lead', responsibilities: ['Review composed diff', 'Resolve merge risk', 'Run the shared gate'], output: 'Integrated change' },
+    ],
+  },
+  {
+    label: 'Multi-tier delivery',
+    outcome: 'A permanent orchestrator delegates one phase to a reviewer-lead, who directs three implementation subphases.',
+    layout: 'tiers',
+    routes: ['M50 27 V35', 'M50 62 V68 H17 V74', 'M50 62 V74', 'M50 68 H83 V74'],
+    roles: [
+      { name: 'Fable 5', role: 'Program orchestrator', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'chief', weight: 'lead', responsibilities: ['Own every phase', 'Maintain global context', 'Hold final release'], output: 'Program direction' },
+      { name: 'GPT 5.6 Sol', role: 'Phase lead + reviewer', accent: 'indigo' as const, icon: ShieldCheck, harness: 'codex', slot: 'phaselead', weight: 'primary', responsibilities: ['Plan this phase', 'Delegate subphases', 'Review all outputs'], output: 'Phase verdict' },
+      { name: 'Opus 1', role: 'API subphase', accent: 'violet' as const, icon: Code2, harness: 'claude-code', slot: 'suba', weight: 'support', responsibilities: ['Implement API seam'], output: 'API patch' },
+      { name: 'Opus 2', role: 'UI subphase', accent: 'violet' as const, icon: Code2, harness: 'cursor', slot: 'subb', weight: 'support', responsibilities: ['Implement UI states'], output: 'UI patch' },
+      { name: 'Luna', role: 'Verification subphase', accent: 'green' as const, icon: TestTube2, harness: 'gemini', slot: 'subc', weight: 'support', responsibilities: ['Build journey proof'], output: 'Test proof' },
     ],
   },
 ] as const;
@@ -228,6 +269,16 @@ function DemoInteraction(props: {
   selected?: string;
   sent?: boolean;
 }) {
+  if (props.kind === 'Approval needed' && props.sent) {
+    return (
+      <div className="nx-ask nx-demo-ask is-approved">
+        <div className="nx-demo-approved-head"><span><Check size={14} aria-hidden="true" /> Approved</span><small>9:43 PM</small></div>
+        <strong>Four-phase plan approved</strong>
+        <p>Both implementation tracks can start. Codex remains the independent ship gate.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="nx-ask nx-demo-ask">
       <div className="nx-ask-head"><span className="nx-ask-kind">{props.kind}</span></div>
@@ -249,9 +300,9 @@ function DemoInteraction(props: {
           </button>
         )}
       </div>
-      {props.sent && (
+      {props.sent && props.kind === 'Question' && (
         <p className="nx-ask-sent">
-          {props.kind === 'Approval needed' ? 'Approved — the workflows are starting…' : 'Answered — the team is continuing…'}
+          Answered — the team is continuing…
         </p>
       )}
     </div>
@@ -275,6 +326,8 @@ function CollaborationDemo() {
   const [sectionRef, entered] = useEnteredViewport<HTMLElement>(0.28);
   const [phase, setPhase] = useState(reduced ? FINAL_PHASE : -1);
   const streamRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [contentHeight, setContentHeight] = useState(180);
   const [overflowing, setOverflowing] = useState(false);
 
   useEffect(() => {
@@ -283,19 +336,28 @@ function CollaborationDemo() {
       setPhase(0);
       return;
     }
-    const timer = window.setTimeout(() => setPhase((current) => Math.min(FINAL_PHASE, current + 1)), DEMO_INTERVAL_MS);
+    const delay = DEMO_PHASE_DELAYS[phase] ?? DEMO_INTERVAL_MS;
+    const timer = window.setTimeout(() => setPhase((current) => Math.min(FINAL_PHASE, current + 1)), delay);
     return () => window.clearTimeout(timer);
   }, [entered, phase, reduced]);
 
-  useEffect(() => {
-    const node = streamRef.current;
-    if (!node || phase < 0) return;
-    const frame = window.requestAnimationFrame(() => {
-      setOverflowing(node.scrollHeight > node.clientHeight + 4);
-      node.scrollTo({ top: node.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [phase, reduced]);
+  useLayoutEffect(() => {
+    const stream = streamRef.current;
+    const content = contentRef.current;
+    if (!stream || !content) return;
+
+    const measure = (): void => {
+      const nextHeight = Math.ceil(content.getBoundingClientRect().height);
+      setContentHeight((current) => current === nextHeight ? current : nextHeight);
+      setOverflowing(content.scrollHeight > stream.clientHeight + 4);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    observer.observe(stream);
+    return () => observer.disconnect();
+  }, []);
 
   const opusOneResearch: DemoTool[] = [
     { icon: 'search', label: <>Searched relay dial, cache, and setup entry points</> },
@@ -354,7 +416,7 @@ function CollaborationDemo() {
               ? { actor: 'GPT 5.6', accent: 'indigo' as const }
               : undefined;
 
-  const windowHeight = reduced ? 760 : Math.min(760, 280 + Math.max(0, phase) * 20);
+  const windowHeight = Math.min(760, Math.max(320, contentHeight + 116));
 
   return (
     <section ref={sectionRef} className={`nx-landing-story nx-demo-story ${entered ? 'is-entered' : ''}`} aria-labelledby="landing-demo-title">
@@ -383,7 +445,8 @@ function CollaborationDemo() {
             aria-live="polite"
             aria-atomic="false"
           >
-            <ol className="nx-demo-thread">
+            <div ref={contentRef} className="nx-demo-content">
+              <ol className="nx-demo-thread">
           {phase >= 0 && (
             <DemoTurn actor="Richard" accent="user" time="9:41 PM">
               <div className="nx-prose"><p>Make the first Codor setup work on filtered networks too. Keep one pairing code for local and relay access, preserve custom relay URLs, and have the team prove both recovery directions before we ship it.</p></div>
@@ -406,7 +469,7 @@ function CollaborationDemo() {
                 detail="Two workers in parallel · independent review before deploy"
                 options={['Approve plan', 'Ask for changes']}
                 selected={phase >= 3 ? 'Approve plan' : undefined}
-                sent={phase >= 4}
+                sent={phase >= 5}
               />
             </DemoTurn>
           )}
@@ -520,8 +583,9 @@ function CollaborationDemo() {
               <div className="nx-batch"><span className="nx-batch-line is-active"><Upload size={14} aria-hidden="true" />Production deployment complete · 0 regressions</span></div>
             </DemoTurn>
           )}
-            </ol>
-            {active && <DemoTyping actor={active.actor} accent={active.accent} />}
+              </ol>
+              {active && <DemoTyping actor={active.actor} accent={active.accent} />}
+            </div>
           </div>
         </div>
       </div>
@@ -578,6 +642,7 @@ function WorkflowStory() {
   }, [visible, reduced]);
 
   const workflow = WORKFLOWS[active] ?? WORKFLOWS[0];
+  const meteorGradient = `workflow-meteor-${workflow.layout}`;
   return (
     <section ref={sectionRef} className={`nx-landing-story is-split nx-workflow-story ${entered ? 'is-entered' : ''}`} aria-labelledby="workflow-title">
       <div className="nx-story-copy">
@@ -591,20 +656,31 @@ function WorkflowStory() {
           <strong>{workflow.label}</strong>
         </header>
         <div className={`nx-workflow-map is-${workflow.layout}`} key={workflow.label}>
-          <svg className="nx-workflow-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <svg className={`nx-workflow-links ${visible ? 'is-live' : ''}`} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id={meteorGradient} x1="-8" y1="0" x2="1" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stopColor="var(--c-agent)" stopOpacity="0" />
+                <stop offset="0.62" stopColor="var(--c-agent)" stopOpacity="0.55" />
+                <stop offset="1" stopColor="var(--c-agent)" stopOpacity="1" />
+              </linearGradient>
+            </defs>
             {workflow.routes.map((route, index) => {
               const routeId = `workflow-${workflow.layout}-${String(index)}`;
               const duration = 2.4 + index * 0.28;
               const delay = index * 0.44;
               return (
                 <g key={routeId}>
-                  <path id={routeId} d={route} />
-                  <circle className="nx-workflow-packet" r="1.35" opacity="0">
-                    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.88;1" dur={`${String(duration)}s`} begin={`${String(delay)}s`} repeatCount="indefinite" />
-                    <animateMotion dur={`${String(duration)}s`} begin={`${String(delay)}s`} repeatCount="indefinite">
-                      <mpath href={`#${routeId}`} />
-                    </animateMotion>
-                  </circle>
+                  <path className="nx-workflow-route" id={routeId} d={route} />
+                  {visible && !reduced && (
+                    <g className="nx-workflow-meteor" opacity="0">
+                      <path className="nx-workflow-meteor-tail" d="M -10 -2 L 0.2 0 L -10 2 L -6 0 Z" fill={`url(#${meteorGradient})`} />
+                      <path className="nx-workflow-meteor-head" d="M -1.4 -1.65 L 1.5 0 L -1.4 1.65 Z" />
+                      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.14;0.84;1" dur={`${String(duration)}s`} begin={`${String(delay)}s`} repeatCount="indefinite" />
+                      <animateMotion rotate="auto" dur={`${String(duration)}s`} begin={`${String(delay)}s`} repeatCount="indefinite">
+                        <mpath href={`#${routeId}`} />
+                      </animateMotion>
+                    </g>
+                  )}
                 </g>
               );
             })}
@@ -724,13 +800,23 @@ function ContextRing({ value }: { value: number }) {
 }
 
 function LimitsVisual() {
+  const reduced = useMemo(prefersReducedMotion, []);
+  const [visualRef, , visible] = useViewportPresence<HTMLDivElement>(0.48);
+  const [drain, setDrain] = useState(0);
+
+  useEffect(() => {
+    if (reduced || !visible || drain >= 9) return;
+    const timer = window.setTimeout(() => setDrain((current) => Math.min(9, current + 1)), 2_200);
+    return () => window.clearTimeout(timer);
+  }, [drain, reduced, visible]);
+
   const members = [
     { name: 'Richard', handle: 'richard', detail: 'Channel owner', accent: 'user' as const, human: true, state: 'Owner', context: 0, fiveHour: 0, weekly: 0 },
-    { name: 'Fable 5', handle: 'fable', detail: 'claude-code · opus', accent: 'green' as const, human: false, state: 'Idle', context: 32, fiveHour: 72, weekly: 18 },
-    { name: 'GPT 5.6', handle: 'codex', detail: 'codex · gpt-5.6', accent: 'indigo' as const, human: false, state: 'Working', context: 68, fiveHour: 43, weekly: 61 },
+    { name: 'Fable 5', handle: 'fable', detail: 'claude-code · opus', accent: 'green' as const, human: false, state: 'Idle', context: 32, fiveHour: 72 - drain, weekly: 18 - Math.floor(drain / 3) },
+    { name: 'GPT 5.6', handle: 'codex', detail: 'codex · gpt-5.6', accent: 'indigo' as const, human: false, state: 'Working', context: 68, fiveHour: 43 - Math.floor(drain * 0.78), weekly: 61 - Math.floor(drain / 2) },
   ];
   return (
-    <div className="nx-feature-visual nx-limits-visual" aria-label="People and agents with live usage limits">
+    <div ref={visualRef} className="nx-feature-visual nx-limits-visual" aria-label="People and agents with live usage limits">
       <header>
         <strong>People &amp; agents</strong>
         <span><RefreshCw size={13} aria-hidden="true" /> Updated now</span>
@@ -770,7 +856,7 @@ function ReviewVisual() {
       <section className="nx-review-window nx-review-preview-window" aria-label="Attachment preview">
         <header><span><Eye size={13} aria-hidden="true" /> Preview</span><small>2 attachments</small></header>
         <div className="nx-review-gallery">
-          <article className="nx-review-image-card"><div><span /><i /><b /></div><strong>mobile-reference.png</strong><small>Image · #527 · 164 KB</small></article>
+          <article className="nx-review-image-card"><div className="nx-review-image-placeholder"><FileImage size={34} aria-hidden="true" /><span>Image preview</span></div><strong>mobile-reference.png</strong><small>Image · #527 · 164 KB</small></article>
           <article className="nx-review-doc-card"><FileText size={22} aria-hidden="true" /><strong>handoff.md</strong><small>Document · #531 · 8 KB</small><span>Download</span></article>
         </div>
       </section>
@@ -778,10 +864,13 @@ function ReviewVisual() {
         <header><span><GitCompareArrows size={13} aria-hidden="true" /> Diff</span><small><span className="nx-stat-add">+84</span> <span className="nx-stat-del">−31</span></small></header>
         <div className="nx-review-diff">
           <aside className="nx-review-history">
-            <header><GitBranch size={13} aria-hidden="true" /><strong>Git history</strong><small>12 commits</small></header>
-            <span className="is-active"><b>Landing micro-motion</b><code>15b7a00</code><small>Richard · now</small></span>
-            <span><b>Refine onboarding</b><code>e491fc3</code><small>Richard · 2h</small></span>
-            <span><b>Relay entry</b><code>e450a3a</code><small>Richard · 3h</small></span>
+            <div className="nx-review-history-toggle"><ChevronRight className="is-open" size={13} aria-hidden="true" /><strong>Working tree / HEAD</strong><small>History</small></div>
+            <div className="nx-review-history-list">
+              <span className="is-active"><b>Working tree / HEAD</b><small>Live</small></span>
+              <span><b>Expand landing workflow story</b><code>5f0811a</code><small>Richard · now</small></span>
+              <span><b>Polish landing product visuals</b><code>8c5e961</code><small>Richard · 24m</small></span>
+              <span><b>Deepen landing product story</b><code>15b7a00</code><small>Richard · 38m</small></span>
+            </div>
           </aside>
           <div className="nx-review-patch">
             <header><code>LandingPage.tsx</code><span className="nx-stat-add">+84</span><span className="nx-stat-del">−31</span></header>

@@ -385,17 +385,18 @@
   position: relative;
   width: 100%;
   height: calc(100% - 54px);
-  overflow-x: hidden;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
   padding: 24px 26px 38px;
-  scrollbar-width: none;
-  scroll-behavior: smooth;
 }
-.nx-demo-stream::-webkit-scrollbar { display: none; }
 .nx-demo-stream.is-overflowing {
+  justify-content: flex-end;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 11%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 11%, #000 100%);
 }
+.nx-demo-content { flex: none; width: 100%; min-width: 0; }
 .nx-demo-thread {
   display: flex;
   flex-direction: column;
@@ -419,6 +420,13 @@
 .nx-demo-ask .nx-ask-options { display: flex; flex-wrap: wrap; gap: 7px; }
 .nx-demo-ask .nx-btn { min-height: 32px; }
 .nx-demo-ask .is-demo-clicked { animation: nx-demo-click 460ms var(--m-ease) both; }
+.nx-demo-ask.is-approved { display: grid; gap: 7px; border-color: color-mix(in srgb, var(--c-live) 42%, var(--c-line)); background: color-mix(in srgb, var(--c-live) 7%, var(--c-surface)); }
+.nx-demo-approved-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nx-demo-approved-head > span { display: inline-flex; align-items: center; gap: 6px; color: var(--c-live-text); font: var(--t-caption-strong); }
+.nx-demo-approved-head > span svg { padding: 2px; border-radius: 50%; color: var(--c-surface); background: var(--c-live); }
+.nx-demo-approved-head > small { color: var(--c-faded); font: var(--t-caption); }
+.nx-demo-ask.is-approved > strong { font: var(--t-ui-strong); }
+.nx-demo-ask.is-approved > p { margin: 0; color: var(--c-secondary); font: var(--t-caption); }
 .nx-demo-typing {
   display: flex;
   align-items: center;
@@ -465,6 +473,8 @@
 .nx-workflow-map.is-studio { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 0.82fr 1fr 0.82fr; grid-template-areas: 'brief brief' 'visual prototype' 'decision decision'; }
 .nx-workflow-map.is-council { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: 1fr 0.9fr; grid-template-areas: 'implementation security experience' 'verdict verdict verdict'; }
 .nx-workflow-map.is-incident { grid-template-columns: 0.92fr 1.08fr; grid-template-rows: 1fr 1fr 0.86fr; grid-template-areas: 'command observe' 'command repair' 'verify verify'; }
+.nx-workflow-map.is-worktrees { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: 0.76fr 1fr 0.8fr; grid-template-areas: 'worklead worklead worklead' 'treea treeb treec' 'integrate integrate integrate'; }
+.nx-workflow-map.is-tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: 0.78fr 0.92fr 1fr; grid-template-areas: 'chief chief chief' 'phaselead phaselead phaselead' 'suba subb subc'; }
 .nx-workflow-map.is-pipeline .is-lead { grid-area: lead; }
 .nx-workflow-role.is-build { grid-area: build; }
 .nx-workflow-role.is-review { grid-area: review; }
@@ -480,9 +490,21 @@
 .nx-workflow-role.is-observe { grid-area: observe; }
 .nx-workflow-role.is-repair { grid-area: repair; }
 .nx-workflow-role.is-verify { grid-area: verify; }
+.nx-workflow-role.is-worklead { grid-area: worklead; }
+.nx-workflow-role.is-treea { grid-area: treea; }
+.nx-workflow-role.is-treeb { grid-area: treeb; }
+.nx-workflow-role.is-treec { grid-area: treec; }
+.nx-workflow-role.is-integrate { grid-area: integrate; }
+.nx-workflow-role.is-chief { grid-area: chief; }
+.nx-workflow-role.is-phaselead { grid-area: phaselead; }
+.nx-workflow-role.is-suba { grid-area: suba; }
+.nx-workflow-role.is-subb { grid-area: subb; }
+.nx-workflow-role.is-subc { grid-area: subc; }
 .nx-workflow-links { position: absolute; z-index: -1; inset: 16px; width: calc(100% - 32px); height: calc(100% - 32px); overflow: visible; }
-.nx-workflow-links path { fill: none; stroke: color-mix(in srgb, var(--c-agent) 45%, var(--c-line-strong)); stroke-width: 1.25; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; animation: nx-route-flow 8s linear infinite; }
-.nx-workflow-packet { fill: var(--c-agent); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--c-agent) 70%, transparent)); }
+.nx-workflow-route { fill: none; stroke: color-mix(in srgb, var(--c-agent) 45%, var(--c-line-strong)); stroke-width: 1.25; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; animation: nx-route-flow 8s linear infinite paused; }
+.nx-workflow-links.is-live .nx-workflow-route { animation-play-state: running; }
+.nx-workflow-meteor { stroke: none; filter: drop-shadow(0 0 2.6px color-mix(in srgb, var(--c-agent) 82%, transparent)); }
+.nx-workflow-meteor-head { fill: color-mix(in srgb, var(--c-agent) 82%, white); }
 .nx-workflow-role {
   position: relative;
   z-index: 1;
@@ -579,6 +601,7 @@
 .nx-landing-member { display: grid; gap: 9px; padding: 9px; border-radius: 12px; }
 .nx-landing-member + .nx-landing-member { border-top: 1px solid var(--c-line); border-radius: 0; }
 .nx-landing-member.is-owner { padding-block: 8px; }
+.nx-landing-member { opacity: 0; transform: translateX(-8px); }
 .nx-landing-story.is-entered .nx-landing-member { animation: nx-roster-arrive 520ms var(--m-ease) both; }
 .nx-landing-story.is-entered .nx-landing-member:nth-child(2) { animation-delay: 110ms; }
 .nx-landing-story.is-entered .nx-landing-member:nth-child(3) { animation-delay: 220ms; }
@@ -601,15 +624,17 @@
 .nx-landing-member-limits b { font: 650 9px/1 var(--f-sans); }
 .nx-landing-member-limits i { height: 4px; overflow: hidden; border-radius: var(--r-full); background: var(--c-muted); }
 .nx-landing-member-limits i { grid-column: 1 / -1; }
-.nx-landing-member-limits em { display: block; width: var(--limit-width); height: 100%; border-radius: inherit; background: var(--c-live); animation: nx-limit-fill 1.2s var(--m-ease) both; }
+.nx-landing-member-limits em { display: block; width: var(--limit-width); height: 100%; border-radius: inherit; background: var(--c-live); animation: nx-limit-fill 1.2s var(--m-ease) both; transition: width 2.05s linear; }
 .nx-landing-member-limits small { color: var(--c-faded); white-space: nowrap; font: 500 9px/1 var(--f-sans); }
 @keyframes nx-limit-fill { from { transform: scaleX(0); transform-origin: left; } }
 @keyframes nx-refresh { 45%, 55% { transform: rotate(180deg); } 100% { transform: rotate(360deg); } }
 @keyframes nx-context-draw { from { stroke-dashoffset: 100; } }
-@keyframes nx-roster-arrive { from { opacity: 0; transform: translateX(-8px); } }
+@keyframes nx-roster-arrive { to { opacity: 1; transform: translateX(0); } }
 
-.nx-review-visual { min-height: 370px; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-content: stretch; gap: 12px; padding: 12px; border: 0; background: transparent; box-shadow: none; overflow: visible; }
+.nx-review-visual { min-height: 438px; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-content: stretch; gap: 12px; padding: 12px; border: 0; background: transparent; box-shadow: none; overflow: visible; }
 .nx-review-window { min-width: 0; overflow: hidden; border: 1px solid var(--c-line-strong); border-radius: 16px; background: var(--c-surface); box-shadow: var(--e-control); }
+.nx-review-preview-window,
+.nx-review-diff-window { opacity: 0; transform: translateY(7px); }
 .nx-review-window > header { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--c-line); background: var(--c-raised); }
 .nx-review-window > header > span { display: inline-flex; align-items: center; gap: 6px; font: var(--t-caption-strong); }
 .nx-review-window > header > small { color: var(--c-faded); font: 500 9px/1.2 var(--f-sans); }
@@ -619,30 +644,31 @@
 .nx-review-gallery article { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; border: 1px solid var(--c-line); border-radius: 13px; background: var(--c-surface); box-shadow: var(--e-control); }
 .nx-review-gallery strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--t-caption-strong); }
 .nx-review-gallery small { color: var(--c-faded); font: 500 10px/1.3 var(--f-sans); }
-.nx-review-image-card > div { position: relative; flex: 1; min-height: 92px; overflow: hidden; border-radius: 9px; background: linear-gradient(145deg, #1c1c1c 0 24%, #6558df 24% 54%, #f1efe9 54%); }
-.nx-review-image-card > div span { position: absolute; inset: 15% auto auto 10%; width: 55%; height: 8px; border-radius: var(--r-full); background: #fff; opacity: 0.9; }
-.nx-review-image-card > div i { position: absolute; right: 9%; top: 14%; width: 28%; height: 34%; border-radius: 10px; background: #2ecc71; animation: nx-preview-float 3.6s ease-in-out infinite; }
-.nx-review-image-card > div b { position: absolute; left: 10%; bottom: 12%; width: 75%; height: 12%; border-radius: 8px; background: #d6d2ca; }
+.nx-review-image-placeholder { flex: 1; min-height: 92px; display: grid; place-items: center; align-content: center; gap: 7px; border: 1px dashed var(--c-line-strong); border-radius: 9px; color: var(--c-faded); background: linear-gradient(135deg, var(--c-raised), var(--c-muted)); }
+.nx-review-image-placeholder svg { opacity: 0.72; }
+.nx-review-image-placeholder span { font: var(--t-caption-strong); }
 .nx-review-doc-card { justify-content: center; align-items: flex-start; min-height: 92px; }
 .nx-review-doc-card > svg { color: var(--c-faded); }
 .nx-review-doc-card > span { margin-top: auto; padding: 5px 8px; border: 1px solid var(--c-line); border-radius: 8px; color: var(--c-secondary); font: var(--t-caption-strong); }
-.nx-review-diff { min-height: 326px; display: grid; grid-template-rows: auto 1fr; }
-.nx-review-history { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 3px; padding: 7px; border-bottom: 1px solid var(--c-line); background: var(--c-raised); }
-.nx-review-history > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 5px; padding: 7px; }
-.nx-review-history > header { grid-column: 1 / -1; }
-.nx-review-history > header strong { font: var(--t-caption-strong); }
-.nx-review-history > header small { color: var(--c-faded); font: 500 9px/1 var(--f-sans); }
-.nx-review-history > span { min-width: 0; display: grid; gap: 2px; padding: 7px; border-radius: 8px; color: var(--c-secondary); }
-.nx-review-history > span.is-active { color: var(--c-ink); background: var(--c-muted); animation: nx-history-pulse 2.8s ease-in-out infinite; }
-.nx-review-history b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 10px/1.3 var(--f-sans); }
-.nx-review-history code { color: var(--c-faded); font: 500 9px/1.3 var(--f-mono); }
-.nx-review-history > span small { color: var(--c-faded); font: 500 9px/1.3 var(--f-sans); }
-.nx-review-patch { min-width: 0; display: grid; align-content: start; padding: 8px 0; overflow: hidden; }
+.nx-review-diff { position: relative; min-height: 394px; display: grid; grid-template-rows: auto 1fr; }
+.nx-review-history { position: relative; z-index: 3; min-width: 0; border-bottom: 1px solid var(--c-line); }
+.nx-review-history-toggle { min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 7px 11px; color: var(--c-secondary); background: var(--c-raised); }
+.nx-review-history-toggle svg { flex: none; transform: rotate(90deg); }
+.nx-review-history-toggle strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--t-caption-strong); }
+.nx-review-history-toggle small { color: var(--c-faded); font: var(--t-caption); }
+.nx-review-history-list { position: absolute; top: calc(100% - 2px); left: 7px; right: 7px; display: grid; padding: 7px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-raised); box-shadow: var(--e-overlay, var(--e-raised)); }
+.nx-review-history-list > span { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 7px; padding: 6px 8px; border-radius: 8px; color: var(--c-secondary); }
+.nx-review-history-list > span.is-active { color: var(--c-ink); background: var(--c-muted); animation: nx-history-pulse 2.8s ease-in-out infinite; }
+.nx-review-history-list b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9px/1.3 var(--f-sans); }
+.nx-review-history-list code { color: var(--c-faded); font: 500 8px/1.3 var(--f-mono); }
+.nx-review-history-list small { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: var(--c-faded); text-overflow: ellipsis; white-space: nowrap; font: 500 8px/1.3 var(--f-sans); }
+.nx-review-patch { min-width: 0; display: grid; align-content: start; padding: 154px 0 8px; overflow: hidden; }
 .nx-review-patch > header { display: flex; align-items: center; gap: 7px; padding: 5px 11px 9px; border-bottom: 1px solid var(--c-line); }
 .nx-review-patch > header code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; font: var(--t-mono-small); }
 .nx-review-patch > code { overflow: hidden; padding: 3px 11px; text-overflow: ellipsis; white-space: nowrap; font: 500 9px/1.35 var(--f-mono); }
 /* Gate the line-reveal behind viewport entry so it never animates offscreen and
    never leaves a diff line mid-fade (partial opacity fails the contrast check). */
+.nx-review-patch > code { opacity: 0; transform: translateX(8px); }
 .nx-review-visual.is-entered .nx-review-patch > code { animation: nx-diff-line-in 420ms var(--m-ease) both; }
 .nx-review-visual.is-entered .nx-review-patch > code:nth-child(3) { animation-delay: 80ms; }
 .nx-review-visual.is-entered .nx-review-patch > code:nth-child(4) { animation-delay: 140ms; }
@@ -650,17 +676,22 @@
 .nx-review-patch > code.is-meta { color: var(--c-secondary); background: var(--c-raised); }
 .nx-review-patch > code.is-add { color: var(--c-diff-add-strong); background: var(--c-diff-add-bg); }
 .nx-review-patch > code.is-del { color: var(--c-diff-del); background: var(--c-diff-del-bg); }
-@keyframes nx-review-panel { from { opacity: 0; transform: translateY(7px); } }
-@keyframes nx-preview-float { 50% { transform: translate(-5px, 4px) rotate(-1deg); } }
+@keyframes nx-review-panel { to { opacity: 1; transform: translateY(0); } }
 @keyframes nx-history-pulse { 50% { transform: translateX(2px); } }
-@keyframes nx-diff-line-in { from { opacity: 0; transform: translateX(8px); } }
+@keyframes nx-diff-line-in { to { opacity: 1; transform: translateX(0); } }
 
+.nx-landing-story > .nx-story-copy { opacity: 0; transform: translateY(14px); }
+.nx-landing-story > .nx-workflow-visual,
+.nx-landing-story > .nx-connectivity-map,
+.nx-landing-story > .nx-feature-visual,
+.nx-landing-story > .nx-demo-stage { opacity: 0; transform: translateY(18px) scale(0.985); }
 .nx-landing-story.is-entered > .nx-story-copy { animation: nx-story-copy-in 680ms var(--m-ease) both; }
 .nx-landing-story.is-entered > .nx-workflow-visual,
 .nx-landing-story.is-entered > .nx-connectivity-map,
-.nx-landing-story.is-entered > .nx-feature-visual { animation: nx-story-visual-in 760ms 80ms var(--m-ease) both; }
-@keyframes nx-story-copy-in { from { opacity: 0; transform: translateY(14px); } }
-@keyframes nx-story-visual-in { from { opacity: 0; transform: translateY(18px) scale(0.985); } }
+.nx-landing-story.is-entered > .nx-feature-visual,
+.nx-landing-story.is-entered > .nx-demo-stage { animation: nx-story-visual-in 760ms 80ms var(--m-ease) both; }
+@keyframes nx-story-copy-in { to { opacity: 1; transform: translateY(0); } }
+@keyframes nx-story-visual-in { to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .nx-attachment-drop { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px dashed var(--c-line-strong); border-radius: 14px; color: var(--c-link); background: var(--c-raised); }
 .nx-attachment-drop span { display: grid; gap: 3px; }
@@ -821,7 +852,7 @@
   .nx-landing-context svg { width: 21px; height: 21px; }
   .nx-review-visual { gap: 12px; background: transparent; }
   .nx-review-gallery { padding: 8px; }
-  .nx-review-history > span:nth-of-type(3) { display: none; }
+  .nx-review-history-list > span:nth-child(4) { display: none; }
   .nx-attachment-files { display: grid; }
 }
 
@@ -849,8 +880,16 @@
   .nx-landing-story.is-entered > .nx-workflow-visual,
   .nx-landing-story.is-entered > .nx-connectivity-map,
   .nx-landing-story.is-entered > .nx-feature-visual { animation: none !important; }
-  .nx-workflow-packet { display: none; }
-  .nx-demo-stream { scroll-behavior: auto; }
+  .nx-workflow-meteor { display: none; }
   .nx-demo-window { transition: none; }
   .nx-voice-wave i { transition: none; }
+  .nx-landing-story > .nx-story-copy,
+  .nx-landing-story > .nx-workflow-visual,
+  .nx-landing-story > .nx-connectivity-map,
+  .nx-landing-story > .nx-feature-visual,
+  .nx-landing-story > .nx-demo-stage,
+  .nx-landing-member,
+  .nx-review-preview-window,
+  .nx-review-diff-window,
+  .nx-review-patch > code { opacity: 1 !important; transform: none !important; }
 }

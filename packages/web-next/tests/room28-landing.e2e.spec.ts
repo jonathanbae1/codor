@@ -72,15 +72,39 @@ test.describe('local setup landing', () => {
     // approval control and Fable launching the workflows (Codex review #556).
     const approval = settled.locator('.nx-turn', { hasText: 'Approved — run all four phases' });
     await expect(approval.locator('.nx-turn-author')).toHaveText('Richard');
+    await expect(settled.locator('.nx-demo-ask.is-approved')).toContainText('Four-phase plan approved');
     await expect(settled.locator('.nx-demo-thread > .nx-turn')).toHaveCount(22);
     await expect(page.locator('.nx-demo-windowbar')).toHaveCount(1);
     await expect(settled.getByRole('textbox')).toHaveCount(0);
+    await expect(settled).toHaveCSS('overflow-y', 'hidden');
+    const feed = await settled.evaluate((stream) => {
+      const content = stream.querySelector<HTMLElement>('.nx-demo-content');
+      const last = stream.querySelector<HTMLElement>('.nx-demo-thread > .nx-turn:last-child');
+      return {
+        scrollTop: stream.scrollTop,
+        contentTop: content?.getBoundingClientRect().top ?? 0,
+        streamTop: stream.getBoundingClientRect().top,
+        lastBottom: last?.getBoundingClientRect().bottom ?? 0,
+        streamBottom: stream.getBoundingClientRect().bottom,
+      };
+    });
+    expect(feed.scrollTop).toBe(0);
+    expect(feed.contentTop).toBeLessThan(feed.streamTop);
+    expect(feed.lastBottom).toBeLessThanOrEqual(feed.streamBottom + 1);
+    await expect(page.locator('.nx-workflow-dots i')).toHaveCount(6);
+    await expect(page.locator('.nx-review-image-placeholder')).toContainText('Image preview');
+    await expect(page.locator('.nx-review-history-toggle')).toContainText('Working tree / HEAD');
+    await expect(page.locator('.nx-review-history-list')).toContainText('Expand landing workflow story');
   });
 
   test('the landing fits a 320px phone and stays axe-clean', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 780 });
     await page.goto('/');
     await expect(page.getByTestId('landing-page')).toBeVisible();
+    const workflow = page.locator('.nx-workflow-story');
+    await expect(workflow.locator('.nx-story-copy')).toHaveCSS('opacity', '0');
+    await workflow.scrollIntoViewIfNeeded();
+    await expect(workflow.locator('.nx-story-copy')).toHaveCSS('opacity', '1');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     await expect(page.locator('.nx-code-cell')).toHaveCount(8);
