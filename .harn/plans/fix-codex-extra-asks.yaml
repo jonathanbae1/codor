@@ -1,0 +1,176 @@
+id: fix-codex-extra-asks
+title: Codex bridges permissions approvals and url-mode MCP elicitations
+notes: "Stacked on fix/codex-approvals (19ca8f5). Bridge two more pinned 0.144.5
+  server requests onto the EXISTING approval-card machinery (no new mechanism):
+  item/permissions/requestApproval and mcpServer/elicitation/request (url mode
+  only). item/tool/requestUserInput stays UNBRIDGED (experimental + needs a
+  text-input card); ask stays false; approvals:'runtime' already covers the two
+  new card types as approval.raised. The shipped command/file approval bridge is
+  generalized (PendingApproval -> PendingRequest with per-method respond/cancel
+  builders) with its decisions, native approvalId/itemId keys, options, and
+  regression behavior preserved byte-for-byte. Wire validated against pinned
+  0.144.5 (/tmp/codex-01445-protocol.a8Enjq/v2). Permissions: allow-once ->
+  {permissions:<requested>, scope:'turn'}, allow-for-session -> scope:'session',
+  deny/cancel/no-turn/stale -> {permissions:{}, scope:'turn'}; strictAutoReview
+  is always false/omitted and never combined with session scope; the card
+  discloses the FULL requested profile (network.enabled, fileSystem
+  read/write/entries/globs/special paths). Elicitation: url mode only, HTTPS +
+  host + no embedded credentials or it is declined; card frames the URL as
+  untrusted from the named MCP server, keeps it inert, and acceptance reads as
+  'completed' not validated; response is the pinned {action, content:null,
+  _meta:null}; form/openai-form/invalid-url -> immediate decline; teardown /
+  interrupt / stale association / no deliverable turn -> cancel. Guard fix: a
+  non-null turnId must EXACTLY equal the established active turn id (a request
+  bearing a turnId while the turn id is still the pre-turn placeholder is
+  rejected); a null turnId (elicitation) parks only while a non-terminal turn is
+  active, else immediate cancel. Parking for the new methods is collision-proof:
+  the JSON-RPC request id namespaced by method and client generation;
+  elicitation cards carry serverName + elicitationId in their semantic detail so
+  two simultaneous elicitations cannot coalesce (proved by a daemon-level test).
+  Scope + must-fixes per fable #768 / investigator #763."
+assumptions:
+  retire:
+    - id: codex-bridges-runtime-command-and-file-approvals
+      reason: It asserts bridging EXACTLY the two command/file requests and that the
+        other three stay unbridged; permissions and url-elicitation are now
+        bridged too, so the exactly-two contract is replaced by the split pair
+        below.
+  create:
+    - id: codex-bridges-command-and-file-approvals
+      title: Codex bridges command and file-change approvals (generalized machinery)
+      statement: The Codex adapter must bridge item/commandExecution/requestApproval
+        and item/fileChange/requestApproval to approval.raised cards through a
+        shared per-request parking machine, parking command/file decisions under
+        their native approvalId (falling back to itemId) and answering with the
+        pinned v2 decisions accept|acceptForSession|decline (options from a
+        command's availableDecisions, omitting acceptForSession when
+        unadvertised; fixed enum for file changes with acceptForSession labelled
+        session-scoped); every request with no active non-terminal turn, or a
+        non-null turnId that does not exactly equal the established active turn
+        id (including the pre-turn placeholder window), is declined; and every
+        still-pending request resolves 'cancel' on
+        interrupt/client-close/turn-end so Codex never blocks. approvals stays
+        'runtime', ask stays false.
+      reason: Preserves the shipped command/file behavior and native keys
+        byte-for-byte while generalizing the parking machine so other request
+        types can reuse it, and tightens the turn guard so a stale request
+        cannot park against a placeholder turn.
+      depends_on:
+        - codex-app-server-is-the-member-runtime
+        - canonical-spawn-controls-enforced
+        - interaction-state-machine-persisted
+    - id: codex-bridges-permissions-and-url-elicitation
+      title: Codex bridges permissions approvals and url-mode MCP elicitations
+      statement: The Codex adapter must bridge item/permissions/requestApproval and
+        mcpServer/elicitation/request (url mode) to approval.raised cards on the
+        shared parking machine, keyed collision-proof by the JSON-RPC request id
+        namespaced by method and client generation. A permissions card discloses
+        the full requested profile (network.enabled and fileSystem
+        read/write/entries/globs/special paths) and answers allow-once ->
+        {permissions:<requested>, scope:'turn'}, allow-for-session ->
+        {permissions:<requested>, scope:'session'}, deny/cancel/no-turn/stale ->
+        {permissions:{}, scope:'turn'}, with strictAutoReview always
+        false/omitted and never combined with session scope. A url elicitation
+        card is surfaced only for an HTTPS URL with a host and no embedded
+        credentials (otherwise, and for form/openai-form modes, the response is
+        an immediate {action:'decline', content:null, _meta:null}); it frames
+        the URL as untrusted from the named MCP server, keeps it inert (no
+        fetch/preview), carries serverName + elicitationId in its semantic
+        detail so two simultaneous elicitations never coalesce, reads acceptance
+        as completed rather than validated, and answers accept/decline while
+        teardown / interrupt / stale association / no deliverable turn
+        (including a between-turn null-turnId elicitation) resolve
+        {action:'cancel', content:null, _meta:null}. requestUserInput stays
+        unbridged (immediate JSON-RPC error).
+      reason: Extends approvals to the user-enabled permissions tool and MCP url
+        elicitations without a new card mechanism, honoring Codex's own security
+        boundary for untrusted elicitation URLs and its nullable-turnId
+        semantics.
+      depends_on:
+        - codex-bridges-command-and-file-approvals
+        - interaction-recorrelation-keys-on-semantic-identity-with-detail
+  reviewed:
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: App-server retention, session_ref/thread identity, resume, interrupt
+        routing, and env merge are unchanged; connect() registers the two new
+        request handlers and bumps a per-connect generation counter used only to
+        namespace new-method parking keys.
+    - id: codex-app-server-contract-is-pinned-to-0-144-5
+      outcome: unchanged
+      reason: The wire stays newline-delimited v2 JSON-RPC verified through the
+        injected fake with no live Codex; only the NOTES prose is updated to
+        move permissions and url-elicitation from unbridged to bridged and name
+        the remaining limitations.
+    - id: interaction-recorrelation-keys-on-semantic-identity-with-detail
+      outcome: unchanged
+      reason: interactionKey is unchanged; a daemon-level test is added proving two
+        simultaneous elicitation cards whose detail differs only by
+        elicitationId get two distinct rows rather than coalescing.
+anchors:
+  codex-bridges-runtime-command-and-file-approvals:
+    codex-approval-bridge:
+      action: remove
+      reason: Re-pointed to codex-bridges-command-and-file-approvals as the
+        generalized machine.
+    codex-approval-respond:
+      action: remove
+      reason: Re-pointed to the generalized respond path.
+    codex-approval-bridge-regression:
+      action: remove
+      reason: Re-pointed; command/file regressions preserved under the new assumption.
+  codex-bridges-command-and-file-approvals:
+    codex-cmdfile-bridge:
+      action: change
+      reason: Generalized bridgeRequest + fixed turn guard + per-request parking, with
+        command/file builders and native keys preserved.
+    codex-cmdfile-respond:
+      action: change
+      reason: respondInteraction resolves via the per-request responder.
+    codex-cmdfile-regression:
+      action: change
+      reason: Shipped command/file regressions retained, re-anchored,
+        guard-placeholder case tightened.
+  codex-bridges-permissions-and-url-elicitation:
+    codex-permelic-bridge:
+      action: change
+      reason: permissions + url-elicitation card/response builders, URL validation,
+        nullable-turnId lifecycle, and handler registration.
+    codex-permelic-regression:
+      action: change
+      reason: fake-app-server tests for permissions and elicitation per method.
+  codex-app-server-is-the-member-runtime:
+    codex-app-server-session-lifecycle:
+      action: change
+      reason: Register the two new handlers and bump the per-connect generation
+        counter.
+    codex-app-server-session-regression:
+      action: change
+      reason: The unknown-interaction rejection message changes from "no pending Codex
+        approval" to "no pending Codex request"; lifecycle behavior is
+        unchanged.
+  codex-app-server-contract-is-pinned-to-0-144-5:
+    codex-app-server-contract-notes:
+      action: change
+      reason: Move permissions + url-elicitation to bridged; name the remaining
+        unbridged surfaces (requestUserInput, form/openai-form elicitation).
+  interaction-recorrelation-keys-on-semantic-identity-with-detail:
+    interaction-recorrelation-regression:
+      action: change
+      reason: Add the daemon-level two-simultaneous-elicitations non-coalesce test.
+files:
+  - packages/adapters/codex/NOTES.md
+  - packages/adapters/codex/src/adapter.ts
+  - packages/adapters/codex/src/adapter.spec.ts
+  - packages/switchboard/src/fake-adapter.ts
+  - packages/switchboard/src/daemon.spec.ts
+verification: Run the Codex adapter suite (command/file regressions stay green,
+  new permissions + elicitation per-method tests, guard-placeholder +
+  nullable-turnId + URL-security cases) and the switchboard daemon suite
+  (concurrent-elicitation non-coalesce) plus typecheck. If the permissions path
+  is cheaply drivable with request_permissions_tool config, run ONE spend-gated
+  live smoke (a couple of turns max); elicitation live is not required — say so.
+  Run Harn unstaged/staged gates, apply, and commit on fix/codex-extra-asks with
+  no push.
+applied:
+  applied_at: 2026-08-01T09:42:23.656Z

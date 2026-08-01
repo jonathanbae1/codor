@@ -42,14 +42,35 @@ are surfaced as Codor approval cards (`approval.raised`) and parked by their
 native `approvalId` (or `itemId`) until the operator answers via
 `respondInteraction`. Operator choices map to the pinned 0.144.5 v2 decisions:
 allow-once→`accept`, allow-for-session→`acceptForSession`, deny→`decline`; turn
-teardown, client loss, and a request with no matching active turn (including a
-stale approval replayed after `thread/resume`) resolve `cancel`/`decline`. The
-other three server requests — `item/tool/requestUserInput`,
-`mcpServer/elicitation/request`, and `item/permissions/requestApproval` — stay
-UNBRIDGED and keep the transport's immediate JSON-RPC error (a known limitation;
-bridging them needs `capabilities.ask` plus a requestUserInput surface).
-`full-access` stays `approvalPolicy:"never"` with `danger-full-access` (--yolo
-runs unattended).
+teardown, client loss, and a request with no matching active turn (a non-null
+`turnId` must exactly equal the established active turn id; a request bearing one
+while the id is still the pre-turn placeholder is rejected) resolve
+`cancel`/`decline`.
+
+`item/permissions/requestApproval` is also bridged as an `approval.raised` card
+that discloses the FULL requested profile (network + every fileSystem shape:
+read/write/entries/globs). allow-once→`{permissions:<requested>,scope:"turn"}`,
+allow-for-session→`scope:"session"`, deny/no-turn/teardown→`{permissions:{},
+scope:"turn"}`; `strictAutoReview` is always false/omitted and never combined
+with session scope.
+
+`mcpServer/elicitation/request` is bridged for `url` mode only, honoring Codex's
+own security boundary: the URL is surfaced only when HTTPS with a host and no
+embedded credentials, framed as untrusted from the named MCP server and kept
+inert (Codor never fetches or previews it); acceptance means the operator
+completed it, not that Codor validated it. Response is the pinned `{action,
+content:null, _meta:null}`: accept/decline by the operator, `cancel` on
+teardown/stale/no-turn (including a between-turn null-`turnId` elicitation), and
+an immediate `decline` for `form`/`openai/form` modes or an unsafe URL. The
+elicitation card carries `serverName` + a stable elicitation id in its semantic
+detail so two simultaneous elicitations never coalesce. Parking for permissions
+and elicitation is keyed collision-proof by the JSON-RPC request id namespaced by
+method + client generation.
+
+`item/tool/requestUserInput` stays UNBRIDGED (experimental; needs a text-input
+card and `capabilities.ask=true`) — the transport's immediate JSON-RPC error is
+converted by 0.144.5 to empty answers rather than blocking. `full-access` stays
+`approvalPolicy:"never"` with `danger-full-access` (--yolo runs unattended).
 
 ## Exact 0.144.5 request shapes
 

@@ -1,0 +1,21 @@
+id: codex-bridges-command-and-file-approvals
+hash: a-db52746602a3
+title: Codex bridges command and file-change approvals (generalized machinery)
+state: active
+statement: The Codex adapter must bridge item/commandExecution/requestApproval
+  and item/fileChange/requestApproval to approval.raised cards through a shared
+  per-request parking machine, parking command/file decisions under their native
+  approvalId (falling back to itemId) and answering with the pinned v2 decisions
+  accept|acceptForSession|decline (options from a command's availableDecisions,
+  omitting acceptForSession when unadvertised; fixed enum for file changes with
+  acceptForSession labelled session-scoped); every request with no active
+  non-terminal turn, or a non-null turnId that does not exactly equal the
+  established active turn id (including the pre-turn placeholder window), is
+  declined; and every still-pending request resolves 'cancel' on
+  interrupt/client-close/turn-end so Codex never blocks. approvals stays
+  'runtime', ask stays false.
+depends_on:
+  - codex-app-server-is-the-member-runtime
+  - canonical-spawn-controls-enforced
+  - interaction-state-machine-persisted
+created_by: fix-codex-extra-asks

@@ -6815,5 +6815,34 @@ describe('interaction re-correlation keys on semantic identity with detail', () 
       return i && i.state === 'orphaned' ? i : undefined;
     })).toBeDefined();
   });
+
+  it('two simultaneous elicitations with distinct elicitationId do not coalesce', async () => {
+    const alpha = spawnAgent('elicit-concurrent');
+    const base = {
+      kind: 'approval' as const,
+      prompt: 'MCP server “acme-mcp” asks you to open a link',
+      tool: 'mcp_elicitation',
+      options: [{ label: 'mark completed' }, { label: 'decline' }],
+    };
+    // Identical prompt/tool/options; the ONLY difference is the elicitationId in
+    // the semantic detail. The daemon must keep them as two distinct rows.
+    fake.enqueue({
+      kind: 'multi_ask',
+      cards: [
+        { ...base, detail: 'acme-mcp · https://a.example/one · elic-1' },
+        { ...base, detail: 'acme-mcp · https://a.example/two · elic-2' },
+      ],
+      reply: () => 'both handled',
+    });
+    daemon.postHumanMessage('eng', '@elicit-concurrent please');
+    const pendings = await until(() => {
+      const list = daemon.store.listInteractions('eng', 'pending').filter((i) => i.member_id === alpha.id);
+      return list.length === 2 ? list : undefined;
+    });
+    expect(pendings).toHaveLength(2);
+    expect(new Set(pendings.map((i) => i.message_id)).size).toBe(2);
+    for (const pending of pendings) await daemon.answerInteraction('eng', pending.id, 'mark completed');
+    await daemon.settle();
+  });
 });
 // harn:end interaction-recorrelation-keys-on-semantic-identity-with-detail

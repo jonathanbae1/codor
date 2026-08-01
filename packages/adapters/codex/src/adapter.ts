@@ -122,9 +122,14 @@ interface TurnState {
   turnId?: string;
 }
 
-/** A native approval request parked awaiting the operator's decision. */
-interface PendingApproval {
-  resolve: (decision: CodexApprovalDecision) => void;
+/**
+ * A native server request parked awaiting the operator's answer. `respond`
+ * maps the operator's card answer to the method's pinned response; `cancel`
+ * resolves the method's teardown response. Both resolve the transport promise.
+ */
+interface PendingRequest {
+  respond: (answer: unknown) => void;
+  cancel: () => void;
 }
 
 interface CodexRuntime {
@@ -135,8 +140,10 @@ interface CodexRuntime {
   child: ChildProcessWithoutNullStreams | null;
   connecting: Promise<void> | null;
   active: TurnState | null;
-  /** Native approval requests parked by native id awaiting a Codor answer. */
-  pendingApprovals: Map<string, PendingApproval>;
+  /** Native server requests parked by native id awaiting a Codor answer. */
+  pendingRequests: Map<string, PendingRequest>;
+  /** Bumped on every connect; namespaces new-method parking keys across reconnects. */
+  generation: number;
   threadId?: string;
   /** Effective thread baseline reported by app-server start/resume/settings. */
   threadModel?: string;
@@ -290,6 +297,101 @@ function decisionForAnswer(answer: unknown): CodexApprovalDecision {
   if (answer === APPROVE_ONCE) return 'accept';
   if (answer === APPROVE_SESSION) return 'acceptForSession';
   return 'decline';
+}
+
+// ── permissions/requestApproval ─────────────────────────────────────────────
+/** Pinned 0.144.5 permission-grant response. Empty profile = safe deny. */
+type CodexPermissionResponse = {
+  permissions: Record<string, unknown>;
+  scope: 'turn' | 'session';
+  strictAutoReview?: boolean;
+};
+
+/** Deny/no-turn/teardown: grant nothing for this turn. strictAutoReview never with session. */
+function emptyGrant(): CodexPermissionResponse {
+  return { permissions: {}, scope: 'turn', strictAutoReview: false };
+}
+
+/** allow-once → requested profile scope:turn; allow-for-session → scope:session; else empty. */
+function permissionGrant(answer: unknown, requested: Record<string, unknown>): CodexPermissionResponse {
+  if (answer === APPROVE_ONCE) return { permissions: requested, scope: 'turn', strictAutoReview: false };
+  if (answer === APPROVE_SESSION) return { permissions: requested, scope: 'session' };
+  return emptyGrant();
+}
+
+/** Disclose the FULL requested profile: network + every fileSystem representation. */
+function permissionSummary(requested: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const net = record(requested.network);
+  if (net?.enabled === true) parts.push('network access');
+  const fs = record(requested.fileSystem);
+  if (fs !== undefined) {
+    const list = (value: unknown): string[] =>
+      Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+    const read = list(fs.read);
+    const write = list(fs.write);
+    if (read.length > 0) parts.push(`read: ${read.join(', ')}`);
+    if (write.length > 0) parts.push(`write: ${write.join(', ')}`);
+    if (Array.isArray(fs.entries) && fs.entries.length > 0) {
+      parts.push(`entries: ${JSON.stringify(fs.entries)}`);
+    }
+    if (typeof fs.globScanMaxDepth === 'number') parts.push(`globScanMaxDepth: ${fs.globScanMaxDepth}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : '(no additional access requested)';
+}
+
+function permissionCard(nativeId: string, requested: Record<string, unknown>, reason: string | undefined): AskCard {
+  return {
+    interaction_id: nativeId,
+    kind: 'approval',
+    prompt: 'Allow Codex elevated permissions?',
+    options: approvalOptions(true),
+    tool: 'permissions',
+    detail: reason !== undefined
+      ? `${reason} — requests ${permissionSummary(requested)}`
+      : `requests ${permissionSummary(requested)}`,
+  };
+}
+
+// ── mcpServer/elicitation/request (url mode only) ────────────────────────────
+type CodexElicitationResponse = { action: 'accept' | 'decline' | 'cancel'; content: null; _meta: null };
+
+const ELICIT_ACCEPT = 'mark completed';
+const ELICIT_DENY = 'decline';
+
+function elicitationResponse(action: 'accept' | 'decline' | 'cancel'): CodexElicitationResponse {
+  return { action, content: null, _meta: null };
+}
+
+/** Codex's own security boundary: HTTPS + host + no embedded credentials, else null. */
+function safeElicitationUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value === '') return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+  if (url.hostname === '') return null;
+  if (url.username !== '' || url.password !== '') return null;
+  return url.toString();
+}
+
+function elicitationCard(nativeId: string, serverName: string, elicitationId: string, url: string, message: string | undefined): AskCard {
+  return {
+    interaction_id: nativeId,
+    kind: 'approval',
+    prompt: `MCP server “${serverName}” asks you to open a link`,
+    // Untrusted, inert: Codor never fetches or previews it; acceptance only means
+    // the operator has completed the link flow themselves.
+    options: [
+      { label: ELICIT_ACCEPT, description: 'you have opened this link yourself; Codor did not fetch or validate it' },
+      { label: ELICIT_DENY },
+    ],
+    tool: 'mcp_elicitation',
+    detail: `${serverName} · ${url}${message !== undefined ? ` · ${message}` : ''} · ${elicitationId}`,
+  };
 }
 
 /**
@@ -449,7 +551,8 @@ export class CodexAdapter implements HarnessAdapter {
     const runtime: CodexRuntime = existing ?? {
       session,
       pendingCompaction: null,
-      pendingApprovals: new Map(),
+      pendingRequests: new Map(),
+      generation: 0,
       ...(memberKey !== undefined && { memberKey }),
       client: null,
       child: null,
@@ -500,19 +603,24 @@ export class CodexAdapter implements HarnessAdapter {
     client = new CodexAppServerClient(child, (error) => this.handleClientClose(runtime, client, error));
     runtime.child = child;
     runtime.client = client;
+    runtime.generation += 1;
     runtime.identity = runtimeIdentity(session);
     client.setNotificationHandler((method, params) => this.routeNotification(runtime, client, method, params));
-    // Bridge the two runtime approval requests to a Codor approval card and park
-    // the decision until the operator answers (see bridgeApproval / respondInteraction).
+    // Bridge the runtime request types to Codor approval cards and park the answer
+    // until the operator responds (see bridge* / respondInteraction).
     client.setRequestHandler('item/commandExecution/requestApproval',
       (params) => this.bridgeApproval(runtime, client, 'command', params));
     client.setRequestHandler('item/fileChange/requestApproval',
       (params) => this.bridgeApproval(runtime, client, 'file', params));
-    // item/tool/requestUserInput, mcpServer/elicitation/request, and
-    // item/permissions/requestApproval stay UNREGISTERED: the transport answers
-    // them with an immediate JSON-RPC error. Known limitation — a bridge would
-    // need capabilities.ask plus a requestUserInput surface (follow-up:
-    // codex-ask-and-elicitation-support).
+    client.setRequestHandler('item/permissions/requestApproval',
+      (params, requestId) => this.bridgePermissions(runtime, client, params, requestId));
+    client.setRequestHandler('mcpServer/elicitation/request',
+      (params, requestId) => this.bridgeElicitation(runtime, client, params, requestId));
+    // item/tool/requestUserInput stays UNREGISTERED: the transport answers it with
+    // an immediate JSON-RPC error (0.144.5 converts that to empty answers rather
+    // than blocking). Bridging it needs capabilities.ask + a text-input card
+    // (follow-up: codex-requestuserinput-support). form/openai-form elicitation
+    // modes are declined below (no typed-form card yet).
 
     try {
       await client.request('initialize', {
@@ -624,7 +732,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (events.some((event) => event.type === 'run.completed')) {
       turn.terminal = true;
       turn.done = true;
-      this.cancelApprovals(runtime);
+      this.cancelRequests(runtime);
       turn.wake?.();
     }
   }
@@ -636,7 +744,7 @@ export class CodexAdapter implements HarnessAdapter {
   ): void {
     if (runtime.client !== client) return;
     this.failCompaction(runtime, error);
-    this.cancelApprovals(runtime);
+    this.cancelRequests(runtime);
     runtime.client = null;
     runtime.child = null;
     const turn = runtime.active;
@@ -663,7 +771,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   private retireRuntime(runtime: CodexRuntime, removeRuntime = false): void {
     this.failCompaction(runtime, new Error('Codex session retired before compaction completed'));
-    this.cancelApprovals(runtime);
+    this.cancelRequests(runtime);
     const client = runtime.client;
     runtime.client = null;
     runtime.child = null;
@@ -883,7 +991,7 @@ export class CodexAdapter implements HarnessAdapter {
     this.completeTurn(turn, { type: 'run.completed', status: 'interrupted' });
     // Cancel parked approvals while the client is still alive so the decision
     // reaches Codex before retireRuntime disposes the transport.
-    this.cancelApprovals(runtime);
+    this.cancelRequests(runtime);
     void client.request('turn/interrupt', {
       threadId: runtime.threadId,
       turnId: turn.turnId,
@@ -891,7 +999,42 @@ export class CodexAdapter implements HarnessAdapter {
   }
   // harn:end codex-app-server-is-the-member-runtime
 
-  // harn:assume codex-bridges-runtime-command-and-file-approvals ref=codex-approval-bridge
+  // harn:assume codex-bridges-command-and-file-approvals ref=codex-cmdfile-bridge
+  /**
+   * The deliverable active turn for a server request, or null. A request that
+   * carries a turnId must EXACTLY match the established active turn id — a
+   * request bearing a turnId while the id is still the pre-turn placeholder
+   * (undefined) is rejected. A request with no turnId (nullable elicitation)
+   * parks on the active turn while one is non-terminal.
+   */
+  private deliverableTurn(runtime: CodexRuntime, rec: Record<string, unknown>): TurnState | null {
+    const turn = runtime.active;
+    if (turn === null || turn.terminal || turn.done) return null;
+    const turnId = typeof rec.turnId === 'string' && rec.turnId !== '' ? rec.turnId : undefined;
+    if (turnId !== undefined && (turn.turnId === undefined || turn.turnId !== turnId)) return null;
+    return turn;
+  }
+
+  /** Push the card, park the answer/cancel builders by native id, return the response promise. */
+  private park(
+    runtime: CodexRuntime,
+    turn: TurnState,
+    card: AskCard,
+    respond: (answer: unknown) => unknown,
+    cancel: () => unknown,
+  ): Promise<unknown> {
+    const key = card.interaction_id;
+    // A repeat for the same native id supersedes the prior park; cancel the old.
+    runtime.pendingRequests.get(key)?.cancel();
+    this.push(turn, [{ type: 'approval.raised', card }]);
+    return new Promise<unknown>((resolve) => {
+      runtime.pendingRequests.set(key, {
+        respond: (answer) => resolve(respond(answer)),
+        cancel: () => resolve(cancel()),
+      });
+    });
+  }
+
   private bridgeApproval(
     runtime: CodexRuntime,
     client: CodexAppServerClient,
@@ -900,48 +1043,85 @@ export class CodexAdapter implements HarnessAdapter {
   ): Promise<{ decision: CodexApprovalDecision }> {
     if (runtime.client !== client) return Promise.resolve({ decision: 'decline' });
     const rec = record(params) ?? {};
-    const turnId = typeof rec.turnId === 'string' ? rec.turnId : undefined;
-    const turn = runtime.active;
-    // No matching active, non-terminal turn — including a stale approval replayed
-    // after thread/resume for an old turn — is declined immediately so it never
-    // parks invisibly and Codex is not left blocked on a card no one will see.
-    if (
-      turn === null || turn.terminal || turn.done ||
-      (turn.turnId !== undefined && turnId !== undefined && turn.turnId !== turnId)
-    ) {
-      return Promise.resolve({ decision: 'decline' });
-    }
+    const turn = this.deliverableTurn(runtime, rec);
+    // No deliverable turn (or a stale/placeholder turnId) → decline immediately.
+    if (turn === null) return Promise.resolve({ decision: 'decline' });
     const nativeId = approvalNativeId(kind, rec);
-    // A repeat for the same native id supersedes the prior park; cancel the old
-    // resolver so it is not stranded (Codex does not reuse an approvalId concurrently).
-    runtime.pendingApprovals.get(nativeId)?.resolve('cancel');
-    this.push(turn, [{ type: 'approval.raised', card: approvalCard(nativeId, kind, rec) }]);
-    return new Promise<{ decision: CodexApprovalDecision }>((resolve) => {
-      runtime.pendingApprovals.set(nativeId, { resolve: (decision) => resolve({ decision }) });
-    });
+    return this.park(runtime, turn, approvalCard(nativeId, kind, rec),
+      (answer) => ({ decision: decisionForAnswer(answer) }),
+      () => ({ decision: 'cancel' })) as Promise<{ decision: CodexApprovalDecision }>;
   }
 
-  /** Resolve every parked approval with `cancel` (turn teardown / client loss). */
-  private cancelApprovals(runtime: CodexRuntime): void {
-    if (runtime.pendingApprovals.size === 0) return;
-    const pendings = [...runtime.pendingApprovals.values()];
-    runtime.pendingApprovals.clear();
-    for (const pending of pendings) pending.resolve('cancel');
+  /** Resolve every parked request with its teardown answer (turn end / client loss). */
+  private cancelRequests(runtime: CodexRuntime): void {
+    if (runtime.pendingRequests.size === 0) return;
+    const pendings = [...runtime.pendingRequests.values()];
+    runtime.pendingRequests.clear();
+    for (const pending of pendings) pending.cancel();
   }
-  // harn:end codex-bridges-runtime-command-and-file-approvals
+  // harn:end codex-bridges-command-and-file-approvals
 
-  // harn:assume codex-bridges-runtime-command-and-file-approvals ref=codex-approval-respond
+  // harn:assume codex-bridges-permissions-and-url-elicitation ref=codex-permelic-bridge
+  private bridgePermissions(
+    runtime: CodexRuntime,
+    client: CodexAppServerClient,
+    params: unknown,
+    requestId: number,
+  ): Promise<CodexPermissionResponse> {
+    if (runtime.client !== client) return Promise.resolve(emptyGrant());
+    const rec = record(params) ?? {};
+    const turn = this.deliverableTurn(runtime, rec);
+    // No deliverable turn / stale → empty grant (safe deny).
+    if (turn === null) return Promise.resolve(emptyGrant());
+    const requested = record(rec.permissions) ?? {};
+    const reason = typeof rec.reason === 'string' && rec.reason !== '' ? rec.reason : undefined;
+    const key = `perm-${runtime.generation}-${requestId}`;
+    return this.park(runtime, turn, permissionCard(key, requested, reason),
+      (answer) => permissionGrant(answer, requested),
+      () => emptyGrant()) as Promise<CodexPermissionResponse>;
+  }
+
+  private bridgeElicitation(
+    runtime: CodexRuntime,
+    client: CodexAppServerClient,
+    params: unknown,
+    requestId: number,
+  ): Promise<CodexElicitationResponse> {
+    if (runtime.client !== client) return Promise.resolve(elicitationResponse('cancel'));
+    const rec = record(params) ?? {};
+    // Only url mode is bridgeable; form/openai-form need a typed-form card → decline.
+    if (rec.mode !== 'url') return Promise.resolve(elicitationResponse('decline'));
+    const url = safeElicitationUrl(rec.url);
+    // Untrusted URL that fails Codex's own boundary (non-HTTPS/hostless/credentialed) → decline.
+    if (url === null) return Promise.resolve(elicitationResponse('decline'));
+    // turnId is nullable for elicitation; deliverableTurn parks on the active turn
+    // when absent and requires an exact match when present. No deliverable turn
+    // (e.g. a standalone between-turn elicitation) → cancel.
+    const turn = this.deliverableTurn(runtime, rec);
+    if (turn === null) return Promise.resolve(elicitationResponse('cancel'));
+    const serverName = typeof rec.serverName === 'string' ? rec.serverName : 'unknown';
+    const elicitationId = typeof rec.elicitationId === 'string' && rec.elicitationId !== ''
+      ? rec.elicitationId : `req-${runtime.generation}-${requestId}`;
+    const message = typeof rec.message === 'string' && rec.message !== '' ? rec.message : undefined;
+    const key = `elic-${runtime.generation}-${requestId}`;
+    return this.park(runtime, turn, elicitationCard(key, serverName, elicitationId, url, message),
+      (answer) => elicitationResponse(answer === ELICIT_ACCEPT ? 'accept' : 'decline'),
+      () => elicitationResponse('cancel')) as Promise<CodexElicitationResponse>;
+  }
+  // harn:end codex-bridges-permissions-and-url-elicitation
+
+  // harn:assume codex-bridges-command-and-file-approvals ref=codex-cmdfile-respond
   respondInteraction(session: Session, interaction_id: string, answer: unknown): Promise<void> {
     const runtime = this.liveRuntime(session);
-    const pending = runtime?.pendingApprovals.get(interaction_id);
+    const pending = runtime?.pendingRequests.get(interaction_id);
     if (runtime === undefined || pending === undefined) {
-      return Promise.reject(new Error(`no pending Codex approval ${interaction_id}`));
+      return Promise.reject(new Error(`no pending Codex request ${interaction_id}`));
     }
-    runtime.pendingApprovals.delete(interaction_id);
-    pending.resolve(decisionForAnswer(answer));
+    runtime.pendingRequests.delete(interaction_id);
+    pending.respond(answer);
     return Promise.resolve();
   }
-  // harn:end codex-bridges-runtime-command-and-file-approvals
+  // harn:end codex-bridges-command-and-file-approvals
 
   /** Thread ids from the rollout store (~/.codex/sessions/YYYY/MM/DD/). */
   discoverSessions(): SessionRef[] {
