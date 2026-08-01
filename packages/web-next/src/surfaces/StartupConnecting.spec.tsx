@@ -16,7 +16,7 @@ describe('StartupConnecting boot honest-state', () => {
   it('shows the neutral connecting copy on a fresh online boot — never flashes an alarm', () => {
     setOnline(true);
     const html = renderToStaticMarkup(<StartupConnecting />);
-    expect(html).toContain('Reaching your channels');
+    expect(html).toContain('Entering the relay');
     expect(html).toContain('data-connecting-state="connecting"');
     expect(html).not.toContain('agent'); // no "agent looks offline" within the grace
   });
