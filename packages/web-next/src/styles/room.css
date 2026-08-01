@@ -644,6 +644,28 @@
   display: flex;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
+  flex-wrap: wrap;
+}
+/* Each question in a multi-question AskUserQuestion is its own block, separated
+   so the operator answers them one at a time before the single Send answers. */
+.nx-ask-question {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-line);
+}
+.nx-ask-question:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.nx-ask-qhead {
+  display: block;
+  font: var(--t-eyebrow);
+  text-transform: uppercase;
+  color: var(--c-muted);
+  margin-bottom: var(--sp-1);
+}
+.nx-ask-question + .nx-btn {
+  margin-top: var(--sp-3);
 }
 
 /* Stop control: a square glyph that interrupts a running agent. Non-destructive

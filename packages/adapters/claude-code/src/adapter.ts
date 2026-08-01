@@ -247,32 +247,38 @@ function sameIdentity(left: QueryIdentity | undefined, right: QueryIdentity): bo
     left.env === right.env;
 }
 
-function asQuestion(input: Record<string, unknown>): {
-  question?: string;
-  options?: { label: string; description?: string }[];
-  multiSelect?: boolean;
-} | undefined {
-  if (!Array.isArray(input.questions)) return undefined;
-  const first = input.questions[0];
-  if (typeof first !== 'object' || first === null) return undefined;
-  const source = first as Record<string, unknown>;
-  const options = Array.isArray(source.options)
-    ? source.options.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return [];
-      const option = value as Record<string, unknown>;
-      return typeof option.label === 'string'
-        ? [{
-          label: option.label,
-          ...(typeof option.description === 'string' && { description: option.description }),
-        }]
-        : [];
-    })
-    : undefined;
-  return {
-    ...(typeof source.question === 'string' && { question: source.question }),
-    ...(options !== undefined && { options }),
-    ...(typeof source.multiSelect === 'boolean' && { multiSelect: source.multiSelect }),
-  };
+// harn:assume askuserquestion-presents-every-question ref=askuser-question-mapping
+/**
+ * Normalize EVERY question in an AskUserQuestion input. One canUseTool call
+ * carries the whole array, so dropping all but questions[0] left the rest to
+ * silently resolve to their SDK defaults. Card questions use `multi`; the SDK
+ * input names the flag `multiSelect`.
+ */
+function normalizeQuestions(input: Record<string, unknown>): import('@codor/protocol').AskQuestion[] {
+  if (!Array.isArray(input.questions)) return [];
+  return input.questions.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const source = entry as Record<string, unknown>;
+    if (typeof source.question !== 'string') return [];
+    const options = Array.isArray(source.options)
+      ? source.options.flatMap((value) => {
+        if (typeof value !== 'object' || value === null) return [];
+        const option = value as Record<string, unknown>;
+        return typeof option.label === 'string'
+          ? [{
+            label: option.label,
+            ...(typeof option.description === 'string' && { description: option.description }),
+          }]
+          : [];
+      })
+      : undefined;
+    return [{
+      question: source.question,
+      ...(typeof source.header === 'string' && { header: source.header }),
+      ...(options !== undefined && { options }),
+      ...(typeof source.multiSelect === 'boolean' && { multi: source.multiSelect }),
+    }];
+  });
 }
 
 interface PermissionPromptOptions {
@@ -287,13 +293,17 @@ export function cardFromSdkPermission(
   options: PermissionPromptOptions = {},
 ): AskCard {
   if (toolName === 'AskUserQuestion') {
-    const question = asQuestion(input);
+    const questions = normalizeQuestions(input);
+    const first = questions[0];
+    // Top-level prompt/options/multi mirror the first question so approvals and
+    // any legacy single-question renderer stay unchanged; `questions` carries all.
     return {
       interaction_id: interactionId,
       kind: 'ask',
-      prompt: question?.question ?? options.title ?? '',
-      options: question?.options,
-      multi: question?.multiSelect ?? false,
+      prompt: first?.question ?? options.title ?? '',
+      options: first?.options,
+      multi: first?.multi ?? false,
+      ...(questions.length > 0 && { questions }),
     };
   }
   const command = typeof input.command === 'string' ? input.command : undefined;
@@ -311,18 +321,30 @@ export function cardFromSdkPermission(
   };
 }
 
+/**
+ * Build the SDK `answers` map. The UI sends an object keyed by question text
+ * (one key per question, arrays for multi-select); the legacy single-question
+ * path sends a bare string/array. Either way, multi-select values are joined
+ * into the comma format the single-question path already produced.
+ */
 function questionAnswers(
   input: Record<string, unknown>,
   answer: unknown,
 ): Record<string, string> {
   if (typeof answer === 'object' && answer !== null && !Array.isArray(answer)) {
-    return answer as Record<string, string>;
+    return Object.fromEntries(
+      Object.entries(answer).map(([question, value]) => [
+        question,
+        Array.isArray(value) ? value.join(', ') : String(value ?? ''),
+      ]),
+    );
   }
-  const question = asQuestion(input)?.question ?? '';
+  const question = normalizeQuestions(input)[0]?.question ?? '';
   return {
     [question]: Array.isArray(answer) ? answer.join(', ') : String(answer ?? ''),
   };
 }
+// harn:end askuserquestion-presents-every-question
 
 function defaultInboxHookRunner(context: InboxHookContext): Promise<HookJSONOutput | undefined> {
   return new Promise((resolve, reject) => {

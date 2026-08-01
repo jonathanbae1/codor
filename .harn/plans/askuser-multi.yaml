@@ -1,0 +1,43 @@
+id: askuser-multi
+title: AskUserQuestion with multiple questions must present and answer every
+  question, not just the first
+assumptions:
+  create:
+    - id: askuserquestion-presents-every-question
+      title: A single AskUserQuestion call is answered question-by-question, in full
+      statement: The Claude Agent SDK invokes canUseTool once per AskUserQuestion tool
+        call carrying an array of questions and expects a single resolution
+        whose updatedInput.answers maps every question's text to its answer. The
+        adapter must therefore surface EVERY question in that array on the ask
+        card and resolve the one pending permission with one answer per
+        question, joining multi-select values into the comma format the
+        single-question path already produces. Presenting only questions[0] and
+        resolving with a single key leaves the remaining questions unanswered
+        and the SDK silently falls back to their defaults. A single-question
+        call, and every non-AskUserQuestion approval, must render and resolve
+        exactly as before.
+      reason: "Bug reported in codor-main: multi-question AskUserQuestion calls showed
+        only the first question and the rest resolved to defaults. Root cause is
+        a single-question assumption on the outbound path spanning asQuestion
+        and cardFromSdkPermission; the return path (questionAnswers, z.unknown
+        answer wire) was already multi-capable."
+      depends_on:
+        - claude-sdk-permissions-back-codor-interactions
+anchors:
+  askuserquestion-presents-every-question:
+    askuser-question-mapping:
+      action: change
+      reason: Map every input.questions entry into the card's questions array and the
+        combined answers object, joining multi-select values, instead of reading
+        only questions[0].
+    askuser-multi-question-regression:
+      action: change
+      reason: Prove a multi-question card carries every question and resolves with one
+        answers key per question, alongside the unchanged single-question path.
+files:
+  - packages/protocol/src/message.ts
+  - packages/protocol/src/schemas.spec.ts
+  - packages/adapters/claude-code/src/adapter.ts
+  - packages/adapters/claude-code/src/adapter.spec.ts
+applied:
+  applied_at: 2026-08-01T06:31:20.444Z

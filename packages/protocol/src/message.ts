@@ -28,12 +28,24 @@ export const BridgeOriginSchema = z.object({
 });
 export type BridgeOrigin = z.infer<typeof BridgeOriginSchema>;
 
+export const AskQuestionSchema = z.object({
+  question: z.string(), // the question text — also the key answers are returned under
+  header: z.string().optional(), // short label the UI may show above the prompt
+  options: z.array(z.object({ label: z.string().min(1), description: z.string().optional() })).optional(),
+  multi: z.boolean().optional(),
+});
+export type AskQuestion = z.infer<typeof AskQuestionSchema>;
+
 export const AskCardSchema = z.object({
   interaction_id: z.string().min(1), // correlates with the pending native request
   kind: z.enum(['ask', 'approval']),
   prompt: z.string(),
   options: z.array(z.object({ label: z.string().min(1), description: z.string().optional() })).optional(),
   multi: z.boolean().optional(),
+  // AskUserQuestion carries EVERY question here; top-level prompt/options/multi
+  // mirror questions[0] so approvals and any legacy single-question renderer are
+  // unchanged. Absent for approvals.
+  questions: z.array(AskQuestionSchema).optional(),
   tool: z.string().optional(), // approvals: the tool/command being requested
   detail: z.string().optional(), // approvals: command text / input summary
 });

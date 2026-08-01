@@ -1811,6 +1811,8 @@ function ToolRow(props: { row: RunRow; diffs: RunItemDiff[] }) {
 function AskCardView(props: { message: Message; connection: Connection }) {
   const ask = props.message.ask;
   const [picked, setPicked] = useState<string[]>([]);
+  // Per-question selections for a multi-question AskUserQuestion, keyed by index.
+  const [picks, setPicks] = useState<Record<number, string[]>>({});
   const [sent, setSent] = useState(false);
   if (!ask) return <MessageProse body={props.message.body} />;
 
@@ -1822,6 +1824,70 @@ function AskCardView(props: { message: Message; connection: Connection }) {
     });
     setSent(true);
   };
+
+  // A single AskUserQuestion call may carry several questions; each must be
+  // answered before one combined answers object (keyed by question text) is
+  // sent. A single question or an approval keeps the original inline behavior.
+  const questions = ask.questions;
+  if (questions !== undefined && questions.length > 1) {
+    const toggle = (qi: number, multi: boolean, label: string): void => {
+      setPicks((prior) => {
+        const current = prior[qi] ?? [];
+        if (!multi) return { ...prior, [qi]: [label] };
+        return {
+          ...prior,
+          [qi]: current.includes(label)
+            ? current.filter((value) => value !== label)
+            : [...current, label],
+        };
+      });
+    };
+    const allAnswered = questions.every((_, qi) => (picks[qi]?.length ?? 0) > 0);
+    const submit = (): void => {
+      answer(Object.fromEntries(questions.map((question, qi) => {
+        const selected = picks[qi] ?? [];
+        return [question.question, question.multi === true ? selected : (selected[0] ?? '')];
+      })));
+    };
+    return (
+      <div className="nx-ask" data-testid={`ask-${props.message.id}`}>
+        <div className="nx-ask-head">
+          <span className="nx-ask-kind">Question</span>
+        </div>
+        {questions.map((question, qi) => (
+          <div className="nx-ask-question" key={qi} data-testid={`ask-${props.message.id}-q${String(qi)}`}>
+            {question.header !== undefined && <span className="nx-ask-qhead">{question.header}</span>}
+            <p className="nx-ask-prompt">{question.question}</p>
+            {question.options !== undefined && question.options.length > 0 && (
+              <div className="nx-ask-options">
+                {question.options.map((option) => (
+                  <button
+                    key={option.label}
+                    className={`nx-btn ${(picks[qi] ?? []).includes(option.label) ? 'is-primary' : ''}`}
+                    disabled={sent}
+                    title={option.description}
+                    data-testid={`ask-${props.message.id}-q${String(qi)}-${option.label}`}
+                    onClick={() => toggle(qi, question.multi === true, option.label)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        <button
+          className="nx-btn is-primary"
+          disabled={sent || !allAnswered}
+          data-testid={`ask-${props.message.id}-submit`}
+          onClick={submit}
+        >
+          Send answers
+        </button>
+        {sent && <p className="nx-ask-sent">Answered — waiting for the agent…</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="nx-ask" data-testid={`ask-${props.message.id}`}>
