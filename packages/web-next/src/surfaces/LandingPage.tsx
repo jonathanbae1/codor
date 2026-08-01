@@ -1,16 +1,27 @@
 import {
+  AudioLines,
   ArrowRight,
   Check,
+  ChevronRight,
+  Code2,
+  Compass,
   Copy,
+  Crown,
+  Eye,
+  FileImage,
+  FileText,
+  Gauge,
+  GitCompareArrows,
   Globe2,
   Laptop,
+  LoaderCircle,
   LockKeyhole,
   Mic,
   Monitor,
   Network,
-  Paperclip,
+  Palette,
   Pencil,
-  Plus,
+  RefreshCw,
   Search,
   Send,
   Server,
@@ -18,12 +29,15 @@ import {
   Sparkles,
   Smartphone,
   Terminal,
+  TestTube2,
+  Upload,
   Users,
+  type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
-import { Chip, StatusPill, TypingDots } from '../primitives/primitives.js';
+import { Chip, TypingDots } from '../primitives/primitives.js';
 import { harnessLabel, harnessMark } from '../room/harness-marks.js';
 import { exchangeBrowserPairingCode, pairThroughRelay, tryTrustedBrowserPairing } from '@runtime/crypto.js';
 import { relayUrlConfigured } from '@runtime/relay-mode.js';
@@ -31,8 +45,8 @@ import { relayUrlConfigured } from '@runtime/relay-mode.js';
 import { PairingCodeInput } from './PairingCodeInput.js';
 
 const INSTALL_COMMAND = 'npx @richhardry/codor setup';
-const DEMO_INTERVAL_MS = 3_600;
-const FINAL_PHASE = 6;
+const DEMO_INTERVAL_MS = 1_550;
+const FINAL_PHASE = 20;
 
 const HARNESSES = [
   'claude-code',
@@ -50,109 +64,46 @@ interface DemoTool {
   label: ReactNode;
 }
 
-interface DemoTurn {
-  actor: string;
-  accent: 'user' | 'green' | 'indigo';
-  time: string;
-  message: ReactNode;
-  tools?: DemoTool[];
-}
-
-const DEMO_TURNS: DemoTurn[] = [
-  {
-    actor: 'Richard',
-    accent: 'user',
-    time: '9:41 PM',
-    message: <>Ship the relay onboarding, but make sure a filtered network still gets one code that works everywhere.</>,
-  },
-  {
-    actor: 'Fable 5',
-    accent: 'green',
-    time: '9:42 PM',
-    message: <>I’ll trace the setup path and make the failover symmetric before changing the first-run flow.</>,
-    tools: [
-      { icon: 'search', label: <>Searched <code>RelayLink</code> and setup call sites</> },
-      { icon: 'terminal', label: <>Read 6 files across the host runtime and CLI</> },
-    ],
-  },
-  {
-    actor: 'GPT 5.6',
-    accent: 'indigo',
-    time: '9:46 PM',
-    message: <>The cached winner is safe, but a cold start still retries only the canonical hostname. The alias needs the same failure path.</>,
-    tools: [
-      { icon: 'search', label: <>Reviewed connect failure vs mid-session drop</> },
-    ],
-  },
-  {
-    actor: 'Fable 5',
-    accent: 'green',
-    time: '9:49 PM',
-    message: <>Fixed. The winner is scoped to its configured relay, and setup now asks the running daemon for the universal offer.</>,
-    tools: [
-      {
-        icon: 'edit',
-        label: <><span className="nx-stat-add">+42</span> <span className="nx-stat-del">−8</span> <code>packages/switchboard/src/relay/link.ts</code></>,
-      },
-      {
-        icon: 'edit',
-        label: <><span className="nx-stat-add">+31</span> <span className="nx-stat-del">−4</span> <code>packages/cli/src/setup.ts</code></>,
-      },
-    ],
-  },
-  {
-    actor: 'GPT 5.6',
-    accent: 'indigo',
-    time: '9:53 PM',
-    message: <>I drove both failures. Canonical blocked → alias opens. Cached alias blocked → canonical recovers. Custom relays never inherit the fallback.</>,
-    tools: [
-      { icon: 'terminal', label: <><code>pnpm test --filter relay-link</code></> },
-      { icon: 'terminal', label: <>58 tests passed in the relay-focused gate</> },
-    ],
-  },
-  {
-    actor: 'Fable 5',
-    accent: 'green',
-    time: '9:54 PM',
-    message: <>Clean. One command, one code, and the same private channel from localhost, Tailscale, or codor.app.</>,
-  },
-];
-
 const WORKFLOWS = [
   {
     label: 'Ship a production feature',
     outcome: 'Implementation and independent review land in one channel.',
+    layout: 'chain',
     roles: [
-      { name: 'Fable 5', role: 'Orchestrator', accent: 'green' as const },
-      { name: 'Opus', role: 'Coder', accent: 'violet' as const },
-      { name: 'GPT 5.6 Sol', role: 'Reviewer', accent: 'indigo' as const },
+      { name: 'Fable 5', role: 'Orchestrator', accent: 'green' as const, icon: Crown, slot: 'left' },
+      { name: 'Opus', role: 'Coder', accent: 'violet' as const, icon: Code2, slot: 'center' },
+      { name: 'GPT 5.6 Sol', role: 'Reviewer', accent: 'indigo' as const, icon: ShieldCheck, slot: 'right' },
     ],
   },
   {
     label: 'Design a new product surface',
     outcome: 'The design intent survives all the way into the implementation.',
+    layout: 'fanout',
     roles: [
-      { name: 'GPT 5.6 Sol', role: 'Orchestrator', accent: 'indigo' as const },
-      { name: 'Opus', role: 'Designer', accent: 'violet' as const },
-      { name: 'GPT 5.6 Luna', role: 'Coder', accent: 'green' as const },
+      { name: 'GPT 5.6 Sol', role: 'Orchestrator', accent: 'indigo' as const, icon: Compass, slot: 'top' },
+      { name: 'Opus', role: 'Designer', accent: 'violet' as const, icon: Palette, slot: 'bottom-left' },
+      { name: 'GPT 5.6 Luna', role: 'Prototype', accent: 'green' as const, icon: Code2, slot: 'bottom-right' },
     ],
   },
   {
     label: 'Harden a risky migration',
     outcome: 'Build, threat-model, and verification happen as one continuous run.',
+    layout: 'loop',
     roles: [
-      { name: 'Opus', role: 'Orchestrator', accent: 'violet' as const },
-      { name: 'Fable 5', role: 'Implementer', accent: 'green' as const },
-      { name: 'GPT 5.6 Sol', role: 'Security review', accent: 'indigo' as const },
+      { name: 'Opus', role: 'Implementer', accent: 'violet' as const, icon: Code2, slot: 'left' },
+      { name: 'GPT 5.6 Sol', role: 'Security review', accent: 'indigo' as const, icon: ShieldCheck, slot: 'right' },
+      { name: 'Fable 5', role: 'Gate', accent: 'green' as const, icon: TestTube2, slot: 'bottom' },
     ],
   },
   {
     label: 'Turn research into working code',
     outcome: 'Evidence, architecture, and the shipped result stay connected.',
+    layout: 'hub',
     roles: [
-      { name: 'GPT 5.6 Luna', role: 'Researcher', accent: 'green' as const },
-      { name: 'Fable 5', role: 'Architect', accent: 'indigo' as const },
-      { name: 'Opus', role: 'Builder', accent: 'violet' as const },
+      { name: 'Fable 5', role: 'Orchestrator', accent: 'green' as const, icon: Crown, slot: 'center' },
+      { name: 'GPT 5.6 Luna', role: 'Researcher', accent: 'indigo' as const, icon: Search, slot: 'top-left' },
+      { name: 'Opus', role: 'Builder', accent: 'violet' as const, icon: Code2, slot: 'top-right' },
+      { name: 'GPT 5.6 Sol', role: 'Evaluator', accent: 'indigo' as const, icon: Eye, slot: 'bottom' },
     ],
   },
 ] as const;
@@ -178,13 +129,105 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
 
-function DemoToolRow({ tool }: { tool: DemoTool }) {
+function DemoToolRow({ tool, running = false }: { tool: DemoTool; running?: boolean }) {
   const Icon = tool.icon === 'edit' ? Pencil : tool.icon === 'search' ? Search : Terminal;
   return (
-    <div className="nx-tool is-ok">
+    <div className={`nx-tool ${running ? 'is-running' : 'is-ok'}`}>
       <Icon className="nx-tool-icon" size={14} aria-hidden="true" />
       <span className="nx-tool-label">{tool.label}</span>
-      <span className="nx-tool-mark is-ok"><Check size={13} aria-hidden="true" /></span>
+      <span className={`nx-tool-mark ${running ? 'is-running' : 'is-ok'}`}>
+        {running
+          ? <LoaderCircle className="nx-spin" size={13} aria-label="running" />
+          : <Check size={13} aria-label="done" />}
+      </span>
+    </div>
+  );
+}
+
+function DemoTurn(props: {
+  actor: string;
+  accent: 'user' | 'green' | 'indigo' | 'violet';
+  time: string;
+  children: ReactNode;
+}) {
+  return (
+    <li className="nx-turn nx-demo-turn">
+      <Chip name={props.actor} accent={props.accent} size={34} />
+      <div className="nx-turn-main">
+        <div className="nx-turn-meta">
+          <strong className="nx-turn-author">{props.actor}</strong>
+          <time className="nx-turn-time">{props.time}</time>
+        </div>
+        {props.children}
+      </div>
+    </li>
+  );
+}
+
+function DemoToolProgress(props: {
+  tools: DemoTool[];
+  step: number;
+  summary: string;
+}) {
+  if (props.step < 0) return null;
+  if (props.step >= props.tools.length) {
+    return (
+      <div className="nx-batch">
+        <span className="nx-batch-line"><ChevronRight size={14} aria-hidden="true" />{props.summary}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="nx-run">
+      {props.tools.slice(0, props.step + 1).map((tool, index) => (
+        <DemoToolRow key={String(index)} tool={tool} running={index === props.step} />
+      ))}
+    </div>
+  );
+}
+
+function DemoInteraction(props: {
+  kind: 'Question' | 'Approval needed';
+  prompt: string;
+  detail?: string;
+  options: string[];
+  selected?: string;
+  sent?: boolean;
+}) {
+  return (
+    <div className="nx-ask nx-demo-ask">
+      <div className="nx-ask-head"><span className="nx-ask-kind">{props.kind}</span></div>
+      <p className="nx-ask-prompt">{props.prompt}</p>
+      {props.detail && <pre className="nx-ask-detail">{props.detail}</pre>}
+      <div className="nx-ask-options">
+        {props.options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={`nx-btn ${props.selected === option ? 'is-primary is-demo-clicked' : ''}`}
+            aria-pressed={props.selected === option}
+            tabIndex={-1}
+          >{props.selected === option && <Check size={13} aria-hidden="true" />}{option}</button>
+        ))}
+        {props.kind === 'Question' && (
+          <button type="button" className={`nx-btn is-primary ${props.sent ? 'is-demo-clicked' : ''}`} tabIndex={-1}>
+            {props.sent ? <><Check size={13} aria-hidden="true" /> Sent</> : 'Send answer'}
+          </button>
+        )}
+      </div>
+      {props.sent && <p className="nx-ask-sent">Answered — the team is continuing…</p>}
+    </div>
+  );
+}
+
+function DemoTyping({ actor, accent }: { actor: string; accent: 'green' | 'indigo' | 'violet' }) {
+  return (
+    <div className="nx-demo-typing">
+      <span className="nx-typing-agent">
+        <Chip name={actor} accent={accent} size={24} />
+        <TypingDots label={`@${actor} is working`} />
+        <span className="nx-typing-elapsed" aria-hidden="true">working</span>
+      </span>
     </div>
   );
 }
@@ -193,6 +236,8 @@ function CollaborationDemo() {
   const reduced = useMemo(prefersReducedMotion, []);
   const [sectionRef, entered] = useEnteredViewport<HTMLElement>(0.28);
   const [phase, setPhase] = useState(reduced ? FINAL_PHASE : -1);
+  const streamRef = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
 
   useEffect(() => {
     if (reduced || !entered || phase >= FINAL_PHASE) return;
@@ -204,8 +249,35 @@ function CollaborationDemo() {
     return () => window.clearTimeout(timer);
   }, [entered, phase, reduced]);
 
-  const shown = phase < 0 ? [] : phase >= FINAL_PHASE ? DEMO_TURNS : DEMO_TURNS.slice(0, phase + 1);
-  const activeActor = phase < 0 || phase >= FINAL_PHASE ? undefined : shown.at(-1)?.actor;
+  useEffect(() => {
+    const node = streamRef.current;
+    if (!node || phase < 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      setOverflowing(node.scrollHeight > node.clientHeight + 4);
+      node.scrollTo({ top: node.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase, reduced]);
+
+  const workerTools: DemoTool[] = [
+    { icon: 'search', label: <>Searched relay connection and setup call sites</> },
+    { icon: 'terminal', label: <>Read 8 files across the host runtime and CLI</> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+34</span> <span className="nx-stat-del">−12</span> <code>relay/link.ts</code> and <code>setup.ts</code></> },
+  ];
+  const reviewTools: DemoTool[] = [
+    { icon: 'search', label: <>Traced cached-winner scope and custom relay behavior</> },
+    { icon: 'terminal', label: <><code>pnpm test --filter relay-link</code></> },
+  ];
+
+  const active = phase === 1
+    ? { actor: 'Fable 5', accent: 'green' as const }
+    : phase >= 5 && phase <= 10
+      ? { actor: 'Opus', accent: 'violet' as const }
+      : phase >= 12 && phase <= 16
+        ? { actor: 'GPT 5.6', accent: 'indigo' as const }
+        : phase >= 18 && phase <= 19
+          ? { actor: 'Opus', accent: 'violet' as const }
+          : undefined;
 
   return (
     <section ref={sectionRef} className="nx-landing-story nx-demo-story" aria-labelledby="landing-demo-title">
@@ -213,85 +285,83 @@ function CollaborationDemo() {
         <p className="nx-landing-kicker">One continuous conversation</p>
         <h2 id="landing-demo-title">The whole team sees the work.</h2>
         <p>
-          Agents don’t hand you disconnected summaries. They share a channel, inspect each other’s changes,
-          run tools, and leave the actual evidence in the room.
+          Your agents work through the problem together: asking the right questions, testing ideas, building the
+          solution, and improving one another’s work without losing the thread.
         </p>
       </div>
 
-      <div className="nx-demo" data-testid="landing-demo">
-        <header className="nx-demo-windowbar">
-          <div className="nx-window-dots" aria-hidden="true"><span /><span /><span /></div>
-          <div className="nx-demo-channel"><strong># relay-onboarding</strong><span>3 members</span></div>
-          <span className={`nx-demo-walkthrough ${entered ? 'is-running' : ''}`}>
-            <i aria-hidden="true" /> {phase >= FINAL_PHASE ? 'Shipped' : entered ? 'Live walkthrough' : 'Starts on scroll'}
-          </span>
-        </header>
-
-        <div className="nx-demo-app">
-          <aside className="nx-demo-roster" aria-label="Channel members" tabIndex={0}>
-            <div className="nx-demo-workspace"><span className="nx-landing-mark" aria-hidden="true" /><strong>Codor</strong></div>
-            <p>Channels</p>
-            <nav aria-label="Demo channels">
-              <span># eng</span>
-              <span className="is-current"># relay-onboarding</span>
-              <span># design</span>
-            </nav>
-            <p>Members</p>
-            {[
-              { name: 'Richard', accent: 'user' as const, role: 'You' },
-              { name: 'Fable 5', accent: 'green' as const, role: activeActor === 'Fable 5' ? 'working' : 'ready' },
-              { name: 'GPT 5.6', accent: 'indigo' as const, role: activeActor === 'GPT 5.6' ? 'reviewing' : 'ready' },
-            ].map((member) => (
-              <div className={`nx-demo-member ${activeActor === member.name ? 'is-active' : ''}`} key={member.name}>
-                <Chip name={member.name} accent={member.accent} size={30} presence="live" surface="raised" />
-                <span><strong>{member.name}</strong><small>{member.role}</small></span>
-              </div>
-            ))}
-          </aside>
-
-          <div className="nx-demo-transcript">
-            <div className="nx-demo-transcript-head">
-              <span>Today</span>
-              <StatusPill tone="live">Live</StatusPill>
-            </div>
-            <ol className="nx-demo-thread" aria-live="polite" aria-atomic="false">
-              {shown.length === 0 && (
-                <li className="nx-demo-empty">
-                  <Sparkles size={18} aria-hidden="true" />
-                  <span><strong>The room is ready.</strong> Scroll a little further to watch the team work.</span>
-                </li>
+      <div
+        ref={streamRef}
+        className={`nx-demo-stream ${overflowing ? 'is-overflowing' : ''}`}
+        data-testid="landing-demo"
+        aria-live="polite"
+        aria-atomic="false"
+      >
+        <ol className="nx-demo-thread">
+          {phase >= 0 && (
+            <DemoTurn actor="Richard" accent="user" time="9:41 PM">
+              <div className="nx-prose"><p>Make the first Codor setup work on filtered networks too. Keep one pairing code for local and relay access, and have someone independently review the fallback before we ship.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 2 && (
+            <DemoTurn actor="Fable 5" accent="green" time="9:42 PM">
+              <div className="nx-prose"><p>I’ll coordinate this. One choice before Opus starts: should the first pass optimize for the smallest patch, or include the recovery tests and rollout notes now?</p></div>
+              {phase <= 3 && (
+                <DemoInteraction
+                  kind="Question"
+                  prompt="What should the team include in this pass?"
+                  options={['Smallest patch', 'Ship + independent review']}
+                  selected={phase >= 3 ? 'Ship + independent review' : undefined}
+                  sent={phase >= 3}
+                />
               )}
-              {shown.map((turn, index) => (
-                <li key={`${turn.actor}-${turn.time}`} className={`nx-turn ${index === shown.length - 1 ? 'is-latest' : ''}`}>
-                  <Chip name={turn.actor} accent={turn.accent} size={34} presence={index === shown.length - 1 ? 'live' : undefined} />
-                  <div className="nx-turn-main">
-                    <div className="nx-turn-meta">
-                      <strong className="nx-turn-author">{turn.actor}</strong>
-                      <time className="nx-turn-time">{turn.time}</time>
-                    </div>
-                    <div className="nx-prose"><p>{turn.message}</p></div>
-                    {turn.tools && <div className="nx-run">{turn.tools.map((tool, toolIndex) => <DemoToolRow key={`${turn.actor}-${String(toolIndex)}`} tool={tool} />)}</div>}
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <p className="nx-demo-result" data-testid="landing-demo-result">
-              <Check size={15} aria-hidden="true" />
-              {phase >= FINAL_PHASE ? 'Both paths fixed · 58 tests passed' : entered ? 'Team working in the channel' : 'Waiting to enter the viewport'}
-            </p>
-            <div className="nx-demo-composer" aria-label="Message composer">
-              <div className="nx-demo-composebox" role="textbox" aria-readonly="true" aria-label="Message relay-onboarding" tabIndex={0}>
-                <span>Message #relay-onboarding</span>
-                <div className="nx-demo-compose-tools" aria-hidden="true">
-                  <Paperclip size={16} />
-                  <Mic size={16} />
-                  <span className="nx-demo-send"><Send size={14} /></span>
-                </div>
-              </div>
-              <small><Plus size={12} aria-hidden="true" /> Add files, images, or context</small>
-            </div>
-          </div>
-        </div>
+            </DemoTurn>
+          )}
+          {phase >= 4 && (
+            <DemoTurn actor="Fable 5" accent="green" time="9:43 PM">
+              <div className="nx-prose"><p>Got it. Opus owns the implementation; GPT 5.6 will attack the network failover and the one-code invariant after the tests are green.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 6 && (
+            <DemoTurn actor="Opus" accent="violet" time="9:45 PM">
+              <div className="nx-prose"><p>I’m tracing both entry paths before editing. The daemon already knows how to mint a universal offer, but setup bypasses it, while the relay link remembers a winning hostname without applying the same fallback on a cold start. I’ll join those paths instead of adding another pairing flow.</p></div>
+              <DemoToolProgress tools={workerTools} step={phase >= 10 ? 3 : phase - 7} summary="Ran 3 tools · wrote 2 files +34 −12" />
+            </DemoTurn>
+          )}
+          {phase >= 11 && (
+            <DemoTurn actor="Opus" accent="violet" time="9:50 PM">
+              <div className="nx-prose"><p>The implementation is in. Setup now asks the running daemon for its offer, so there is still exactly one grant behind both doors. Relay dialing tries the configured hostname, switches once on a pre-open failure, and caches only a winner scoped to that exact relay URL. Custom relays never inherit the hosted alias.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 13 && (
+            <DemoTurn actor="GPT 5.6" accent="indigo" time="9:52 PM">
+              <div className="nx-prose"><p>I’m reviewing the failure boundaries, not just the happy path. The shared grant remains single-use, and mid-session drops correctly stay on the known winner. One gap: the cached-alias outage needs the reverse recovery leg, otherwise a network change can strand an existing host until restart.</p></div>
+              <DemoToolProgress tools={reviewTools} step={phase >= 16 ? 2 : phase - 14} summary="Ran 2 tools · reviewed 1 fallback +18 −0" />
+              {phase >= 16 && phase <= 17 && (
+                <DemoInteraction
+                  kind="Approval needed"
+                  prompt="Apply the reverse-failover regression and rerun the relay gate?"
+                  detail="pnpm test --filter relay-link"
+                  options={['Allow', 'Ask for changes']}
+                  selected={phase >= 17 ? 'Allow' : undefined}
+                  sent={phase >= 17}
+                />
+              )}
+            </DemoTurn>
+          )}
+          {phase >= 19 && (
+            <DemoTurn actor="Opus" accent="violet" time="9:55 PM">
+              <div className="nx-prose"><p>Added the reverse leg and reran the focused gate. Canonical blocked → alias opens; cached alias blocked → canonical recovers; a custom URL never leaves its own origin. The setup and relay-link suites are green.</p></div>
+              <div className="nx-batch"><span className="nx-batch-line"><ChevronRight size={14} aria-hidden="true" />Ran 4 tools · wrote 1 file +22 −3</span></div>
+            </DemoTurn>
+          )}
+          {phase >= 20 && (
+            <DemoTurn actor="GPT 5.6" accent="indigo" time="9:57 PM">
+              <div className="nx-prose"><p>Independent review is clean. The behavior is symmetric, the cached winner cannot leak across relay configurations, and the universal code still burns once at either door. This is ready to ship.</p></div>
+            </DemoTurn>
+          )}
+        </ol>
+        {active && <DemoTyping actor={active.actor} accent={active.accent} />}
       </div>
     </section>
   );
@@ -346,30 +416,34 @@ function WorkflowStory() {
 
   const workflow = WORKFLOWS[active] ?? WORKFLOWS[0];
   return (
-    <section ref={sectionRef} className="nx-landing-story nx-workflow-story" aria-labelledby="workflow-title">
+    <section ref={sectionRef} className="nx-landing-story is-split nx-workflow-story" aria-labelledby="workflow-title">
       <div className="nx-story-copy">
         <p className="nx-landing-kicker">Compose the team</p>
         <h2 id="workflow-title">Multi-agent workflows, with ease.</h2>
-        <p>Pick the agents and the roles. Codor keeps their context, evidence, and handoffs in one place while the team changes shape around the job.</p>
+        <p>Choose who leads, who builds, and who challenges the result. Codor keeps the whole group in one conversation even when the shape of the team changes.</p>
       </div>
       <div className="nx-workflow-visual" aria-live="polite">
         <header>
           <span><Sparkles size={15} aria-hidden="true" /> Workflow {active + 1} of {WORKFLOWS.length}</span>
           <strong>{workflow.label}</strong>
         </header>
-        <div className="nx-workflow-pipeline" key={workflow.label}>
-          {workflow.roles.map((member, index) => (
-            <div className="nx-workflow-stage" key={`${workflow.label}-${member.name}`}>
-              <article
-                className="nx-workflow-role"
-                style={{ '--workflow-index': index } as CSSProperties}
-              >
-                <Chip name={member.name} accent={member.accent} size={42} presence="live" surface="raised" />
-                <span><small>{member.role}</small><strong>{member.name}</strong></span>
+        <div className={`nx-workflow-map is-${workflow.layout}`} key={workflow.label}>
+          <svg className="nx-workflow-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {workflow.layout === 'chain' && <path d="M18 50 H82" />}
+            {workflow.layout === 'fanout' && <><path d="M50 22 V43 L23 76" /><path d="M50 43 L77 76" /></>}
+            {workflow.layout === 'loop' && <><path d="M20 38 C31 7 69 7 80 38" /><path d="M80 38 C70 78 30 78 20 38" /><path d="M50 68 V82" /></>}
+            {workflow.layout === 'hub' && <><path d="M50 50 L21 22" /><path d="M50 50 L79 22" /><path d="M50 50 V82" /></>}
+          </svg>
+          {workflow.roles.map((member, index) => {
+            const RoleIcon = member.icon;
+            return (
+              <article className={`nx-workflow-role is-${member.slot}`} key={`${workflow.label}-${member.name}`}>
+                <Chip name={member.name} accent={member.accent} size={36} presence="live" surface="raised" />
+                <span><small><RoleIcon size={12} aria-hidden="true" /> {member.role}</small><strong>{member.name}</strong></span>
+                <i className="nx-workflow-order" aria-hidden="true">{index + 1}</i>
               </article>
-              {index < workflow.roles.length - 1 && <span className="nx-workflow-connector" aria-hidden="true"><i /></span>}
-            </div>
-          ))}
+            );
+          })}
         </div>
         <footer><Check size={15} aria-hidden="true" /> {workflow.outcome}</footer>
         <div className="nx-workflow-dots" aria-hidden="true">
@@ -380,77 +454,145 @@ function WorkflowStory() {
   );
 }
 
+function ConnectivityMap() {
+  return (
+    <div className="nx-connectivity-map" aria-label="Devices connect privately to any Codor computer">
+      <svg viewBox="0 0 600 360" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M142 60 C230 60 225 180 300 180" />
+        <path d="M142 180 H300" />
+        <path d="M142 300 C230 300 225 180 300 180" />
+        <path d="M300 180 C375 180 370 85 458 85" />
+        <path d="M300 180 H458" />
+        <path d="M300 180 C375 180 370 275 458 275" />
+      </svg>
+      <div className="nx-connectivity-sources">
+        <span><Monitor aria-hidden="true" /><strong>Desktop</strong></span>
+        <span><Smartphone aria-hidden="true" /><strong>Mobile</strong></span>
+        <span><Terminal aria-hidden="true" /><strong>CLI</strong></span>
+      </div>
+      <div className="nx-connectivity-core">
+        <LockKeyhole aria-hidden="true" />
+        <strong>E2E encrypted relay</strong>
+        <small>or direct connection</small>
+        <i aria-hidden="true" />
+      </div>
+      <div className="nx-connectivity-hosts">
+        <span><Laptop aria-hidden="true" /><strong>Studio Mac</strong><small>relay-ui</small></span>
+        <span><Server aria-hidden="true" /><strong>Workstation</strong><small>compiler</small></span>
+        <span><Server aria-hidden="true" /><strong>GPU box</strong><small>evals</small></span>
+      </div>
+    </div>
+  );
+}
+
+function VoiceVisual() {
+  return (
+    <div className="nx-feature-visual nx-voice-visual" aria-label="Voice control preview">
+      <div className="nx-voice-recording"><span><Mic size={17} aria-hidden="true" /> Recording 0:08</span><i /></div>
+      <div className="nx-voice-wave" aria-hidden="true">
+        {[18, 35, 62, 42, 76, 31, 54, 84, 47, 70, 29, 58, 38, 66, 24].map((height, index) => (
+          <i key={String(index)} style={{ '--wave-height': `${String(height)}%`, '--wave-delay': `${String(index * 70)}ms` } as CSSProperties} />
+        ))}
+      </div>
+      <div className="nx-voice-transcript"><AudioLines size={16} aria-hidden="true" /><span>“Ask Opus to tighten the mobile layout, then have GPT review it.”</span></div>
+    </div>
+  );
+}
+
+function LimitsVisual() {
+  const rows = [
+    { name: 'Fable 5', accent: 'green' as const, value: '68%', width: '68%' },
+    { name: 'GPT 5.6', accent: 'indigo' as const, value: '41%', width: '41%' },
+    { name: 'Opus', accent: 'violet' as const, value: '14%', width: '14%' },
+  ];
+  return (
+    <div className="nx-feature-visual nx-limits-visual" aria-label="Automatically refreshed usage limits">
+      <header><Gauge size={16} aria-hidden="true" /><strong>Live usage</strong><span><RefreshCw size={13} aria-hidden="true" /> Updated now</span></header>
+      {rows.map((row) => (
+        <div className="nx-limit-row" key={row.name}>
+          <Chip name={row.name} accent={row.accent} size={30} />
+          <span><strong>{row.name}</strong><i><b style={{ '--limit-width': row.width } as CSSProperties} /></i></span>
+          <small>{row.value}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReviewVisual() {
+  return (
+    <div className="nx-feature-visual nx-review-visual" aria-label="Preview and diff viewer">
+      <header><span className="is-active"><Eye size={13} aria-hidden="true" /> Preview</span><span><GitCompareArrows size={13} aria-hidden="true" /> Diff</span></header>
+      <div className="nx-review-canvas"><span className="nx-preview-nav" /><strong>codor.app</strong><p>Landing motion pass</p><i /></div>
+      <footer>
+        <span><FileText size={14} aria-hidden="true" /><code>LandingPage.tsx</code></span>
+        <span className="nx-stat-add">+84</span><span className="nx-stat-del">−31</span>
+      </footer>
+    </div>
+  );
+}
+
+function AttachmentVisual() {
+  return (
+    <div className="nx-feature-visual nx-attachment-visual" aria-label="Automatic attachment sending">
+      <div className="nx-attachment-drop"><Upload size={19} aria-hidden="true" /><span><strong>Drop files into the conversation</strong><small>Codor uploads and attaches them to your next message.</small></span></div>
+      <div className="nx-attachment-files">
+        <span><FileImage size={16} aria-hidden="true" /><b>mobile-reference.png</b><small>164 KB</small></span>
+        <span><FileText size={16} aria-hidden="true" /><b>review-notes.md</b><small>8 KB</small></span>
+      </div>
+      <div className="nx-attachment-send"><span>Give these to Fable and ask for one pass.</span><i><Send size={14} aria-hidden="true" /></i></div>
+    </div>
+  );
+}
+
+function FeatureSection(props: {
+  id: string;
+  kicker: string;
+  title: string;
+  body: string;
+  icon: LucideIcon;
+  visual: ReactNode;
+  reverse?: boolean;
+}) {
+  const Icon = props.icon;
+  return (
+    <section className={`nx-landing-story is-split nx-compact-feature ${props.reverse ? 'is-reverse' : ''}`} aria-labelledby={props.id}>
+      <div className="nx-story-copy">
+        <p className="nx-landing-kicker"><Icon size={13} aria-hidden="true" /> {props.kicker}</p>
+        <h2 id={props.id}>{props.title}</h2>
+        <p>{props.body}</p>
+      </div>
+      {props.visual}
+    </section>
+  );
+}
+
 function ProductStories() {
   return (
     <div className="nx-product-stories">
       <WorkflowStory />
 
-      <section className="nx-landing-story is-split nx-computers-story" aria-labelledby="computers-title">
+      <section className="nx-landing-story is-split nx-connectivity-story" aria-labelledby="computers-title">
         <div className="nx-story-copy">
-          <p className="nx-landing-kicker">One place for every project</p>
-          <h2 id="computers-title">All your computers. One Codor.</h2>
+          <p className="nx-landing-kicker"><Network size={13} aria-hidden="true" /> Runs where you work</p>
+          <h2 id="computers-title">Every computer. Every device. Still private.</h2>
           <p>
-            Pair your laptop, workstation, and remote box once. Switch between them without losing the room,
-            the agents, or the thread you were following.
+            Start agents on your laptop, workstation, or remote box. Use the same room from desktop, mobile, or
+            terminal over a direct connection or the end-to-end encrypted relay. The relay connects the devices;
+            it never receives your channel keys.
           </p>
-        </div>
-        <div className="nx-computer-preview" aria-label="Computer switcher preview">
-          <header><span className="nx-landing-mark" aria-hidden="true" /><strong>Connected</strong><StatusPill tone="live">Live</StatusPill></header>
-          <div className="nx-computer-layout">
-            <div className="nx-computer-list">
-              <article className="is-active"><Laptop aria-hidden="true" /><span><strong>Studio Mac</strong><small>relay-ui · 3 agents</small></span><i /></article>
-              <article><Monitor aria-hidden="true" /><span><strong>Workstation</strong><small>compiler · 2 agents</small></span><i /></article>
-              <article><Server aria-hidden="true" /><span><strong>GPU box</strong><small>evals · 1 agent</small></span><i /></article>
-            </div>
-            <div className="nx-computer-channel">
-              <p><span># relay-ui</span><strong>Studio Mac</strong></p>
-              <div><Chip name="Fable 5" accent="green" size={30} /><span><strong>Fable 5</strong><small>Landing pass is ready for review.</small></span></div>
-              <div><Chip name="GPT 5.6" accent="indigo" size={30} /><span><strong>GPT 5.6</strong><small>Reviewing the mobile motion now.</small></span></div>
-              <span className="nx-computer-cursor" aria-hidden="true"><ArrowRight size={13} /> switching host</span>
-            </div>
+          <div className="nx-connectivity-facts">
+            <span><ShieldCheck size={14} aria-hidden="true" /> Relay sees ciphertext only</span>
+            <span><Users size={14} aria-hidden="true" /> No Codor account required</span>
           </div>
         </div>
+        <ConnectivityMap />
       </section>
 
-      <section className="nx-landing-story is-split is-reverse" aria-labelledby="anywhere-title">
-        <div className="nx-story-copy">
-          <p className="nx-landing-kicker">Pick up anywhere</p>
-          <h2 id="anywhere-title">Leave your desk. Keep the room.</h2>
-          <p>
-            Your computer stays the host. Open the same live channel on localhost, across Tailscale, or through
-            codor.app when you step away—without moving your repositories or keys.
-          </p>
-        </div>
-        <div className="nx-network-preview" aria-label="Private Codor connection diagram">
-          <div className="nx-network-node is-host"><Server aria-hidden="true" /><strong>Your computer</strong><span>keys + repos</span></div>
-          <div className="nx-network-path"><span /><LockKeyhole aria-hidden="true" /><small>end-to-end encrypted</small><span /><i aria-hidden="true" /></div>
-          <div className="nx-network-devices">
-            <span><Laptop aria-hidden="true" /> Browser</span>
-            <span><Smartphone aria-hidden="true" /> Phone</span>
-            <span><Terminal aria-hidden="true" /> CLI</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="nx-landing-story nx-privacy-story" aria-labelledby="private-title">
-        <div className="nx-story-copy">
-          <p className="nx-landing-kicker">Private by architecture</p>
-          <h2 id="private-title">The relay can connect you. It cannot read you.</h2>
-          <p>Codor’s relay holds no channel keys and forwards encrypted payloads only. No Codor account is required, and every paired browser gets its own revocable authority.</p>
-        </div>
-        <div className="nx-cipher-graphic" aria-label="Encrypted relay diagram">
-          <span className="nx-cipher-device"><Laptop aria-hidden="true" /><small>Browser</small></span>
-          <div className="nx-cipher-rail"><i /><i /><i /><span /></div>
-          <span className="nx-cipher-relay"><Network aria-hidden="true" /><strong>Blind relay</strong><small>ciphertext only</small></span>
-          <div className="nx-cipher-rail is-reverse"><i /><i /><i /><span /></div>
-          <span className="nx-cipher-device"><Server aria-hidden="true" /><small>Your Codor</small></span>
-        </div>
-        <div className="nx-privacy-facts">
-          <span><LockKeyhole aria-hidden="true" /><strong>End-to-end encrypted</strong><small>keys stay on your devices</small></span>
-          <span><Users aria-hidden="true" /><strong>No account required</strong><small>pair with a single-use code</small></span>
-          <span><ShieldCheck aria-hidden="true" /><strong>Independently revocable</strong><small>each browser has its own authority</small></span>
-        </div>
-      </section>
+      <FeatureSection id="voice-title" kicker="Talk it through" title="Voice control that stays in the room." body="Record one thought or several takes, choose the agent, and send the transcript into the same conversation. Codor keeps the voice note beside the words it produced." icon={Mic} visual={<VoiceVisual />} />
+      <FeatureSection id="limits-title" kicker="Always current" title="Limits update themselves." body="Account usage and context pressure refresh while the agents work, so you know who has room for the next task without checking every provider by hand." icon={Gauge} visual={<LimitsVisual />} reverse />
+      <FeatureSection id="review-title" kicker="See the result" title="Preview the app. Inspect the diff." body="Keep the working UI and the files that changed together. Move from the browser preview to the exact additions and deletions without leaving the channel." icon={GitCompareArrows} visual={<ReviewVisual />} />
+      <FeatureSection id="attachments-title" kicker="Context included" title="Attachments go with the ask." body="Drop screenshots, design references, logs, or notes into the composer. Codor uploads them once and attaches them to the message automatically." icon={Upload} visual={<AttachmentVisual />} reverse />
     </div>
   );
 }

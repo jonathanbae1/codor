@@ -59,11 +59,15 @@ test.describe('local setup landing', () => {
     await demo.scrollIntoViewIfNeeded();
     await expect(turns).toHaveCount(1, { timeout: 2_000 });
     await expect(turns).toHaveCount(2, { timeout: 4_500 });
+    await expect(demo.locator('.nx-ask')).toHaveCount(1);
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
-    await expect(page.getByTestId('landing-demo-result')).toContainText('58 tests passed');
-    await expect(page.getByTestId('landing-demo').getByRole('textbox')).toBeVisible();
+    const settled = page.getByTestId('landing-demo');
+    await expect(settled).toContainText('Ran 3 tools · wrote 2 files +34 −12');
+    await expect(settled).toContainText('Independent review is clean');
+    await expect(settled.locator('.nx-demo-windowbar')).toHaveCount(0);
+    await expect(settled.getByRole('textbox')).toHaveCount(0);
   });
 
   test('the landing fits a 320px phone and stays axe-clean', async ({ page }) => {
