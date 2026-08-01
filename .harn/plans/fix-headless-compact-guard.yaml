@@ -1,0 +1,81 @@
+id: fix-headless-compact-guard
+title: A no-op /compact settles from the terminal result instead of the 180s guard
+notes: >
+  DRAFT ONLY — not locked, not implemented; awaiting fable's go. compactSession
+  injects an unwrapped /compact and settles pendingCompaction only when
+  observeCompaction sees a compaction/completed boundary (adapter.ts:868-886).
+  On a small/near-empty session the real SDK never emits a compact_boundary, but
+  it DOES end the /compact turn with a `result` message, which the translator
+  already turns into a terminal run.completed with usage (translate.ts:539-588).
+  Because observeCompaction ignores that run.completed, the wait runs out the
+  180s COMPACTION_TIMEOUT_MS guard and surfaces "Claude compaction timed out"
+  for a session that was simply already compact. Fix: in observeCompaction, when
+  no boundary is present but a terminal run.completed arrives, settle the
+  compaction as a no-op (undefined re-baseline) — or, if that run.completed is a
+  failure, failCompaction with its reason. The 180s timer stays as the backstop
+  for a genuinely silent/wedged engine (no result at all), so the existing
+  timeout contract is preserved. Boundary handling is checked first and clears
+  pending, so a real compaction (boundary precedes result) is unchanged.
+files:
+  - packages/adapters/claude-code/src/adapter.ts
+  - packages/adapters/claude-code/src/adapter.spec.ts
+assumptions:
+  create:
+    - id: manual-compaction-settles-on-terminal-result
+      title: A manual /compact with nothing to compact settles from the turn result
+      statement: >
+        compactSession must resolve when the injected /compact turn ends with a
+        terminal result (the SDK's run.completed) even though no
+        compact_boundary is emitted — resolving undefined for a success (nothing
+        to re-baseline) and failing with the native reason for a failure — so a
+        session that is already compact returns promptly instead of waiting out
+        the missing-boundary guard; the guard timer remains only for an engine
+        that emits no terminal signal at all. A boundary, when present, is
+        observed first and still settles the re-baseline, so a normal compaction
+        is unaffected.
+      reason: >
+        On a small headless session the real Claude SDK emits no
+        compact_boundary but still terminates the /compact turn with a result
+        the adapter already receives; ignoring it turns a no-op compaction into
+        a 180s timeout error.
+      depends_on:
+        - claude-compaction-follows-native-system-events
+anchors:
+  manual-compaction-settles-on-terminal-result:
+    claude-compaction-noop-settle:
+      action: change
+      reason: Introduce the settle-on-terminal-result branch in observeCompaction that
+        resolves a no-op /compact from the terminal run.completed.
+phases:
+  - id: p1-fix
+    title: Settle observeCompaction on a boundary-less terminal result
+    detail: >
+      adapter.ts observeCompaction (~868): after the existing boundary check
+      (which stays first and clears pending), if the pushed events include a
+      terminal run.completed, clearCompaction and either
+      pending.settle(undefined) on status 'completed' or
+      failCompaction(run.completed.error) on status 'failed'. ~8-12 lines, one
+      method, no change to compactSession, the timer, or runQueryPump.
+      observeCompaction currently sits outside any harn anchor; the fix adds a
+      small anchored region for the new settle assumption.
+  - id: p2-test
+    title: Unit test via the existing manual-compaction fake
+    detail: >
+      adapter.spec.ts 'manual compaction': add a case that scripts the compact
+      turn to yield result('nothing to compact') with no boundary and asserts
+      compactSession resolves undefined promptly (no fake timers). The existing
+      'rejects rather than hanging when the engine never reports a boundary'
+      test (fake yields nothing at all) stays green, proving the timer backstop
+      is intact. Optionally a failure-result case asserting failCompaction
+      surfaces the native reason.
+  - id: p3-confirm
+    title: Confirm the SDK actually emits the terminal result (cheap smoke)
+    detail: >
+      One instrumented headless smoke logging every SDKMessage type during a
+      real no-op /compact confirms the terminal result is delivered (the fix's
+      premise). The original timed-out smoke that produced the memory note
+      should, with the fix, resolve in seconds — a strong real-world
+      confirmation the operator/opus3 can re-run. If the SDK emits NO terminal
+      signal for a no-op, no early settle is possible and this becomes DROP.
+applied:
+  applied_at: 2026-08-01T09:13:50.303Z
