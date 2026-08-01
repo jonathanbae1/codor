@@ -2060,6 +2060,11 @@ export class Daemon {
     }
     const usage = await adapter.compactSession(session);
     this.landCompactedUsage(room, memberId, usage);
+    // A successful manual compaction summarizes the codor briefing out of the
+    // engine's context just like an auto-compaction, but it never surfaces the
+    // timeline WireEvent outward (the adapter observes it internally), so the
+    // event-loop hook never fires here — re-arm the briefing explicitly.
+    this.markBriefingForReinjection(room, memberId);
   }
 
   /**
@@ -2077,6 +2082,24 @@ export class Daemon {
     if (current !== undefined) this.emitMember(room, current);
   }
   // harn:end manual-compaction-is-an-operator-act
+
+  // harn:assume compaction-reinjects-codor-briefing ref=daemon-briefing-reinjection-helper
+  /**
+   * Re-arm the codor briefing so the member's next new-turn / batched delivery
+   * carries the full roster + conventions again. Compaction summarizes the
+   * original briefing (injected on the first delivery) out of the engine's
+   * context; clearing conventions_sent re-opens the conventions gate and marking
+   * roster_stale re-opens the roster gate in composeBatchPayload. misaddressed is
+   * deliberately left untouched: a concurrently raised misaddress must survive,
+   * and conventions_sent=false already guarantees re-injection on its own.
+   */
+  private markBriefingForReinjection(room: string, memberId: string): void {
+    this.store.updateMember(room, memberId, {
+      conventions_sent: false,
+      roster_stale: true,
+    });
+  }
+  // harn:end compaction-reinjects-codor-briefing
 
   // harn:assume rename-preserves-mention-resolution ref=member-rename-stable-mentions
   renameMember(room: string, memberId: string, handle: string, displayName?: string): Member {
@@ -3273,6 +3296,20 @@ export class Daemon {
           };
           // harn:end failed-run-details-never-route-as-replies
         }
+        // harn:assume compaction-reinjects-codor-briefing ref=daemon-compaction-reinjects-briefing-auto
+        // An auto-compaction (both runtimes) surfaces a completed compaction
+        // timeline item through this live iterator, even mid-turn. It has
+        // summarized the codor briefing out of context, so re-arm it for the
+        // member's next delivery. Idempotent: repeated completed items (or a
+        // manual compaction that a racing turn consumed) just re-set the flags.
+        if (
+          journalEvent.type === 'timeline' &&
+          journalEvent.item.type === 'compaction' &&
+          journalEvent.item.status === 'completed'
+        ) {
+          this.markBriefingForReinjection(room, member.id);
+        }
+        // harn:end compaction-reinjects-codor-briefing
       }
     } catch (error) {
       if (error instanceof RemoteAttemptAmbiguousError) {

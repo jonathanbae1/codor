@@ -1,0 +1,94 @@
+id: compaction-reinject
+title: Re-inject the codor briefing after a native session compaction
+notes: >
+  After an agent's native session compacts, the summarizer drops the codor usage
+  briefing (roster + [conventions:] block) that rides the first delivery, and
+  the agent stops using codor correctly. Both adapters already normalize native
+  compaction into a single timeline/compaction WireEvent (status
+  loading|completed). React to a COMPLETED compaction by re-arming the member's
+  briefing flags (conventions_sent=false, roster_stale=true ONLY — misaddressed
+  is left untouched so a concurrently raised misaddress is never clobbered, and
+  conventions_sent=false already guarantees re-injection). The existing
+  composeBatchPayload gate then re-attaches the full briefing on the member's
+  next new-turn / batched delivery. Two call sites: the daemon turn event loop
+  (auto-compaction, both runtimes, via the live deliver() iterator) and
+  compactMember after a SUCCESSFUL compactSession (operator manual compaction,
+  which never emits the wire event outward). No new interfaces; re-injection
+  stays a per-member SQL flag re-arm consumed by the existing gate, deferred to
+  the next delivery by design. Mid-turn steering intentionally bypasses the gate
+  and does not consume the flags. Out of scope (documented, not handled): the
+  pre-existing compactMember idle-check race (a message can start a turn during
+  the await); compaction performed inside an externally attached terminal, which
+  is invisible to the daemon. Investigator double-pass (#315) and fable go-order
+  (#324) folded.
+assumptions:
+  create:
+    - id: compaction-reinjects-codor-briefing
+      title: A completed compaction re-arms the codor briefing for the next delivery
+      statement: >
+        When a member's native session reports a completed compaction - either
+        an auto-compaction observed as a timeline compaction item with status
+        completed in the daemon turn event loop, or a successful operator
+        compactMember - the daemon must re-arm that member's briefing flags by
+        setting conventions_sent to false and roster_stale to true (and leaving
+        misaddressed untouched), so the existing composeBatchPayload gate
+        re-attaches the full roster and conventions briefing on the member's
+        next new-turn or batched delivery, because compaction summarizes the
+        original briefing out of context and the agent otherwise stops using
+        codor correctly.
+      reason: >
+        The briefing rides only the first delivery (gated by conventions_sent /
+        roster_stale); nothing currently re-arms those flags after a compaction,
+        so post-compaction turns lose the codor usage instructions. misaddressed
+        is excluded to avoid clobbering a concurrently raised flag.
+      depends_on:
+        - compaction-timeline-items-are-durable-run-evidence
+        - manual-compaction-is-an-operator-act
+  reviewed:
+    - id: compaction-timeline-items-are-durable-run-evidence
+      outcome: unchanged
+      reason: >
+        The timeline compaction WireEvent shape and its journal fanout are
+        unchanged; the new hook only reads the completed status off that event
+        in the same event loop and does not touch the fanout anchor.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: >
+        compactMember stays operator-gated and idle-only and still delegates to
+        the harness's native compaction; it only gains a briefing re-arm after a
+        successful compactSession. The idle-check race is pre-existing and
+        explicitly out of scope for this change.
+files:
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+anchors:
+  compaction-reinjects-codor-briefing:
+    daemon-briefing-reinjection-helper:
+      action: change
+      reason: >
+        New private Daemon helper that re-arms conventions_sent=false and
+        roster_stale=true for one member (the single place the two-flag rule
+        lives).
+    daemon-compaction-reinjects-briefing-auto:
+      action: change
+      reason: >
+        New branch in the turn event loop: on a timeline compaction item with
+        status completed, call the helper (covers auto-compaction for both
+        runtimes via the live deliver iterator).
+    compaction-reinject-regression:
+      action: change
+      reason: >
+        Regressions: auto boundary consumed by an active turn re-arms and next
+        delivery carries [conventions:]+[roster:]; a normal turn does not;
+        manual compactMember re-arms; misaddressed=true is preserved through
+        re-arm; repeated compactions are idempotent; a failed manual compaction
+        does not re-arm.
+  manual-compaction-is-an-operator-act:
+    compact-member-contract:
+      action: change
+      reason: >
+        compactMember gains a call to the briefing re-arm helper after a
+        successful compactSession; the region's operator-act contract is
+        otherwise unchanged.
+applied:
+  applied_at: 2026-08-01T06:46:26.777Z
