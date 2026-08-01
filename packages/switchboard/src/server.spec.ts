@@ -1422,6 +1422,9 @@ describe('WebSocket', () => {
     client.ws.send(JSON.stringify({ type: 'list_rooms' }));
     const rooms = await client.next((frame) => frame.type === 'rooms');
     expect(rooms).toMatchObject({ type: 'rooms', rooms: [{ id: 'eng', name: 'Eng' }] });
+    // The reply carries each listed room's committed seq so a multiplexed client
+    // can detect and warm-resync a room that fell behind.
+    expect(rooms.type === 'rooms' && rooms.room_seqs).toEqual({ eng: daemon.store.currentSeq('eng') });
 
     client.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
     await client.next((frame) => frame.type === 'sync_complete');

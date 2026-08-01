@@ -380,3 +380,82 @@ describe('foreground watchdog', () => {
     expect(FakeSocket.instances).toHaveLength(afterDispose);
   });
 });
+
+describe('per-room seq reconciliation', () => {
+  /** Subscribe eng+design on a fresh socket and advance their committed cursors. */
+  const primed = (engSeq: number, designSeq: number): FakeSocket => {
+    build('eng');
+    const socket = latest();
+    socket.accept();
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'eng' }, { id: 'design' }] });
+    useClientStore.setState({
+      rooms: {
+        eng: { ...useClientStore.getState().rooms.eng, seq: engSeq },
+        design: { ...useClientStore.getState().rooms.design, seq: designSeq },
+      },
+    } as never);
+    return socket;
+  };
+  const resyncsAfter = (socket: FakeSocket, before: number) => socket.subscriptions().slice(before);
+
+  it('warm-resyncs only a subscribed room the server reports is behind', () => {
+    const socket = primed(10, 5);
+    const before = socket.subscriptions().length;
+    // Probe reply: design trails (server 8 > committed 5); eng is current.
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'eng' }, { id: 'design' }], room_seqs: { eng: 10, design: 8 } });
+    expect(resyncsAfter(socket, before)).toEqual([{ room: 'design', since_seq: 5 }]);
+  });
+
+  it('holds one in-flight resync per room until the cursor catches up, then re-arms', () => {
+    const socket = primed(10, 5);
+    let before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'design' }], room_seqs: { design: 8 } });
+    expect(resyncsAfter(socket, before)).toEqual([{ room: 'design', since_seq: 5 }]);
+
+    // A second probe while still behind must NOT fire another resync.
+    before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'design' }], room_seqs: { design: 9 } });
+    expect(resyncsAfter(socket, before)).toEqual([]);
+
+    // Cursor catches up (the resync's sync_complete landed); a fresh lag re-arms.
+    useClientStore.setState({
+      rooms: { design: { ...useClientStore.getState().rooms.design, seq: 9 } },
+    } as never);
+    before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'design' }], room_seqs: { design: 12 } });
+    expect(resyncsAfter(socket, before)).toEqual([{ room: 'design', since_seq: 9 }]);
+  });
+
+  it('does not resync a room that is current', () => {
+    const socket = primed(10, 8);
+    const before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'eng' }, { id: 'design' }], room_seqs: { eng: 10, design: 8 } });
+    expect(resyncsAfter(socket, before)).toEqual([]);
+  });
+
+  it('is a graceful no-op when the server omits room_seqs', () => {
+    const socket = primed(10, 5);
+    const before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'eng' }, { id: 'design' }] });
+    expect(resyncsAfter(socket, before)).toEqual([]);
+  });
+
+  it('converges: a lag self-limits to ONE resync once sync_complete fast-forwards the cursor', () => {
+    const socket = primed(10, 5);
+    // A lag (even a spurious empty-delta one) fires exactly one resync.
+    let before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'design' }], room_seqs: { design: 8 } });
+    expect(resyncsAfter(socket, before)).toEqual([{ room: 'design', since_seq: 5 }]);
+
+    // The resync's sync_complete carries the room's currentSeq, fast-forwarding
+    // the committed cursor even if the warm delta was empty.
+    useClientStore.setState({
+      rooms: { design: { ...useClientStore.getState().rooms.design, seq: 8 } },
+    } as never);
+
+    // A subsequent probe with the SAME server seq must NOT resync again.
+    before = socket.subscriptions().length;
+    socket.deliver({ type: 'rooms', rooms: [{ id: 'design' }], room_seqs: { design: 8 } });
+    expect(resyncsAfter(socket, before)).toEqual([]);
+  });
+});
