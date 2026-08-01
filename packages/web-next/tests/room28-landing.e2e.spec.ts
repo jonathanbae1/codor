@@ -54,6 +54,7 @@ test.describe('local setup landing', () => {
   test('the conversation starts on scroll and reduced motion receives the settled result', async ({ page }) => {
     await page.goto('/');
     const demo = page.getByTestId('landing-demo');
+    await expect(page.getByTestId('landing-demo-channel')).toContainText('# relay-onboarding');
     const turns = demo.locator('.nx-demo-thread > .nx-turn');
     await expect(turns).toHaveCount(0);
     await demo.scrollIntoViewIfNeeded();
