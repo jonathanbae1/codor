@@ -1,0 +1,89 @@
+id: fix-voice-rerecord
+title: Repeat voice recording works after the first send (mobile PWA)
+notes: >
+  In the mobile PWA the voice recorder captures audio only on the first take of
+  a page session; a take started after a prior one is sent produces no audio.
+  Three independently-traced defects in packages/web-next/src/room/voice.ts
+  cover all three failure legs identified in review, and the approved fix
+  addresses each: (A) startRecording constructs a new AudioContext after the
+  async getUserMedia await — outside a user gesture — so on mobile WebKit it is
+  born "suspended" and its ScriptProcessorNode.onaudioprocess never fires; it is
+  never resume()d. (C) release() tears the context down with a fire-and-forget
+  `void context.close()` that is never awaited or sequenced before the next
+  getUserMedia, so the iOS mic can stay busy and the next acquisition stalls.
+  (B/C) startTake awaits getUserMedia with no timeout, so a rejected acquisition
+  surfaces a bare error and a hung one pins the take in 'recording' forever with
+  no error and no exit but Cancel. The clock is an independent Date.now interval
+  that starts when the 'recording' take is emitted (voice.ts:297-298) BEFORE
+  getUserMedia, so it cannot explain a frozen 0:00 — hence all three legs are
+  fixed rather than guessing which the phone shows. NOT in scope: the shared
+  module-level AudioContext refactor (fallback only if the post-fix on-device
+  check still fails). packages/web-next is .harnignore'd so Harn will not
+  diff-gate the change; correctness is proven via unit + e2e that model
+  suspended / rejecting / never-resolving contexts, plus an on-device manual
+  check.
+files:
+  - packages/web-next/src/room/voice.ts
+  - packages/web-next/src/room/voice.spec.ts
+  - packages/web-next/tests/room32-voice.e2e.spec.ts
+assumptions:
+  create:
+    - id: repeat-voice-capture-is-reliable
+      title: Every voice take captures audio or fails visibly and recoverably
+      statement: >
+        The web-next voice recorder must capture microphone audio on every take
+        within a page session — including a take started after a prior take was
+        sent and its mic/AudioContext released — and when acquisition cannot
+        succeed it must fail visibly and leave the panel recoverable rather than
+        silently stalling. To achieve this startRecording must resume the
+        AudioContext before relying on ScriptProcessorNode.onaudioprocess
+        (mobile WebKit builds a context constructed outside a user gesture in a
+        suspended state), must sequence the previous context's teardown so the
+        mic is freed before the next getUserMedia, and startTake must bound the
+        getUserMedia await with a timeout so a rejected or never-resolving
+        acquisition flips the take to failed with a surfaced error instead of
+        pinning it in the recording state.
+      reason: >
+        startRecording constructs and closes a new AudioContext per take, never
+        resumes it, and never awaits the close; startTake awaits getUserMedia
+        with no bound. The first take runs on the page's initial audio unlock;
+        later takes stay suspended, race a not-yet-freed mic, or hang with no
+        diagnostic.
+phases:
+  - id: p1-fix
+    title: Fix — resume, sequence teardown, and bound acquisition
+    detail: >
+      voice.ts: (1) in startRecording, `await context.resume?.()` guarded in
+      try/catch after constructing the context, before wiring the graph; (2)
+      record the context.close() promise in a module-scoped pendingRelease that
+      the next startRecording awaits (release() stays sync so
+      RecordingHandle.cancel():void is unchanged; the mic is freed before the
+      next getUserMedia); (3) in DictationSession.startTake, race this.begin()
+      against an injectable-timer timeout (~15s, above any permission prompt) —
+      on reject OR timeout flip the take to 'failed' with captureErrorMessage
+      and clear recordingId (panel already recoverable), and cancel a handle
+      that resolves after the timeout so no mic leaks. No shared-context
+      refactor.
+  - id: p2-unit
+    title: Unit tests — suspended, rejecting, never-resolving
+    detail: >
+      voice.spec.ts: (a) a suspended-context fake whose onaudioprocess only
+      fires after resume() flips state to 'running', asserting two sequential
+      startRecording() calls each capture frames (proves resume + teardown
+      sequencing); (b) a rejecting getUserMedia through startTake asserting the
+      take → 'failed' with a surfaced error and recordingId cleared so a retry
+      startTake works; (c) a never-resolving getUserMedia with a controllable
+      timer asserting the timeout flips the take → 'failed' and releases any
+      late handle. Existing noopTimers tests stay green (timer never fires).
+  - id: p3-e2e
+    title: e2e regression + on-device checklist
+    detail: >
+      tests/room32-voice.e2e.spec.ts: make the fake AudioContext start
+      'suspended' and emit only after resume(); add a record→send→record-again
+      scenario asserting the second take draws a waveform and posts a voice
+      card. Deliver an on-device checklist for the operator (second recording:
+      clock ticks, waveform moves, message posts) plus the three disambiguating
+      observations so a surviving leg is identifiable. Run `harn check` and the
+      web-next unit + e2e suites before commit.
+applied:
+  applied_at: 2026-08-01T07:02:47.525Z

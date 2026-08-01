@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  ACQUIRE_TIMEOUT_MS,
   DictationSession,
   downsampleLevels,
   encodeWav,
@@ -13,6 +14,7 @@ import {
   VOICE_SAMPLE_RATE,
   type DictationTake,
   type DictationTimers,
+  type RecordingHandle,
   type StartRecording,
 } from './voice.js';
 
@@ -123,6 +125,52 @@ describe('capture level stream', () => {
     expect(levels[1]).toBeGreaterThan(0.2);
     expect(levels[1]).toBeLessThan(0.9);
     expect(levels[2]).toBe(1);
+  });
+
+  // Mobile WebKit births a context (constructed after the getUserMedia await)
+  // suspended; the graph never pulls until resume(). This fake only emits once
+  // running, so it captures on both takes ONLY if startRecording resumes it and
+  // the prior context's close is sequenced before the next acquisition.
+  it('resumes a suspended context so two sequential takes each capture', async () => {
+    const resumed: number[] = [];
+    const makeContext = () => {
+      const context = {
+        state: 'suspended' as 'suspended' | 'running',
+        sampleRate: 24_000,
+        destination: {},
+        resume() { this.state = 'running'; resumed.push(1); return Promise.resolve(); },
+        createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
+        createScriptProcessor() {
+          const node = {
+            onaudioprocess: null as ((e: unknown) => void) | null,
+            connect() {
+              if (context.state !== 'running') return; // suspended → no frames
+              node.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array(64).fill(0.3) } });
+            },
+            disconnect() {},
+          };
+          return node;
+        },
+        close: () => Promise.resolve(),
+      };
+      return context;
+    };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => Promise.resolve({ getTracks: () => [{ stop() {} }] }) },
+    });
+    vi.stubGlobal('AudioContext', function AudioContextMock() { return makeContext(); });
+
+    const first: number[] = [];
+    const h1 = await startRecording((level) => first.push(level));
+    await h1.stop(); // release() → records the close promise for the next take
+    const second: number[] = [];
+    const h2 = await startRecording((level) => second.push(level));
+    await h2.stop();
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(second.length).toBeGreaterThan(0); // the repeat recording captures too
+    expect(resumed.length).toBe(2); // each context was resumed
   });
 });
 
@@ -284,5 +332,59 @@ describe('DictationSession', () => {
     session.cancelTake();
     expect(takes()).toEqual([]);
     expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it('fails a take with a surfaced error when acquisition rejects, leaving the panel recoverable', async () => {
+    let takes: DictationTake[] = [];
+    const rejecting: StartRecording = () => {
+      const error = new Error('denied');
+      error.name = 'NotAllowedError';
+      return Promise.reject(error);
+    };
+    const session = new DictationSession({
+      transcribe: async () => 'unused',
+      startRecording: rejecting,
+      onChange: (next) => { takes = next; },
+      timers: noopTimers,
+      now: () => 0,
+    });
+
+    await session.startTake();
+    expect(takes[0]).toMatchObject({ state: 'failed' });
+    expect(takes[0]!.error).toMatch(/blocked/); // captureErrorMessage(NotAllowedError)
+
+    await session.startTake(); // recordingId was cleared → the retry is not blocked
+    expect(takes).toHaveLength(2);
+  });
+
+  it('times out a never-resolving acquisition and cancels a late handle so no mic leaks', async () => {
+    let takes: DictationTake[] = [];
+    let fire: (() => void) | undefined;
+    const timers: DictationTimers = {
+      set: (fn, ms) => { if (ms === ACQUIRE_TIMEOUT_MS) fire = fn; return ms; },
+      clear: () => {},
+    };
+    const late = deferred<RecordingHandle>();
+    const session = new DictationSession({
+      transcribe: async () => 'unused',
+      startRecording: () => late.promise, // never resolves until we resolve it
+      onChange: (next) => { takes = next; },
+      timers,
+      now: () => 0,
+    });
+
+    const started = session.startTake();
+    await flush();
+    expect(takes[0]!.state).toBe('recording'); // still waiting on acquisition
+
+    fire?.(); // trip the acquisition timeout
+    await started;
+    expect(takes[0]!.state).toBe('failed');
+    expect(takes[0]!.error).toMatch(/didn’t start/);
+
+    let cancelled = false;
+    late.resolve({ async stop() { return new Uint8Array(); }, cancel() { cancelled = true; } });
+    await flush();
+    expect(cancelled).toBe(true); // the late acquisition is released, not leaked
   });
 });

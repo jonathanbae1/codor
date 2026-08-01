@@ -1,0 +1,18 @@
+id: repeat-voice-capture-is-reliable
+hash: a-f398761b5466
+title: Every voice take captures audio or fails visibly and recoverably
+state: active
+statement: >
+  The web-next voice recorder must capture microphone audio on every take within
+  a page session — including a take started after a prior take was sent and its
+  mic/AudioContext released — and when acquisition cannot succeed it must fail
+  visibly and leave the panel recoverable rather than silently stalling. To
+  achieve this startRecording must resume the AudioContext before relying on
+  ScriptProcessorNode.onaudioprocess (mobile WebKit builds a context constructed
+  outside a user gesture in a suspended state), must sequence the previous
+  context's teardown so the mic is freed before the next getUserMedia, and
+  startTake must bound the getUserMedia await with a timeout so a rejected or
+  never-resolving acquisition flips the take to failed with a surfaced error
+  instead of pinning it in the recording state.
+depends_on: []
+created_by: fix-voice-rerecord
