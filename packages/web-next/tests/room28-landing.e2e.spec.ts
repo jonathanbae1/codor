@@ -26,6 +26,10 @@ test.describe('local setup landing', () => {
     await expect(cells).toHaveCount(8);
     await expect(cells.nth(0)).toHaveValue('2');
     await expect(cells.nth(7)).toHaveValue('D');
+    await expect(landing.locator('.nx-setup-step').nth(1)).toBeInViewport();
+    const lastCell = await cells.nth(7).boundingBox();
+    const pairButton = await page.getByTestId('pairing-code-submit').boundingBox();
+    expect(pairButton?.y).toBeGreaterThan((lastCell?.y ?? 0) + (lastCell?.height ?? 0));
 
     await pasteCode(page, '6789-WXYZ');
     await expect(cells.nth(0)).toHaveValue('6');
@@ -47,22 +51,19 @@ test.describe('local setup landing', () => {
     await expect(page.getByTestId('landing-page')).toBeVisible();
   });
 
-  test('the two-lap demo pauses and reduced motion receives the settled result', async ({ page }) => {
+  test('the conversation starts on scroll and reduced motion receives the settled result', async ({ page }) => {
     await page.goto('/');
     const demo = page.getByTestId('landing-demo');
-    const pause = demo.getByRole('button', { name: 'Pause demo' });
-    await expect(pause).toBeVisible();
-    await pause.click();
-    const before = await demo.locator('li').count();
-    await page.waitForTimeout(2_700);
-    await expect(demo.locator('li')).toHaveCount(before);
-    await demo.getByRole('button', { name: 'Resume demo' }).click();
-    await expect(demo.locator('li')).toHaveCount(before + 1, { timeout: 3_500 });
+    const turns = demo.locator('.nx-demo-thread > .nx-turn');
+    await expect(turns).toHaveCount(0);
+    await demo.scrollIntoViewIfNeeded();
+    await expect(turns).toHaveCount(1, { timeout: 2_000 });
+    await expect(turns).toHaveCount(2, { timeout: 4_500 });
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
     await expect(page.getByTestId('landing-demo-result')).toContainText('58 tests passed');
-    await expect(page.getByRole('button', { name: 'Demo complete' })).toBeDisabled();
+    await expect(page.getByTestId('landing-demo').getByRole('textbox')).toBeVisible();
   });
 
   test('the landing fits a 320px phone and stays axe-clean', async ({ page }) => {

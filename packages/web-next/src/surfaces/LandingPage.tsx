@@ -1,27 +1,29 @@
 import {
   ArrowRight,
-  Bot,
   Check,
   Copy,
-  GitBranch,
   Globe2,
   Laptop,
   LockKeyhole,
+  Mic,
+  Monitor,
   Network,
-  Pause,
+  Paperclip,
   Pencil,
-  Play,
+  Plus,
   Search,
+  Send,
   Server,
   ShieldCheck,
+  Sparkles,
   Smartphone,
   Terminal,
   Users,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
-import { Chip, Button, StatusPill } from '../primitives/primitives.js';
+import { Chip, StatusPill, TypingDots } from '../primitives/primitives.js';
 import { harnessLabel, harnessMark } from '../room/harness-marks.js';
 import { exchangeBrowserPairingCode, pairThroughRelay, tryTrustedBrowserPairing } from '@runtime/crypto.js';
 import { relayUrlConfigured } from '@runtime/relay-mode.js';
@@ -29,7 +31,7 @@ import { relayUrlConfigured } from '@runtime/relay-mode.js';
 import { PairingCodeInput } from './PairingCodeInput.js';
 
 const INSTALL_COMMAND = 'npx @richhardry/codor setup';
-const DEMO_INTERVAL_MS = 2_400;
+const DEMO_INTERVAL_MS = 3_600;
 const FINAL_PHASE = 6;
 
 const HARNESSES = [
@@ -116,6 +118,62 @@ const DEMO_TURNS: DemoTurn[] = [
   },
 ];
 
+const WORKFLOWS = [
+  {
+    label: 'Ship a production feature',
+    outcome: 'Implementation and independent review land in one channel.',
+    roles: [
+      { name: 'Fable 5', role: 'Orchestrator', accent: 'green' as const },
+      { name: 'Opus', role: 'Coder', accent: 'violet' as const },
+      { name: 'GPT 5.6 Sol', role: 'Reviewer', accent: 'indigo' as const },
+    ],
+  },
+  {
+    label: 'Design a new product surface',
+    outcome: 'The design intent survives all the way into the implementation.',
+    roles: [
+      { name: 'GPT 5.6 Sol', role: 'Orchestrator', accent: 'indigo' as const },
+      { name: 'Opus', role: 'Designer', accent: 'violet' as const },
+      { name: 'GPT 5.6 Luna', role: 'Coder', accent: 'green' as const },
+    ],
+  },
+  {
+    label: 'Harden a risky migration',
+    outcome: 'Build, threat-model, and verification happen as one continuous run.',
+    roles: [
+      { name: 'Opus', role: 'Orchestrator', accent: 'violet' as const },
+      { name: 'Fable 5', role: 'Implementer', accent: 'green' as const },
+      { name: 'GPT 5.6 Sol', role: 'Security review', accent: 'indigo' as const },
+    ],
+  },
+  {
+    label: 'Turn research into working code',
+    outcome: 'Evidence, architecture, and the shipped result stay connected.',
+    roles: [
+      { name: 'GPT 5.6 Luna', role: 'Researcher', accent: 'green' as const },
+      { name: 'Fable 5', role: 'Architect', accent: 'indigo' as const },
+      { name: 'Opus', role: 'Builder', accent: 'violet' as const },
+    ],
+  },
+] as const;
+
+function useEnteredViewport<T extends Element>(threshold = 0.35) {
+  const ref = useRef<T>(null);
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    if (entered || !ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry?.isIntersecting) setEntered(true); },
+      { threshold },
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [entered, threshold]);
+
+  return [ref, entered] as const;
+}
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
@@ -133,20 +191,24 @@ function DemoToolRow({ tool }: { tool: DemoTool }) {
 
 function CollaborationDemo() {
   const reduced = useMemo(prefersReducedMotion, []);
-  const [phase, setPhase] = useState(reduced ? FINAL_PHASE : 0);
-  const [paused, setPaused] = useState(false);
+  const [sectionRef, entered] = useEnteredViewport<HTMLElement>(0.28);
+  const [phase, setPhase] = useState(reduced ? FINAL_PHASE : -1);
 
   useEffect(() => {
-    if (reduced || paused || phase >= FINAL_PHASE) return;
+    if (reduced || !entered || phase >= FINAL_PHASE) return;
+    if (phase < 0) {
+      setPhase(0);
+      return;
+    }
     const timer = window.setTimeout(() => setPhase((current) => Math.min(FINAL_PHASE, current + 1)), DEMO_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [paused, phase, reduced]);
+  }, [entered, phase, reduced]);
 
-  const shown = phase >= FINAL_PHASE ? DEMO_TURNS : DEMO_TURNS.slice(0, Math.max(1, phase + 1));
-  const activeActor = phase >= FINAL_PHASE ? undefined : shown.at(-1)?.actor;
+  const shown = phase < 0 ? [] : phase >= FINAL_PHASE ? DEMO_TURNS : DEMO_TURNS.slice(0, phase + 1);
+  const activeActor = phase < 0 || phase >= FINAL_PHASE ? undefined : shown.at(-1)?.actor;
 
   return (
-    <section className="nx-landing-story nx-demo-story" aria-labelledby="landing-demo-title">
+    <section ref={sectionRef} className="nx-landing-story nx-demo-story" aria-labelledby="landing-demo-title">
       <div className="nx-story-copy">
         <p className="nx-landing-kicker">One continuous conversation</p>
         <h2 id="landing-demo-title">The whole team sees the work.</h2>
@@ -160,21 +222,20 @@ function CollaborationDemo() {
         <header className="nx-demo-windowbar">
           <div className="nx-window-dots" aria-hidden="true"><span /><span /><span /></div>
           <div className="nx-demo-channel"><strong># relay-onboarding</strong><span>3 members</span></div>
-          <Button
-            type="button"
-            variant="quiet"
-            className="nx-demo-control"
-            disabled={reduced || phase >= FINAL_PHASE}
-            aria-label={paused ? 'Resume demo' : phase >= FINAL_PHASE ? 'Demo complete' : 'Pause demo'}
-            onClick={() => setPaused((current) => !current)}
-          >
-            {paused ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
-            {paused ? 'Resume' : phase >= FINAL_PHASE ? 'Complete' : 'Pause'}
-          </Button>
+          <span className={`nx-demo-walkthrough ${entered ? 'is-running' : ''}`}>
+            <i aria-hidden="true" /> {phase >= FINAL_PHASE ? 'Shipped' : entered ? 'Live walkthrough' : 'Starts on scroll'}
+          </span>
         </header>
 
         <div className="nx-demo-app">
           <aside className="nx-demo-roster" aria-label="Channel members" tabIndex={0}>
+            <div className="nx-demo-workspace"><span className="nx-landing-mark" aria-hidden="true" /><strong>Codor</strong></div>
+            <p>Channels</p>
+            <nav aria-label="Demo channels">
+              <span># eng</span>
+              <span className="is-current"># relay-onboarding</span>
+              <span># design</span>
+            </nav>
             <p>Members</p>
             {[
               { name: 'Richard', accent: 'user' as const, role: 'You' },
@@ -194,6 +255,12 @@ function CollaborationDemo() {
               <StatusPill tone="live">Live</StatusPill>
             </div>
             <ol className="nx-demo-thread" aria-live="polite" aria-atomic="false">
+              {shown.length === 0 && (
+                <li className="nx-demo-empty">
+                  <Sparkles size={18} aria-hidden="true" />
+                  <span><strong>The room is ready.</strong> Scroll a little further to watch the team work.</span>
+                </li>
+              )}
               {shown.map((turn, index) => (
                 <li key={`${turn.actor}-${turn.time}`} className={`nx-turn ${index === shown.length - 1 ? 'is-latest' : ''}`}>
                   <Chip name={turn.actor} accent={turn.accent} size={34} presence={index === shown.length - 1 ? 'live' : undefined} />
@@ -210,8 +277,19 @@ function CollaborationDemo() {
             </ol>
             <p className="nx-demo-result" data-testid="landing-demo-result">
               <Check size={15} aria-hidden="true" />
-              {phase >= FINAL_PHASE ? 'Both paths fixed · 58 tests passed' : 'Review in progress'}
+              {phase >= FINAL_PHASE ? 'Both paths fixed · 58 tests passed' : entered ? 'Team working in the channel' : 'Waiting to enter the viewport'}
             </p>
+            <div className="nx-demo-composer" aria-label="Message composer">
+              <div className="nx-demo-composebox" role="textbox" aria-readonly="true" aria-label="Message relay-onboarding" tabIndex={0}>
+                <span>Message #relay-onboarding</span>
+                <div className="nx-demo-compose-tools" aria-hidden="true">
+                  <Paperclip size={16} />
+                  <Mic size={16} />
+                  <span className="nx-demo-send"><Send size={14} /></span>
+                </div>
+              </div>
+              <small><Plus size={12} aria-hidden="true" /> Add files, images, or context</small>
+            </div>
           </div>
         </div>
       </div>
@@ -235,40 +313,117 @@ function HarnessRail() {
   );
 }
 
+function HeroActivity() {
+  const activity = [
+    { name: 'Fable 5', accent: 'green' as const, label: 'is orchestrating', className: 'is-fable' },
+    { name: 'GPT 5.6', accent: 'indigo' as const, label: 'is reviewing', className: 'is-gpt' },
+    { name: 'Opus', accent: 'violet' as const, label: 'is coding', className: 'is-opus' },
+    { name: 'Luna', accent: 'green' as const, label: 'is researching', className: 'is-luna' },
+  ];
+  return (
+    <div className="nx-hero-activity" aria-hidden="true">
+      {activity.map((item) => (
+        <span className={`nx-hero-typing ${item.className}`} key={item.name}>
+          <Chip name={item.name} accent={item.accent} size={26} />
+          <span><strong>{item.name}</strong> {item.label}</span>
+          <TypingDots />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function WorkflowStory() {
+  const reduced = useMemo(prefersReducedMotion, []);
+  const [sectionRef, entered] = useEnteredViewport<HTMLElement>(0.3);
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    if (reduced || !entered) return;
+    const timer = window.setInterval(() => setActive((current) => (current + 1) % WORKFLOWS.length), 4_800);
+    return () => window.clearInterval(timer);
+  }, [entered, reduced]);
+
+  const workflow = WORKFLOWS[active] ?? WORKFLOWS[0];
+  return (
+    <section ref={sectionRef} className="nx-landing-story nx-workflow-story" aria-labelledby="workflow-title">
+      <div className="nx-story-copy">
+        <p className="nx-landing-kicker">Compose the team</p>
+        <h2 id="workflow-title">Multi-agent workflows, with ease.</h2>
+        <p>Pick the agents and the roles. Codor keeps their context, evidence, and handoffs in one place while the team changes shape around the job.</p>
+      </div>
+      <div className="nx-workflow-visual" aria-live="polite">
+        <header>
+          <span><Sparkles size={15} aria-hidden="true" /> Workflow {active + 1} of {WORKFLOWS.length}</span>
+          <strong>{workflow.label}</strong>
+        </header>
+        <div className="nx-workflow-pipeline" key={workflow.label}>
+          {workflow.roles.map((member, index) => (
+            <div className="nx-workflow-stage" key={`${workflow.label}-${member.name}`}>
+              <article
+                className="nx-workflow-role"
+                style={{ '--workflow-index': index } as CSSProperties}
+              >
+                <Chip name={member.name} accent={member.accent} size={42} presence="live" surface="raised" />
+                <span><small>{member.role}</small><strong>{member.name}</strong></span>
+              </article>
+              {index < workflow.roles.length - 1 && <span className="nx-workflow-connector" aria-hidden="true"><i /></span>}
+            </div>
+          ))}
+        </div>
+        <footer><Check size={15} aria-hidden="true" /> {workflow.outcome}</footer>
+        <div className="nx-workflow-dots" aria-hidden="true">
+          {WORKFLOWS.map((item, index) => <i className={index === active ? 'is-active' : ''} key={item.label} />)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProductStories() {
   return (
     <div className="nx-product-stories">
-      <section className="nx-landing-story is-split" aria-labelledby="inspect-title">
+      <WorkflowStory />
+
+      <section className="nx-landing-story is-split nx-computers-story" aria-labelledby="computers-title">
         <div className="nx-story-copy">
-          <p className="nx-landing-kicker">Work you can inspect</p>
-          <h2 id="inspect-title">Not a typing indicator. The real trail.</h2>
-          <p>Open the command, file edit, test run, or review that moved the work forward. Nothing gets flattened into “done.”</p>
-          <ul className="nx-story-list">
-            <li><Check size={15} aria-hidden="true" /> Tool calls stay attached to the turn</li>
-            <li><Check size={15} aria-hidden="true" /> Diffs show additions and deletions</li>
-            <li><Check size={15} aria-hidden="true" /> Review passes live beside implementation</li>
-          </ul>
+          <p className="nx-landing-kicker">One place for every project</p>
+          <h2 id="computers-title">All your computers. One Codor.</h2>
+          <p>
+            Pair your laptop, workstation, and remote box once. Switch between them without losing the room,
+            the agents, or the thread you were following.
+          </p>
         </div>
-        <div className="nx-diff-preview" aria-label="Example file review">
-          <header><GitBranch size={15} aria-hidden="true" /><span>relay-onboard</span><strong>2 files changed</strong></header>
-          <div className="nx-diff-file"><Pencil size={14} aria-hidden="true" /><code>relay/link.ts</code><span><b>+42</b> <i>−8</i></span></div>
-          <pre aria-label="Code diff" tabIndex={0}><span className="is-context">  const primary = configuredUrl;</span>{'\n'}<span className="is-del">- const target = primary;</span>{'\n'}<span className="is-add">+ const target = cachedWinner ?? primary;</span>{'\n'}<span className="is-add">+ const alternate = relayAlias(primary);</span>{'\n'}<span className="is-context">  socket = dial(target);</span></pre>
-          <footer><ShieldCheck size={15} aria-hidden="true" /> Reviewed by GPT 5.6</footer>
+        <div className="nx-computer-preview" aria-label="Computer switcher preview">
+          <header><span className="nx-landing-mark" aria-hidden="true" /><strong>Connected</strong><StatusPill tone="live">Live</StatusPill></header>
+          <div className="nx-computer-layout">
+            <div className="nx-computer-list">
+              <article className="is-active"><Laptop aria-hidden="true" /><span><strong>Studio Mac</strong><small>relay-ui · 3 agents</small></span><i /></article>
+              <article><Monitor aria-hidden="true" /><span><strong>Workstation</strong><small>compiler · 2 agents</small></span><i /></article>
+              <article><Server aria-hidden="true" /><span><strong>GPU box</strong><small>evals · 1 agent</small></span><i /></article>
+            </div>
+            <div className="nx-computer-channel">
+              <p><span># relay-ui</span><strong>Studio Mac</strong></p>
+              <div><Chip name="Fable 5" accent="green" size={30} /><span><strong>Fable 5</strong><small>Landing pass is ready for review.</small></span></div>
+              <div><Chip name="GPT 5.6" accent="indigo" size={30} /><span><strong>GPT 5.6</strong><small>Reviewing the mobile motion now.</small></span></div>
+              <span className="nx-computer-cursor" aria-hidden="true"><ArrowRight size={13} /> switching host</span>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="nx-landing-story is-split is-reverse" aria-labelledby="anywhere-title">
         <div className="nx-story-copy">
           <p className="nx-landing-kicker">Pick up anywhere</p>
-          <h2 id="anywhere-title">Your computer stays the host.</h2>
+          <h2 id="anywhere-title">Leave your desk. Keep the room.</h2>
           <p>
-            Keep repositories and keys on the machine you chose. Open the same channel on localhost, across your
-            Tailscale network, or through codor.app when you step away.
+            Your computer stays the host. Open the same live channel on localhost, across Tailscale, or through
+            codor.app when you step away—without moving your repositories or keys.
           </p>
         </div>
         <div className="nx-network-preview" aria-label="Private Codor connection diagram">
           <div className="nx-network-node is-host"><Server aria-hidden="true" /><strong>Your computer</strong><span>keys + repos</span></div>
-          <div className="nx-network-path"><span /><LockKeyhole aria-hidden="true" /><small>end-to-end encrypted</small><span /></div>
+          <div className="nx-network-path"><span /><LockKeyhole aria-hidden="true" /><small>end-to-end encrypted</small><span /><i aria-hidden="true" /></div>
           <div className="nx-network-devices">
             <span><Laptop aria-hidden="true" /> Browser</span>
             <span><Smartphone aria-hidden="true" /> Phone</span>
@@ -277,32 +432,23 @@ function ProductStories() {
         </div>
       </section>
 
-      <section className="nx-landing-story nx-agent-story" aria-labelledby="team-title">
-        <div className="nx-story-copy">
-          <p className="nx-landing-kicker">A room for the whole team</p>
-          <h2 id="team-title">Start with one agent. Bring in another when the work needs it.</h2>
-          <p>Fable can build, GPT can challenge the edge cases, and you keep the final word—without copying context between tabs.</p>
-        </div>
-        <div className="nx-agent-handoff" aria-label="Agent collaboration handoff">
-          <article><Chip name="Richard" accent="user" size={40} presence="live" /><span><strong>You set the direction</strong><small>one request in the shared channel</small></span></article>
-          <ArrowRight aria-hidden="true" />
-          <article><Chip name="Fable 5" accent="green" size={40} presence="live" /><span><strong>Fable ships the change</strong><small>tools, edits, and tests included</small></span></article>
-          <ArrowRight aria-hidden="true" />
-          <article><Chip name="GPT 5.6" accent="indigo" size={40} presence="live" /><span><strong>GPT 5.6 reviews it</strong><small>findings return to the same room</small></span></article>
-        </div>
-      </section>
-
       <section className="nx-landing-story nx-privacy-story" aria-labelledby="private-title">
-        <div className="nx-privacy-icon"><LockKeyhole size={26} aria-hidden="true" /></div>
         <div className="nx-story-copy">
           <p className="nx-landing-kicker">Private by architecture</p>
           <h2 id="private-title">The relay can connect you. It cannot read you.</h2>
           <p>Codor’s relay holds no channel keys and forwards encrypted payloads only. No Codor account is required, and every paired browser gets its own revocable authority.</p>
         </div>
+        <div className="nx-cipher-graphic" aria-label="Encrypted relay diagram">
+          <span className="nx-cipher-device"><Laptop aria-hidden="true" /><small>Browser</small></span>
+          <div className="nx-cipher-rail"><i /><i /><i /><span /></div>
+          <span className="nx-cipher-relay"><Network aria-hidden="true" /><strong>Blind relay</strong><small>ciphertext only</small></span>
+          <div className="nx-cipher-rail is-reverse"><i /><i /><i /><span /></div>
+          <span className="nx-cipher-device"><Server aria-hidden="true" /><small>Your Codor</small></span>
+        </div>
         <div className="nx-privacy-facts">
-          <span><LockKeyhole aria-hidden="true" /><strong>End-to-end encrypted</strong><small>keys remain with your devices</small></span>
-          <span><Network aria-hidden="true" /><strong>Network-flexible</strong><small>local, Tailscale, or blind relay</small></span>
+          <span><LockKeyhole aria-hidden="true" /><strong>End-to-end encrypted</strong><small>keys stay on your devices</small></span>
           <span><Users aria-hidden="true" /><strong>No account required</strong><small>pair with a single-use code</small></span>
+          <span><ShieldCheck aria-hidden="true" /><strong>Independently revocable</strong><small>each browser has its own authority</small></span>
         </div>
       </section>
     </div>
@@ -343,12 +489,10 @@ export function LandingPage() {
 
       <section className="nx-landing-hero" aria-labelledby="landing-title">
         <div className="nx-landing-intro">
-          <p className="nx-landing-kicker"><span className="nx-live-dot" aria-hidden="true" /> Your agents, together</p>
-          <h1 id="landing-title">Fable 5 and GPT 5.6 on the same team? <mark>That's just unfair</mark></h1>
-          <p className="nx-landing-lede">
-            One private channel where you direct the work, coding agents share context, and every tool call, edit,
-            test, and review stays visible.
-          </p>
+          <div className="nx-hero-title-stage">
+            <HeroActivity />
+            <h1 id="landing-title">Fable 5 and GPT 5.6 on the same team? <mark>That's just unfair</mark></h1>
+          </div>
           <HarnessRail />
         </div>
 
