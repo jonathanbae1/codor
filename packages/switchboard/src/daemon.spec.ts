@@ -6880,3 +6880,107 @@ describe('codor briefing re-injection after compaction', () => {
   });
 });
 // harn:end compaction-reinjects-codor-briefing
+
+// harn:assume manual-compaction-leases-out-turn-admission ref=compaction-lease-regression
+describe('manual compaction leases out turn admission', () => {
+  const owner = () => daemon.ownerOf('eng');
+
+  // One delivery so the first-delivery briefing has been sent and its gates are
+  // closed (conventions_sent=true), matching a real member mid-conversation.
+  const establishBriefing = async (handle: string) => {
+    const agent = spawnAgent(handle);
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', `@${handle} establish context`);
+    await daemon.settle();
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(true);
+    return agent;
+  };
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  it('defers a delivery during a held compaction, then delivers it with the re-injected briefing', async () => {
+    const agent = await establishBriefing('lease-alpha');
+
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', agent.id, owner().id);
+
+    // A delivery landing while the compaction is held must be deferred: queued,
+    // no turn started, nothing handed to the engine.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-alpha work during compaction');
+    await tick();
+    expect(daemon.store.listDeliveries('eng', { recipient: agent.id, state: 'queued' })).toHaveLength(1);
+    expect(fake.deliveries.some((d) => d.payload.includes('work during compaction'))).toBe(false);
+    expect(daemon.store.getMember('eng', agent.id)!.state).not.toBe('running');
+
+    // Release: the compaction re-arms the briefing, then the finally admits the
+    // deferred delivery — which therefore carries the fresh briefing.
+    fake.releaseCompactions();
+    await compaction;
+    await daemon.settle();
+
+    const delivered = fake.deliveries.find((d) => d.payload.includes('work during compaction'));
+    expect(delivered).toBeDefined();
+    expect(delivered!.payload).toContain('[conventions:');
+    expect(delivered!.payload).toContain('[roster:');
+  });
+
+  it('does not start a turn while a compaction is held', async () => {
+    const agent = await establishBriefing('lease-beta');
+    const deliveriesBefore = fake.deliveries.length;
+
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', agent.id, owner().id);
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-beta racing turn');
+    await tick();
+    // No turn was admitted: the engine saw no new delivery and the member never
+    // went running.
+    expect(fake.deliveries).toHaveLength(deliveriesBefore);
+    expect(daemon.store.getMember('eng', agent.id)!.state).not.toBe('running');
+
+    fake.releaseCompactions();
+    await compaction;
+    await daemon.settle();
+    expect(fake.deliveries.length).toBeGreaterThan(deliveriesBefore);
+  });
+
+  it('releases the lease and admits deferred work without a briefing when the compaction fails', async () => {
+    const agent = await establishBriefing('lease-gamma');
+    let rejectCompaction: (reason: Error) => void = () => undefined;
+    fake.compactSession = () => new Promise((_, reject) => { rejectCompaction = reject; });
+
+    const compaction = daemon.compactMember('eng', agent.id, owner().id).catch((e: unknown) => e);
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-gamma queued during failing compaction');
+    await tick();
+    expect(fake.deliveries.some((d) => d.payload.includes('queued during failing compaction'))).toBe(false);
+
+    rejectCompaction(new Error('engine compaction failed'));
+    const result = await compaction;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toMatch(/engine compaction failed/);
+    await daemon.settle();
+
+    // Lease released → the deferred delivery is admitted. No compaction happened,
+    // so conventions_sent stays true and the delivery carries no briefing.
+    const delivered = fake.deliveries.find((d) => d.payload.includes('queued during failing compaction'));
+    expect(delivered).toBeDefined();
+    expect(delivered!.payload).not.toContain('[conventions:');
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(true);
+  });
+
+  it('refuses a second compaction while one is already pending', async () => {
+    const agent = await establishBriefing('lease-delta');
+    fake.holdCompactions();
+    const first = daemon.compactMember('eng', agent.id, owner().id);
+
+    await expect(daemon.compactMember('eng', agent.id, owner().id))
+      .rejects.toThrow(/already compacting/);
+
+    fake.releaseCompactions();
+    await first;
+  });
+});
+// harn:end manual-compaction-leases-out-turn-admission

@@ -1,0 +1,20 @@
+id: manual-compaction-leases-out-turn-admission
+hash: a-a9cd537b414a
+title: A pending manual compaction defers new turns for that member
+state: active
+statement: >
+  While an operator compactMember's compactSession() call is pending for a
+  member, the daemon must refuse to admit a new turn for that member at the
+  shared turn-admission gate, so a delivery arriving during the compaction is
+  deferred (left queued) rather than started as a turn that would race the
+  engine and consume the compaction boundary; the lease is held only for the
+  bounded compactSession() await and released in a finally that then admits the
+  deferred work via maybeStartTurn, so a hung compaction cannot wedge the member
+  (compactSession is capped at 180s) and the admitted delivery carries the
+  re-injected briefing.
+depends_on:
+  - manual-compaction-is-an-operator-act
+  - turn-start-requires-owned-custody
+  - one-inflight-turn-per-member
+  - compaction-reinjects-codor-briefing
+created_by: compact-lock
