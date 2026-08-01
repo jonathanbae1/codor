@@ -108,17 +108,18 @@ describe('Codex app-server controls', () => {
   // harn:end harness-declares-supported-thinking-levels
 
   // harn:assume harness-declares-what-a-policy-becomes ref=adapter-policy-regression
-  it('maps canonical policy to no runtime approvals and exact 0.144.5 sandbox shapes', () => {
+  it('maps non-yolo policies to on-request approvals and exact 0.144.5 sandbox shapes', () => {
     expect(codexPolicyOptions('read-only')).toEqual({
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       sandbox: 'read-only',
       sandboxPolicy: { type: 'readOnly' },
     });
     expect(codexPolicyOptions('workspace-write')).toEqual({
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
       sandboxPolicy: { type: 'workspaceWrite', networkAccess: false },
     });
+    // full-access alone runs unattended: never ask, no sandbox.
     expect(codexPolicyOptions('full-access')).toEqual({
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
@@ -214,9 +215,6 @@ describe('persistent Codex app-server lifecycle', () => {
 
     const first = collect(adapter, session, 'one', { onSessionRef: (ref) => refs.push(ref) });
     await server.waitForRequest('turn/start', 1);
-    await expect(server.request('item/commandExecution/requestApproval', {
-      threadId: 'thread-1', turnId: 'turn-1', itemId: 'unexpected',
-    })).resolves.toEqual({ decision: 'decline' });
     completeTurn(server, 'turn-1', 'ONE');
     expect((await first).at(-1)).toMatchObject({ status: 'completed', final_text: 'ONE' });
 
@@ -342,7 +340,7 @@ describe('persistent Codex app-server lifecycle', () => {
     expect(resume.params).toMatchObject({
       threadId: 'rollout-existing',
       cwd: '/work',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       sandbox: 'read-only',
     });
     await server.waitForRequest('turn/start');
@@ -439,7 +437,7 @@ describe('persistent Codex app-server lifecycle', () => {
     expect(firstServer.child.killed).toBe(true);
   });
 
-  it('routes interrupt through turn/interrupt without creating runtime approvals', async () => {
+  it('routes interrupt through turn/interrupt and rejects an unknown approval id', async () => {
     const server = createFakeCodexAppServer();
     const { adapter } = fixtureAdapter(server);
     const session = adapter.spawn({ cwd: '/work' });
@@ -461,7 +459,7 @@ describe('persistent Codex app-server lifecycle', () => {
     });
     expect((await run).at(-1)).toEqual({ type: 'run.completed', status: 'interrupted' });
     await expect(adapter.respondInteraction(session, 'nope', {})).rejects.toThrow(
-      'approvals=spawn-time',
+      'no pending Codex approval nope',
     );
   });
 
@@ -736,3 +734,196 @@ describe('Codex turn/plan/updated thread routing', () => {
   });
 });
 // harn:end normalized-agent-task-updates-are-bounded-and-authoritative
+
+function drive(
+  adapter: CodexAdapter,
+  session: Session,
+  payload: string,
+  hooks: Parameters<CodexAdapter['deliver']>[2] = {},
+): { events: WireEvent[]; done: Promise<WireEvent[]> } {
+  const events: WireEvent[] = [];
+  const done = (async () => {
+    for await (const event of adapter.deliver(session, payload, hooks)) events.push(event);
+    return events;
+  })();
+  return { events, done };
+}
+
+async function until<T>(fn: () => T | undefined, tries = 200): Promise<T> {
+  for (let i = 0; i < tries; i++) {
+    const value = fn();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('until: condition never became truthy');
+}
+
+function approvalCards(events: WireEvent[]): Extract<WireEvent, { type: 'approval.raised' }>['card'][] {
+  return events
+    .filter((event): event is Extract<WireEvent, { type: 'approval.raised' }> => event.type === 'approval.raised')
+    .map((event) => event.card);
+}
+
+// harn:assume codex-bridges-runtime-command-and-file-approvals ref=codex-approval-bridge-regression
+describe('Codex runtime approval bridging', () => {
+  it('bridges a command approval to a card and returns accept on allow-once', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    const decision = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', approvalId: 'appr-1',
+      command: 'curl https://example.com', availableDecisions: ['accept', 'acceptForSession', 'decline'],
+    });
+    const card = await until(() => approvalCards(events)[0]);
+    expect(card.interaction_id).toBe('appr-1');
+    expect(card.kind).toBe('approval');
+    expect(card.detail).toBe('curl https://example.com');
+    expect(card.options?.map((o) => o.label)).toEqual(['allow once', 'allow for this session', 'deny']);
+    await adapter.respondInteraction(session, 'appr-1', 'allow once');
+    expect(await decision).toEqual({ decision: 'accept' });
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+
+  it('bridges a file-change approval and returns acceptForSession on allow-for-session', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    const decision = server.request('item/fileChange/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'file-1', reason: 'write outside workspace',
+    });
+    const card = await until(() => approvalCards(events)[0]);
+    expect(card.interaction_id).toBe('file-1');
+    expect(card.tool).toBe('apply_patch');
+    expect(card.options?.map((o) => o.label)).toContain('allow for this session');
+    await adapter.respondInteraction(session, 'file-1', 'allow for this session');
+    expect(await decision).toEqual({ decision: 'acceptForSession' });
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+
+  it('omits allow-for-session when the command does not advertise it, and denies map to decline', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    const decision = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', command: 'ls',
+      availableDecisions: ['accept', 'decline'],
+    });
+    const card = await until(() => approvalCards(events)[0]);
+    expect(card.options?.map((o) => o.label)).toEqual(['allow once', 'deny']);
+    await adapter.respondInteraction(session, 'item-1', 'deny');
+    expect(await decision).toEqual({ decision: 'decline' });
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+
+  it('resolves two concurrent approvals independently by native id', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    const first = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', approvalId: 'a1', command: 'one',
+    });
+    const second = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', approvalId: 'a2', command: 'two',
+    });
+    await until(() => (approvalCards(events).length === 2 ? true : undefined));
+    await adapter.respondInteraction(session, 'a2', 'deny');
+    await adapter.respondInteraction(session, 'a1', 'allow once');
+    expect(await first).toEqual({ decision: 'accept' });
+    expect(await second).toEqual({ decision: 'decline' });
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+
+  it('declines a stale approval whose turnId does not match the active turn', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    // Establish the active turn id (turn-1) and wait until the adapter has it.
+    server.notify('turn/started', {
+      threadId: 'thread-1', turn: { id: 'turn-1', status: 'inProgress', items: [], error: null },
+    });
+    server.notify('item/completed', {
+      threadId: 'thread-1', turnId: 'turn-1', item: { type: 'agentMessage', id: 'm1', text: 'working' },
+    });
+    await until(() => (events.length > 0 ? true : undefined));
+    // A stale approval names an OLD turn; the active turn is turn-1.
+    await expect(server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-OLD', itemId: 'item-1', command: 'stale',
+    })).resolves.toEqual({ decision: 'decline' });
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+
+  it('declines an approval that arrives with no active turn', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    completeTurn(server, 'turn-1', 'DONE');
+    await done; // turn is over; runtime.active is null but the client persists
+    await expect(server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', command: 'late',
+    })).resolves.toEqual({ decision: 'decline' });
+  });
+
+  it('cancels a pending approval when the turn is interrupted', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    server.notify('turn/started', {
+      threadId: 'thread-1', turn: { id: 'turn-1', status: 'inProgress', items: [], error: null },
+    });
+    const decision = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', command: 'blocking',
+    });
+    await until(() => approvalCards(events)[0]);
+    adapter.interrupt(session);
+    expect(await decision).toEqual({ decision: 'cancel' });
+    await done;
+  });
+
+  it('cancels a pending approval when the app-server dies', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { events, done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    const decision = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', command: 'blocking',
+    });
+    await until(() => approvalCards(events)[0]);
+    server.exit(1, null, 'boom');
+    expect(await decision).toEqual({ decision: 'cancel' });
+    await done;
+  });
+
+  it('answers an unbridged server request with an immediate error', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work', policy: 'workspace-write' });
+    const { done } = drive(adapter, session, 'go');
+    await server.waitForRequest('turn/start');
+    await expect(server.request('item/permissions/requestApproval', {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'perm-1',
+    })).rejects.toThrow(/Unsupported server request/);
+    completeTurn(server, 'turn-1', 'DONE');
+    await done;
+  });
+});
+// harn:end codex-bridges-runtime-command-and-file-approvals

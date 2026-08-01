@@ -1,0 +1,16 @@
+id: interaction-recorrelation-keys-on-semantic-identity-with-detail
+hash: a-43cac8f8e0d7
+title: Interaction re-correlation keys on semantic identity including detail
+state: active
+statement: The daemon's interaction re-correlation key must be the semantic
+  identity of a card — kind, prompt, option labels, tool, AND detail —
+  deliberately excluding the process-lifetime native id, so that a crash
+  re-raise of the same card with a fresh native id still re-correlates to the
+  same PendingInteraction (and an answered ask replays idempotently) while two
+  concurrent approvals that differ only in detail no longer coalesce onto one
+  row and strand a native id. Two byte-identical concurrent approvals still
+  coalesce; that residual is accepted and bounded because turn teardown cancels
+  every still-pending approval.
+depends_on:
+  - interaction-state-machine-persisted
+created_by: fix-codex-approvals

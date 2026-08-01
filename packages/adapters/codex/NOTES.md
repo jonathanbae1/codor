@@ -35,10 +35,21 @@ member environment remain unchanged. Exit, crash, or identity mismatch closes
 that transport; the next delivery starts a new process and resumes the same
 thread id.
 
-Codex app-server can issue requests to its client. Runtime approvals remain out
-of scope: every thread/turn uses `approvalPolicy:"never"`, and an unexpected
-`item/commandExecution/requestApproval` or `item/fileChange/requestApproval`
-is explicitly declined rather than parked or converted to a Codor card.
+Codex app-server can issue requests to its client. Runtime approvals ARE
+bridged: non-yolo policies use `approvalPolicy:"on-request"`, so
+`item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+are surfaced as Codor approval cards (`approval.raised`) and parked by their
+native `approvalId` (or `itemId`) until the operator answers via
+`respondInteraction`. Operator choices map to the pinned 0.144.5 v2 decisions:
+allow-once→`accept`, allow-for-session→`acceptForSession`, deny→`decline`; turn
+teardown, client loss, and a request with no matching active turn (including a
+stale approval replayed after `thread/resume`) resolve `cancel`/`decline`. The
+other three server requests — `item/tool/requestUserInput`,
+`mcpServer/elicitation/request`, and `item/permissions/requestApproval` — stay
+UNBRIDGED and keep the transport's immediate JSON-RPC error (a known limitation;
+bridging them needs `capabilities.ask` plus a requestUserInput surface).
+`full-access` stays `approvalPolicy:"never"` with `danger-full-access` (--yolo
+runs unattended).
 
 ## Exact 0.144.5 request shapes
 
@@ -54,8 +65,8 @@ The canonical policy mappings are:
 
 | Codor policy | thread sandbox | turn sandboxPolicy | approvalPolicy |
 | --- | --- | --- | --- |
-| `read-only` | `read-only` | `{type:"readOnly"}` | `never` |
-| `workspace-write` | `workspace-write` | `{type:"workspaceWrite",networkAccess:false}` | `never` |
+| `read-only` | `read-only` | `{type:"readOnly"}` | `on-request` |
+| `workspace-write` | `workspace-write` | `{type:"workspaceWrite",networkAccess:false}` | `on-request` |
 | `full-access` | `danger-full-access` | `{type:"dangerFullAccess"}` | `never` |
 
 Thinking is the 0.144.5 `turn/start.effort` value (`low`, `medium`, `high`,
@@ -145,9 +156,10 @@ evidence only — it never carries usage and never settles a compaction.
   larger provider session surface. A fresh Codor process directly issues
   `thread/resume` for its one persisted member thread.
 - Paseo exposes runtime approvals, steering, goals, rollback, and subagent
-  surfaces. Those are intentionally not added here. Codor keeps its existing
-  spawn-time-only approval capability and no slash routing. Manual compaction is
-  the exception: it is exposed, as an operator-only act (see `compactSession`).
+  surfaces. Codor bridges runtime command/file-change approvals (above) and
+  active-turn steering (live inbox), but goals, rollback, subagents, and slash
+  routing are intentionally not added. Manual compaction is exposed as an
+  operator-only act (see `compactSession`).
 
 The in-memory fake app-server copies Paseo's harness shape: paired PassThrough
 streams, automatic request responses, notification injection, server-request

@@ -170,8 +170,12 @@ export function createFakeCodexAppServer(
     },
     request(method, params) {
       const id = nextServerRequestId++;
-      child.stdout.write(`${JSON.stringify({ id, method, ...(params !== undefined && { params }) })}\n`);
-      return new Promise((resolve, reject) => serverRequests.set(id, { resolve, reject }));
+      // Register the pending BEFORE writing: a synchronously-returned response
+      // (e.g. an unsupported-method error) can be read back before this returns.
+      return new Promise((resolve, reject) => {
+        serverRequests.set(id, { resolve, reject });
+        child.stdout.write(`${JSON.stringify({ id, method, ...(params !== undefined && { params }) })}\n`);
+      });
     },
     waitForRequest(method, occurrence = 1) {
       const predicate = (message: JsonRecord) => message.method === method;

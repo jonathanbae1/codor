@@ -12,7 +12,7 @@ describe('@codor/adapter-codex barrel', () => {
       discover: true,
       interactiveAttach: true,
       ask: false,
-      approvals: 'spawn-time',
+      approvals: 'runtime',
       extensions: false,
       thinking: true,
       thinking_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],

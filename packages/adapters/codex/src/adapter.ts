@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import type {
   AgentLimit,
   AgentUsage,
   AdapterTurnHooks,
+  AskCard,
   HarnessAdapter,
   ModelCatalog,
   Session,
@@ -62,7 +64,7 @@ function assertThinkingLevel(thinking: ThinkingLevel | undefined): void {
 // harn:end harness-declares-supported-thinking-levels
 
 export interface CodexPolicyOptions {
-  approvalPolicy: 'never';
+  approvalPolicy: 'never' | 'on-request';
   sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
   sandboxPolicy:
     | { type: 'readOnly' }
@@ -74,12 +76,15 @@ export interface CodexPolicyOptions {
 export function codexPolicyOptions(policy: string | undefined): CodexPolicyOptions {
   const selected = policy ?? 'read-only';
   if (!PolicySchema.safeParse(selected).success) throw invalidPolicy(selected);
+  // Non-yolo policies use 'on-request' so Codex can ASK the operator before an
+  // action its sandbox forbids (bridged to a Codor approval card). Full-access
+  // stays 'never' with danger-full-access — --yolo runs unattended by design.
   if (selected === 'read-only') {
-    return { approvalPolicy: 'never', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly' } };
+    return { approvalPolicy: 'on-request', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly' } };
   }
   if (selected === 'workspace-write') {
     return {
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
       sandboxPolicy: { type: 'workspaceWrite', networkAccess: false },
     };
@@ -117,6 +122,11 @@ interface TurnState {
   turnId?: string;
 }
 
+/** A native approval request parked awaiting the operator's decision. */
+interface PendingApproval {
+  resolve: (decision: CodexApprovalDecision) => void;
+}
+
 interface CodexRuntime {
   session: Session;
   memberKey?: string;
@@ -125,6 +135,8 @@ interface CodexRuntime {
   child: ChildProcessWithoutNullStreams | null;
   connecting: Promise<void> | null;
   active: TurnState | null;
+  /** Native approval requests parked by native id awaiting a Codor answer. */
+  pendingApprovals: Map<string, PendingApproval>;
   threadId?: string;
   /** Effective thread baseline reported by app-server start/resume/settings. */
   threadModel?: string;
@@ -210,6 +222,76 @@ function notificationThreadId(params: unknown): string | undefined {
   return typeof id === 'string' ? id : undefined;
 }
 
+/** Pinned 0.144.5 v2 approval decisions (the string variants Codor answers with). */
+type CodexApprovalDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel';
+
+const APPROVE_ONCE = 'allow once';
+const APPROVE_SESSION = 'allow for this session';
+const DENY = 'deny';
+
+/**
+ * Native correlation id for a parked approval: the request's approvalId when
+ * present (zsh-exec-bridge subcommands share one itemId and disambiguate by a
+ * UUID approvalId), else itemId, else a generated id so a malformed request can
+ * still be answered rather than stranded.
+ */
+function approvalNativeId(kind: 'command' | 'file', rec: Record<string, unknown>): string {
+  const approvalId = typeof rec.approvalId === 'string' && rec.approvalId !== '' ? rec.approvalId : undefined;
+  const itemId = typeof rec.itemId === 'string' && rec.itemId !== '' ? rec.itemId : undefined;
+  return approvalId ?? itemId ?? `codex-approval-${kind}-${randomUUID()}`;
+}
+
+function clip(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, ' ');
+  return trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed;
+}
+
+function approvalOptions(allowSession: boolean): { label: string; description?: string }[] {
+  const options: { label: string; description?: string }[] = [{ label: APPROVE_ONCE }];
+  if (allowSession) {
+    // Honest scope: acceptForSession is cached within one live Codex thread and
+    // is NOT persisted across app-server/thread recreation or resume.
+    options.push({ label: APPROVE_SESSION, description: 'cached for this Codex session only, not persisted' });
+  }
+  options.push({ label: DENY });
+  return options;
+}
+
+function approvalCard(nativeId: string, kind: 'command' | 'file', rec: Record<string, unknown>): AskCard {
+  const reason = typeof rec.reason === 'string' && rec.reason !== '' ? rec.reason : undefined;
+  if (kind === 'command') {
+    const command = typeof rec.command === 'string' && rec.command !== '' ? rec.command : undefined;
+    const available = Array.isArray(rec.availableDecisions) ? rec.availableDecisions : undefined;
+    // acceptForSession is offered only when the command request advertises it.
+    const allowSession = available === undefined || available.includes('acceptForSession');
+    return {
+      interaction_id: nativeId,
+      kind: 'approval',
+      prompt: command !== undefined ? `Allow Codex to run: ${clip(command)}` : 'Allow Codex to run a command?',
+      options: approvalOptions(allowSession),
+      tool: 'shell',
+      detail: command ?? reason ?? '(command)',
+    };
+  }
+  // File-change requests carry no availableDecisions; the fixed enum supports
+  // acceptForSession, so it is always offered.
+  const grantRoot = typeof rec.grantRoot === 'string' && rec.grantRoot !== '' ? rec.grantRoot : undefined;
+  return {
+    interaction_id: nativeId,
+    kind: 'approval',
+    prompt: 'Allow Codex to edit files?',
+    options: approvalOptions(true),
+    tool: 'apply_patch',
+    detail: reason ?? (grantRoot !== undefined ? `grant write under ${grantRoot}` : '(file changes)'),
+  };
+}
+
+function decisionForAnswer(answer: unknown): CodexApprovalDecision {
+  if (answer === APPROVE_ONCE) return 'accept';
+  if (answer === APPROVE_SESSION) return 'acceptForSession';
+  return 'decline';
+}
+
 /**
  * Codex adapter backed by one long-lived 0.144.5 app-server per member.
  * Codor owns the turn boundary and spawn-time sandbox policy; app-server owns
@@ -221,8 +303,9 @@ export class CodexAdapter implements HarnessAdapter {
     resume: true,
     discover: true,
     interactiveAttach: true,
+    // ask stays false: Codex has no requestUserInput bridge (only approvals).
     ask: false,
-    approvals: 'spawn-time',
+    approvals: 'runtime',
     extensions: false,
     thinking: true,
     thinking_levels: CODEX_THINKING_LEVELS,
@@ -366,6 +449,7 @@ export class CodexAdapter implements HarnessAdapter {
     const runtime: CodexRuntime = existing ?? {
       session,
       pendingCompaction: null,
+      pendingApprovals: new Map(),
       ...(memberKey !== undefined && { memberKey }),
       client: null,
       child: null,
@@ -418,10 +502,17 @@ export class CodexAdapter implements HarnessAdapter {
     runtime.client = client;
     runtime.identity = runtimeIdentity(session);
     client.setNotificationHandler((method, params) => this.routeNotification(runtime, client, method, params));
-    // Runtime approvals are intentionally unsupported. `never` should prevent
-    // these methods, but declining is safer than leaving an unexpected request hung.
-    client.setRequestHandler('item/commandExecution/requestApproval', () => ({ decision: 'decline' }));
-    client.setRequestHandler('item/fileChange/requestApproval', () => ({ decision: 'decline' }));
+    // Bridge the two runtime approval requests to a Codor approval card and park
+    // the decision until the operator answers (see bridgeApproval / respondInteraction).
+    client.setRequestHandler('item/commandExecution/requestApproval',
+      (params) => this.bridgeApproval(runtime, client, 'command', params));
+    client.setRequestHandler('item/fileChange/requestApproval',
+      (params) => this.bridgeApproval(runtime, client, 'file', params));
+    // item/tool/requestUserInput, mcpServer/elicitation/request, and
+    // item/permissions/requestApproval stay UNREGISTERED: the transport answers
+    // them with an immediate JSON-RPC error. Known limitation — a bridge would
+    // need capabilities.ask plus a requestUserInput surface (follow-up:
+    // codex-ask-and-elicitation-support).
 
     try {
       await client.request('initialize', {
@@ -533,6 +624,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (events.some((event) => event.type === 'run.completed')) {
       turn.terminal = true;
       turn.done = true;
+      this.cancelApprovals(runtime);
       turn.wake?.();
     }
   }
@@ -544,6 +636,7 @@ export class CodexAdapter implements HarnessAdapter {
   ): void {
     if (runtime.client !== client) return;
     this.failCompaction(runtime, error);
+    this.cancelApprovals(runtime);
     runtime.client = null;
     runtime.child = null;
     const turn = runtime.active;
@@ -570,6 +663,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   private retireRuntime(runtime: CodexRuntime, removeRuntime = false): void {
     this.failCompaction(runtime, new Error('Codex session retired before compaction completed'));
+    this.cancelApprovals(runtime);
     const client = runtime.client;
     runtime.client = null;
     runtime.child = null;
@@ -787,6 +881,9 @@ export class CodexAdapter implements HarnessAdapter {
       return;
     }
     this.completeTurn(turn, { type: 'run.completed', status: 'interrupted' });
+    // Cancel parked approvals while the client is still alive so the decision
+    // reaches Codex before retireRuntime disposes the transport.
+    this.cancelApprovals(runtime);
     void client.request('turn/interrupt', {
       threadId: runtime.threadId,
       turnId: turn.turnId,
@@ -794,11 +891,57 @@ export class CodexAdapter implements HarnessAdapter {
   }
   // harn:end codex-app-server-is-the-member-runtime
 
-  respondInteraction(): Promise<void> {
-    return Promise.reject(
-      new Error('codex raises no interactions (capabilities.ask=false, approvals=spawn-time)'),
-    );
+  // harn:assume codex-bridges-runtime-command-and-file-approvals ref=codex-approval-bridge
+  private bridgeApproval(
+    runtime: CodexRuntime,
+    client: CodexAppServerClient,
+    kind: 'command' | 'file',
+    params: unknown,
+  ): Promise<{ decision: CodexApprovalDecision }> {
+    if (runtime.client !== client) return Promise.resolve({ decision: 'decline' });
+    const rec = record(params) ?? {};
+    const turnId = typeof rec.turnId === 'string' ? rec.turnId : undefined;
+    const turn = runtime.active;
+    // No matching active, non-terminal turn — including a stale approval replayed
+    // after thread/resume for an old turn — is declined immediately so it never
+    // parks invisibly and Codex is not left blocked on a card no one will see.
+    if (
+      turn === null || turn.terminal || turn.done ||
+      (turn.turnId !== undefined && turnId !== undefined && turn.turnId !== turnId)
+    ) {
+      return Promise.resolve({ decision: 'decline' });
+    }
+    const nativeId = approvalNativeId(kind, rec);
+    // A repeat for the same native id supersedes the prior park; cancel the old
+    // resolver so it is not stranded (Codex does not reuse an approvalId concurrently).
+    runtime.pendingApprovals.get(nativeId)?.resolve('cancel');
+    this.push(turn, [{ type: 'approval.raised', card: approvalCard(nativeId, kind, rec) }]);
+    return new Promise<{ decision: CodexApprovalDecision }>((resolve) => {
+      runtime.pendingApprovals.set(nativeId, { resolve: (decision) => resolve({ decision }) });
+    });
   }
+
+  /** Resolve every parked approval with `cancel` (turn teardown / client loss). */
+  private cancelApprovals(runtime: CodexRuntime): void {
+    if (runtime.pendingApprovals.size === 0) return;
+    const pendings = [...runtime.pendingApprovals.values()];
+    runtime.pendingApprovals.clear();
+    for (const pending of pendings) pending.resolve('cancel');
+  }
+  // harn:end codex-bridges-runtime-command-and-file-approvals
+
+  // harn:assume codex-bridges-runtime-command-and-file-approvals ref=codex-approval-respond
+  respondInteraction(session: Session, interaction_id: string, answer: unknown): Promise<void> {
+    const runtime = this.liveRuntime(session);
+    const pending = runtime?.pendingApprovals.get(interaction_id);
+    if (runtime === undefined || pending === undefined) {
+      return Promise.reject(new Error(`no pending Codex approval ${interaction_id}`));
+    }
+    runtime.pendingApprovals.delete(interaction_id);
+    pending.resolve(decisionForAnswer(answer));
+    return Promise.resolve();
+  }
+  // harn:end codex-bridges-runtime-command-and-file-approvals
 
   /** Thread ids from the rollout store (~/.codex/sessions/YYYY/MM/DD/). */
   discoverSessions(): SessionRef[] {
