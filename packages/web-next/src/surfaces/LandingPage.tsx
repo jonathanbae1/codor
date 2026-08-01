@@ -47,8 +47,8 @@ import { relayUrlConfigured } from '@runtime/relay-mode.js';
 import { PairingCodeInput } from './PairingCodeInput.js';
 
 const INSTALL_COMMAND = 'npx @richhardry/codor setup';
-const DEMO_INTERVAL_MS = 1_550;
-const FINAL_PHASE = 20;
+const DEMO_INTERVAL_MS = 1_120;
+const FINAL_PHASE = 38;
 
 const HARNESSES = [
   'claude-code',
@@ -71,46 +71,47 @@ const WORKFLOWS = [
     label: 'Production pipeline',
     outcome: 'A clean handoff from plan → implementation → independent review.',
     layout: 'pipeline',
-    routes: ['M18 50 H43', 'M57 50 H82'],
+    routes: ['M31 50 H35', 'M65 50 H69'],
     roles: [
-      { name: 'Fable 5', role: 'Plans + delegates', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'left', weight: 'lead' },
-      { name: 'Opus', role: 'Owns implementation', accent: 'violet' as const, icon: Code2, harness: 'claude-code', slot: 'center', weight: 'primary' },
-      { name: 'GPT 5.6 Sol', role: 'Independent gate', accent: 'indigo' as const, icon: ShieldCheck, harness: 'codex', slot: 'right', weight: 'support' },
+      { name: 'Fable 5', role: 'Orchestrator', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'lead', weight: 'lead', responsibilities: ['Shape the plan', 'Split ownership', 'Hold the ship gate'], output: 'Approved plan' },
+      { name: 'Opus', role: 'Implementation owner', accent: 'violet' as const, icon: Code2, harness: 'claude-code', slot: 'build', weight: 'primary', responsibilities: ['Trace both paths', 'Build the patch', 'Run focused gates'], output: 'Tested change' },
+      { name: 'GPT 5.6 Sol', role: 'Independent reviewer', accent: 'indigo' as const, icon: ShieldCheck, harness: 'codex', slot: 'review', weight: 'support', responsibilities: ['Attack invariants', 'Verify recovery'], output: 'Ship verdict' },
     ],
   },
   {
     label: 'Design studio',
-    outcome: 'Research and visual direction converge in a working prototype.',
+    outcome: 'One brief fans out, then converges into a tested product decision.',
     layout: 'studio',
-    routes: ['M50 24 C42 36 28 51 22 70', 'M50 24 C58 36 72 51 78 70', 'M30 75 H70'],
+    routes: ['M50 29 V34 H25 V38', 'M50 29 V34 H75 V38', 'M25 67 V72 H50', 'M75 67 V72 H50'],
     roles: [
-      { name: 'GPT 5.6 Sol', role: 'Product direction', accent: 'indigo' as const, icon: Compass, harness: 'codex', slot: 'top', weight: 'lead' },
-      { name: 'Opus', role: 'Visual system', accent: 'violet' as const, icon: Palette, harness: 'claude-code', slot: 'bottom-left', weight: 'primary' },
-      { name: 'GPT 5.6 Luna', role: 'Interactive prototype', accent: 'green' as const, icon: Code2, harness: 'cursor', slot: 'bottom-right', weight: 'primary' },
+      { name: 'GPT 5.6 Sol', role: 'Product lead', accent: 'indigo' as const, icon: Compass, harness: 'codex', slot: 'brief', weight: 'lead', responsibilities: ['Turn the ask into a brief', 'Set success criteria', 'Resolve tradeoffs'], output: 'Product brief' },
+      { name: 'Opus', role: 'Visual system', accent: 'violet' as const, icon: Palette, harness: 'claude-code', slot: 'visual', weight: 'primary', responsibilities: ['Explore directions', 'Build responsive states'], output: 'Visual language' },
+      { name: 'GPT 5.6 Luna', role: 'Prototype track', accent: 'green' as const, icon: Code2, harness: 'cursor', slot: 'prototype', weight: 'primary', responsibilities: ['Wire interaction', 'Exercise edge cases'], output: 'Working prototype' },
+      { name: 'Fable 5', role: 'Convergence', accent: 'green' as const, icon: Check, harness: 'claude-code', slot: 'decision', weight: 'support', responsibilities: ['Compare both tracks', 'Choose the final direction'], output: 'Design decision' },
     ],
   },
   {
     label: 'Review council',
     outcome: 'Three specialist reads feed one explicit ship decision.',
     layout: 'council',
-    routes: ['M18 28 C26 48 38 62 50 77', 'M50 25 V77', 'M82 28 C74 48 62 62 50 77'],
+    routes: ['M16 46 V51 H50 V57', 'M50 46 V57', 'M84 46 V51 H50 V57'],
     roles: [
-      { name: 'Opus', role: 'Implementation read', accent: 'violet' as const, icon: Code2, harness: 'claude-code', slot: 'top-left', weight: 'primary' },
-      { name: 'GPT 5.6 Sol', role: 'Security critique', accent: 'indigo' as const, icon: ShieldCheck, harness: 'codex', slot: 'top', weight: 'support' },
-      { name: 'Luna', role: 'UX + regression read', accent: 'green' as const, icon: TestTube2, harness: 'gemini', slot: 'top-right', weight: 'support' },
-      { name: 'Fable 5', role: 'Synthesizes verdict', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'bottom', weight: 'lead' },
+      { name: 'Opus', role: 'Implementation read', accent: 'violet' as const, icon: Code2, harness: 'claude-code', slot: 'implementation', weight: 'support', responsibilities: ['Trace control flow', 'Check test depth'], output: 'Code findings' },
+      { name: 'GPT 5.6 Sol', role: 'Security critique', accent: 'indigo' as const, icon: ShieldCheck, harness: 'codex', slot: 'security', weight: 'support', responsibilities: ['Probe trust boundaries', 'Attack failure states'], output: 'Risk findings' },
+      { name: 'Luna', role: 'UX + regression read', accent: 'green' as const, icon: TestTube2, harness: 'gemini', slot: 'experience', weight: 'support', responsibilities: ['Walk real journeys', 'Check mobile + a11y'], output: 'Journey findings' },
+      { name: 'Fable 5', role: 'Council chair', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'verdict', weight: 'lead', responsibilities: ['Reconcile disagreements', 'Rank concrete defects', 'Set the release decision'], output: 'One verdict' },
     ],
   },
   {
     label: 'Incident room',
     outcome: 'Observe, repair, and verify in parallel under one commander.',
     layout: 'incident',
-    routes: ['M50 50 L20 22', 'M50 50 L80 22', 'M50 50 V80', 'M80 22 C91 48 76 71 55 80'],
+    routes: ['M47 24 H53', 'M47 50 H53', 'M24 68 V74 H50', 'M76 68 V74 H50', 'M50 74 V79'],
     roles: [
-      { name: 'Fable 5', role: 'Incident commander', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'center', weight: 'lead' },
-      { name: 'Luna', role: 'Logs + reproduction', accent: 'green' as const, icon: Search, harness: 'gemini', slot: 'top-left', weight: 'support' },
-      { name: 'Opus', role: 'Live repair', accent: 'violet' as const, icon: Code2, harness: 'cursor', slot: 'top-right', weight: 'primary' },
-      { name: 'GPT 5.6 Sol', role: 'Recovery verification', accent: 'indigo' as const, icon: Eye, harness: 'codex', slot: 'bottom', weight: 'support' },
+      { name: 'Fable 5', role: 'Incident commander', accent: 'green' as const, icon: Crown, harness: 'claude-code', slot: 'command', weight: 'lead', responsibilities: ['Own the timeline', 'Route live evidence', 'Choose rollback or fix'], output: 'Live decision' },
+      { name: 'Luna', role: 'Signal desk', accent: 'green' as const, icon: Search, harness: 'gemini', slot: 'observe', weight: 'support', responsibilities: ['Correlate logs', 'Pin reproduction'], output: 'Root cause' },
+      { name: 'Opus', role: 'Repair track', accent: 'violet' as const, icon: Code2, harness: 'cursor', slot: 'repair', weight: 'primary', responsibilities: ['Patch live path', 'Prepare rollback'], output: 'Candidate fix' },
+      { name: 'GPT 5.6 Sol', role: 'Recovery verifier', accent: 'indigo' as const, icon: Eye, harness: 'codex', slot: 'verify', weight: 'support', responsibilities: ['Replay the failure', 'Watch recovery'], output: 'Recovery proof' },
     ],
   },
 ] as const;
@@ -130,6 +131,32 @@ function useEnteredViewport<T extends Element>(threshold = 0.35) {
   }, [entered, threshold]);
 
   return [ref, entered] as const;
+}
+
+// Live viewport presence: `entered` latches true once (for one-shot entrance
+// styling) while `visible` tracks the element in real time, so looping
+// animations can pause the moment the section scrolls offscreen instead of
+// running their intervals forever.
+function useViewportPresence<T extends Element>(threshold = 0.35) {
+  const ref = useRef<T>(null);
+  const [entered, setEntered] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const onScreen = entry?.isIntersecting ?? false;
+        setVisible(onScreen);
+        if (onScreen) setEntered(true);
+      },
+      { threshold },
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [threshold]);
+
+  return [ref, entered, visible] as const;
 }
 
 function prefersReducedMotion(): boolean {
@@ -222,7 +249,11 @@ function DemoInteraction(props: {
           </button>
         )}
       </div>
-      {props.sent && <p className="nx-ask-sent">Answered — the team is continuing…</p>}
+      {props.sent && (
+        <p className="nx-ask-sent">
+          {props.kind === 'Approval needed' ? 'Approved — the workflows are starting…' : 'Answered — the team is continuing…'}
+        </p>
+      )}
     </div>
   );
 }
@@ -266,25 +297,64 @@ function CollaborationDemo() {
     return () => window.cancelAnimationFrame(frame);
   }, [phase, reduced]);
 
-  const workerTools: DemoTool[] = [
-    { icon: 'search', label: <>Searched relay connection and setup call sites</> },
-    { icon: 'terminal', label: <>Read 8 files across the host runtime and CLI</> },
-    { icon: 'edit', label: <><span className="nx-stat-add">+34</span> <span className="nx-stat-del">−12</span> <code>relay/link.ts</code> and <code>setup.ts</code></> },
+  const opusOneResearch: DemoTool[] = [
+    { icon: 'search', label: <>Searched relay dial, cache, and setup entry points</> },
+    { icon: 'terminal', label: <>Read 11 files across the host runtime and CLI</> },
+    { icon: 'search', label: <>Mapped cold-start and reconnect state transitions</> },
+  ];
+  const opusTwoResearch: DemoTool[] = [
+    { icon: 'search', label: <>Traced universal-offer mint and local degrade</> },
+    { icon: 'terminal', label: <>Inspected pairing tests and install output</> },
+    { icon: 'search', label: <>Checked the one-code burn invariant at both doors</> },
+  ];
+  const opusOneBuild: DemoTool[] = [
+    { icon: 'edit', label: <><span className="nx-stat-add">+46</span> <span className="nx-stat-del">−18</span> <code>relay/link.ts</code></> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+22</span> <span className="nx-stat-del">−6</span> <code>relay/store.ts</code></> },
+    { icon: 'terminal', label: <><code>pnpm test --filter relay-link</code></> },
+    { icon: 'terminal', label: <>Typechecked the host package</> },
+  ];
+  const opusTwoBuild: DemoTool[] = [
+    { icon: 'edit', label: <><span className="nx-stat-add">+38</span> <span className="nx-stat-del">−14</span> <code>setup.ts</code></> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+17</span> <span className="nx-stat-del">−4</span> <code>program.ts</code></> },
+    { icon: 'terminal', label: <><code>pnpm test --filter setup-flow</code></> },
+    { icon: 'terminal', label: <>Ran packed launcher proof</> },
+  ];
+  const opusOneTests: DemoTool[] = [
+    { icon: 'terminal', label: <>Simulated canonical SNI reset</> },
+    { icon: 'terminal', label: <>Simulated cached-alias outage</> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+29</span> <span className="nx-stat-del">−2</span> <code>link.spec.ts</code></> },
+  ];
+  const opusTwoTests: DemoTool[] = [
+    { icon: 'terminal', label: <>Exercised relay-enabled first install</> },
+    { icon: 'terminal', label: <>Exercised labelled local-only degrade</> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+31</span> <span className="nx-stat-del">−0</span> <code>setup-flow.spec.ts</code></> },
   ];
   const reviewTools: DemoTool[] = [
-    { icon: 'search', label: <>Traced cached-winner scope and custom relay behavior</> },
-    { icon: 'terminal', label: <><code>pnpm test --filter relay-link</code></> },
+    { icon: 'search', label: <>Traced winner scope through URL changes</> },
+    { icon: 'search', label: <>Attacked pre-open versus mid-session failure</> },
+    { icon: 'terminal', label: <>Ran host and CLI gates</> },
+  ];
+  const fixTools: DemoTool[] = [
+    { icon: 'search', label: <>Reproduced cached-alias outage after network change</> },
+    { icon: 'edit', label: <><span className="nx-stat-add">+24</span> <span className="nx-stat-del">−3</span> <code>relay/link.ts</code></> },
+    { icon: 'terminal', label: <>Reran symmetric failover matrix</> },
   ];
 
-  const active = phase === 1
+  const active = phase === 1 || phase === 5
     ? { actor: 'Fable 5', accent: 'green' as const }
-    : phase >= 5 && phase <= 10
-      ? { actor: 'Opus', accent: 'violet' as const }
-      : phase >= 12 && phase <= 16
-        ? { actor: 'GPT 5.6', accent: 'indigo' as const }
-        : phase >= 18 && phase <= 19
-          ? { actor: 'Opus', accent: 'violet' as const }
-          : undefined;
+    : phase === 6
+      ? { actor: 'Opus 1', accent: 'violet' as const }
+      : phase === 18 || phase === 20
+        ? { actor: 'Fable 5', accent: 'green' as const }
+        : phase === 23
+          ? { actor: 'GPT 5.6', accent: 'indigo' as const }
+          : phase === 30
+            ? { actor: 'Opus 1', accent: 'violet' as const }
+            : phase === 35
+              ? { actor: 'GPT 5.6', accent: 'indigo' as const }
+              : undefined;
+
+  const windowHeight = reduced ? 760 : Math.min(760, 280 + Math.max(0, phase) * 20);
 
   return (
     <section ref={sectionRef} className={`nx-landing-story nx-demo-story ${entered ? 'is-entered' : ''}`} aria-labelledby="landing-demo-title">
@@ -297,85 +367,163 @@ function CollaborationDemo() {
         </p>
       </div>
 
-      <div className="nx-demo-channel-head" data-testid="landing-demo-channel">
-        <span className="nx-landing-mark" aria-hidden="true" />
-        <span><small>Channel</small><strong># relay-onboarding</strong></span>
-        <i aria-hidden="true" />
-        <small>4 members</small>
-      </div>
-
-      <div
-        ref={streamRef}
-        className={`nx-demo-stream ${overflowing ? 'is-overflowing' : ''}`}
-        data-testid="landing-demo"
-        aria-live="polite"
-        aria-atomic="false"
-      >
-        <ol className="nx-demo-thread">
+      <div className="nx-demo-stage">
+        <div className="nx-demo-window" style={{ '--demo-window-height': `${String(windowHeight)}px` } as CSSProperties}>
+          <div className="nx-demo-windowbar" data-testid="landing-demo-channel">
+            <span className="nx-window-lights" aria-hidden="true"><i /><i /><i /></span>
+            <span className="nx-landing-mark" aria-hidden="true" />
+            <span><small>Codor</small><strong># relay-onboarding</strong></span>
+            <i className="nx-channel-live" aria-hidden="true" />
+            <small>5 members</small>
+          </div>
+          <div
+            ref={streamRef}
+            className={`nx-demo-stream ${overflowing ? 'is-overflowing' : ''}`}
+            data-testid="landing-demo"
+            aria-live="polite"
+            aria-atomic="false"
+          >
+            <ol className="nx-demo-thread">
           {phase >= 0 && (
             <DemoTurn actor="Richard" accent="user" time="9:41 PM">
-              <div className="nx-prose"><p>Make the first Codor setup work on filtered networks too. Keep one pairing code for local and relay access, and have someone independently review the fallback before we ship.</p></div>
+              <div className="nx-prose"><p>Make the first Codor setup work on filtered networks too. Keep one pairing code for local and relay access, preserve custom relay URLs, and have the team prove both recovery directions before we ship it.</p></div>
             </DemoTurn>
           )}
           {phase >= 2 && (
             <DemoTurn actor="Fable 5" accent="green" time="9:42 PM">
-              <div className="nx-prose"><p>I’ll coordinate this. One choice before Opus starts: should the first pass optimize for the smallest patch, or include the recovery tests and rollout notes now?</p></div>
-              {phase <= 3 && (
-                <DemoInteraction
-                  kind="Question"
-                  prompt="What should the team include in this pass?"
-                  options={['Smallest patch', 'Ship + independent review']}
-                  selected={phase >= 3 ? 'Ship + independent review' : undefined}
-                  sent={phase >= 3}
-                />
-              )}
+              <div className="nx-prose">
+                <p>I’ll run this as four gated phases and keep the pairing invariant explicit:</p>
+                <ol>
+                  <li><strong>Map:</strong> trace relay dialing and first-install offer minting independently.</li>
+                  <li><strong>Build:</strong> Opus 1 owns symmetric failover; Opus 2 owns universal setup.</li>
+                  <li><strong>Challenge:</strong> Codex reviews hostile-network and double-grant failure modes.</li>
+                  <li><strong>Ship:</strong> fix real findings, re-review, run the full gate, then deploy.</li>
+                </ol>
+              </div>
+              <DemoInteraction
+                kind="Approval needed"
+                prompt="Approve this phased plan and start both implementation tracks?"
+                detail="Two workers in parallel · independent review before deploy"
+                options={['Approve plan', 'Ask for changes']}
+                selected={phase >= 3 ? 'Approve plan' : undefined}
+                sent={phase >= 4}
+              />
             </DemoTurn>
           )}
-          {phase >= 4 && (
-            <DemoTurn actor="Fable 5" accent="green" time="9:43 PM">
-              <div className="nx-prose"><p>Got it. Opus owns the implementation; GPT 5.6 will attack the network failover and the one-code invariant after the tests are green.</p></div>
+          {phase >= 5 && (
+            <DemoTurn actor="Richard" accent="user" time="9:43 PM">
+              <div className="nx-prose"><p>Approved — run all four phases. Ship only after Codex has signed off on the hostile-network and double-grant failure modes.</p></div>
             </DemoTurn>
           )}
           {phase >= 6 && (
-            <DemoTurn actor="Opus" accent="violet" time="9:45 PM">
-              <div className="nx-prose"><p>I’m tracing both entry paths before editing. The daemon already knows how to mint a universal offer, but setup bypasses it, while the relay link remembers a winning hostname without applying the same fallback on a cold start. I’ll join those paths instead of adding another pairing flow.</p></div>
-              <DemoToolProgress tools={workerTools} step={phase >= 10 ? 3 : phase - 7} summary="Ran 3 tools · wrote 2 files +34 −12" />
+            <DemoTurn actor="Fable 5" accent="green" time="9:43 PM">
+              <div className="nx-prose"><p>Approved. I’ve started two workflows: Opus 1 is isolating the relay-link state machine; Opus 2 is tracing the daemon-only mint and install experience. Work in parallel, keep scopes disjoint, and report concrete tests with each handoff.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 7 && (
+            <DemoTurn actor="Opus 1" accent="violet" time="9:44 PM">
+              <div className="nx-prose"><p>I’m mapping the link before touching it. The important split is pre-open failure versus a mid-session drop: only a socket that never opened should try the alternate hostname. I’m also checking whether the stored winner is scoped to the configured relay URL.</p></div>
+              <DemoToolProgress tools={opusOneResearch} step={phase - 7} summary="Ran 3 tools · inspected relay dialing and persistence" />
+            </DemoTurn>
+          )}
+          {phase >= 8 && (
+            <DemoTurn actor="Opus 2" accent="green" time="9:44 PM">
+              <div className="nx-prose"><p>I’m following the first code from installer output to the stored grant. Setup currently has enough information to mint locally, but doing so beside the daemon would fork the room. The safe route is status → daemon offer → labelled local fallback if relay reservation fails.</p></div>
+              <DemoToolProgress tools={opusTwoResearch} step={phase - 8} summary="Ran 3 tools · traced one code through both doors" />
+            </DemoTurn>
+          )}
+          {phase >= 10 && (
+            <DemoTurn actor="Opus 1" accent="violet" time="9:46 PM">
+              <div className="nx-prose"><p>The state machine is smaller than it looked. I’ll preserve the configured URL as identity, keep the winning dial URL beside it, and permit one alternate attempt only before <code>onOpen</code>. A custom relay never gets the hosted alias because it has no eligible alternate.</p></div>
             </DemoTurn>
           )}
           {phase >= 11 && (
-            <DemoTurn actor="Opus" accent="violet" time="9:50 PM">
-              <div className="nx-prose"><p>The implementation is in. Setup now asks the running daemon for its offer, so there is still exactly one grant behind both doors. Relay dialing tries the configured hostname, switches once on a pre-open failure, and caches only a winner scoped to that exact relay URL. Custom relays never inherit the hosted alias.</p></div>
+            <DemoTurn actor="Opus 2" accent="green" time="9:47 PM">
+              <div className="nx-prose"><p>The universal path is confirmed: the daemon’s pairing host creates one stored grant, and both local exchange and relay completion consume that same entry. I’ll make relay-on the install default, but keep <code>--no-relay</code> as a complete opt-out and label every degrade honestly.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 12 && (
+            <DemoTurn actor="Opus 1" accent="violet" time="9:48 PM">
+              <div className="nx-prose"><p>I’m implementing the scoped winner and guarded alternate now. The reconnect path remains unchanged after a healthy session; only a failed handshake can flip endpoints.</p></div>
+              <DemoToolProgress tools={opusOneBuild} step={phase - 12} summary="Ran 4 tools · wrote 2 files +68 −24" />
             </DemoTurn>
           )}
           {phase >= 13 && (
-            <DemoTurn actor="GPT 5.6" accent="indigo" time="9:52 PM">
-              <div className="nx-prose"><p>I’m reviewing the failure boundaries, not just the happy path. The shared grant remains single-use, and mid-session drops correctly stay on the known winner. One gap: the cached-alias outage needs the reverse recovery leg, otherwise a network change can strand an existing host until restart.</p></div>
-              <DemoToolProgress tools={reviewTools} step={phase >= 16 ? 2 : phase - 14} summary="Ran 2 tools · reviewed 1 fallback +18 −0" />
-              {phase >= 16 && phase <= 17 && (
-                <DemoInteraction
-                  kind="Approval needed"
-                  prompt="Apply the reverse-failover regression and rerun the relay gate?"
-                  detail="pnpm test --filter relay-link"
-                  options={['Allow', 'Ask for changes']}
-                  selected={phase >= 17 ? 'Allow' : undefined}
-                  sent={phase >= 17}
-                />
-              )}
+            <DemoTurn actor="Opus 2" accent="green" time="9:48 PM">
+              <div className="nx-prose"><p>I’m wiring setup to ask the live daemon for the offer after the service starts. The output carries the same browser endpoint as local pairing, and a relay reservation failure returns a clearly marked local-only code instead of aborting install.</p></div>
+              <DemoToolProgress tools={opusTwoBuild} step={phase - 13} summary="Ran 4 tools · wrote 2 files +55 −18" />
+            </DemoTurn>
+          )}
+          {phase >= 16 && (
+            <DemoTurn actor="Opus 1" accent="violet" time="9:51 PM">
+              <div className="nx-prose"><p>The forward leg is green. I added an explicit matrix for canonical blocked, alias blocked, cached winner, and custom origin. I’m running the reverse network-change case separately so a previous alias win cannot become sticky.</p></div>
+              <DemoToolProgress tools={opusOneTests} step={phase - 16} summary="Ran 3 tools · wrote 1 file +29 −2" />
+            </DemoTurn>
+          )}
+          {phase >= 17 && (
+            <DemoTurn actor="Opus 2" accent="green" time="9:52 PM">
+              <div className="nx-prose"><p>The install track now boots relay-enabled, waits for the daemon, and mints through <code>/api/pairing/offers</code>. I’m pinning the two degraded cases: relay unavailable still completes setup; <code>--no-relay</code> never starts a relay session.</p></div>
+              <DemoToolProgress tools={opusTwoTests} step={phase - 17} summary="Ran 3 tools · wrote 1 file +31 −0" />
             </DemoTurn>
           )}
           {phase >= 19 && (
-            <DemoTurn actor="Opus" accent="violet" time="9:55 PM">
-              <div className="nx-prose"><p>Added the reverse leg and reran the focused gate. Canonical blocked → alias opens; cached alias blocked → canonical recovers; a custom URL never leaves its own origin. The setup and relay-link suites are green.</p></div>
-              <div className="nx-batch"><span className="nx-batch-line"><ChevronRight size={14} aria-hidden="true" />Ran 4 tools · wrote 1 file +22 −3</span></div>
+            <DemoTurn actor="Opus 1" accent="violet" time="9:54 PM">
+              <div className="nx-prose"><p>My track is ready. Canonical reset → alias opens; cached alias reset → canonical recovers; custom relays remain on their own origin. The winner is persisted only after open and discarded when the configured URL changes.</p></div>
             </DemoTurn>
           )}
-          {phase >= 20 && (
+          {phase >= 21 && (
+            <DemoTurn actor="Opus 2" accent="green" time="9:54 PM">
+              <div className="nx-prose"><p>Setup is ready too. The first printed code is universal when relay is reachable, visibly local-only when it is not, and <code>--no-relay</code> leaves relay disabled. CLI and packed-install proofs are green.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 22 && (
+            <DemoTurn actor="Fable 5" accent="green" time="9:55 PM">
+              <div className="nx-prose"><p>Both tracks are integrated without overlapping ownership. I’ve handed the combined diff to Codex with one review brief: attack winner scoping, reverse failover, and the single shared pairing grant.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 24 && (
             <DemoTurn actor="GPT 5.6" accent="indigo" time="9:57 PM">
-              <div className="nx-prose"><p>Independent review is clean. The behavior is symmetric, the cached winner cannot leak across relay configurations, and the universal code still burns once at either door. This is ready to ship.</p></div>
+              <div className="nx-prose"><p>I’m reviewing the composed behavior, not the two patches in isolation. I’ve verified the daemon-only mint first; now I’m forcing every endpoint transition and checking which state survives reconnect.</p></div>
+              <DemoToolProgress tools={reviewTools} step={phase - 24} summary="Ran 3 tools · reviewed failover, grants, and setup" />
             </DemoTurn>
           )}
-        </ol>
-        {active && <DemoTyping actor={active.actor} accent={active.accent} />}
+          {phase >= 28 && (
+            <DemoTurn actor="GPT 5.6" accent="indigo" time="10:00 PM">
+              <div className="nx-prose"><p>One concrete defect: after the alias has won once, an asynchronous failure before its next <code>open</code> schedules ordinary backoff but never tries canonical. A user who changes networks can stay stranded even though the other endpoint works. The one-code path is clean.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 29 && (
+            <DemoTurn actor="Fable 5" accent="green" time="10:01 PM">
+              <div className="nx-prose"><p>Confirmed. Opus 1, make pre-open failover symmetric for the cached winner and add the exact regression. Keep mid-session reconnect behavior untouched. Codex will re-review only that repair.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 31 && (
+            <DemoTurn actor="Opus 1" accent="violet" time="10:03 PM">
+              <div className="nx-prose"><p>Reproduced it. The alternate was derived from the configured URL instead of the attempted dial URL, so a cached alias could not point back to canonical. I’ve corrected that lookup and guarded it with the same once-per-attempt flag.</p></div>
+              <DemoToolProgress tools={fixTools} step={phase - 31} summary="Ran 3 tools · wrote 1 file +24 −3" />
+            </DemoTurn>
+          )}
+          {phase >= 34 && (
+            <DemoTurn actor="Fable 5" accent="green" time="10:05 PM">
+              <div className="nx-prose"><p>The regression is green in both directions. Codex, re-review the repair and confirm the cached winner, custom URL, and mid-session boundaries still hold.</p></div>
+            </DemoTurn>
+          )}
+          {phase >= 36 && (
+            <DemoTurn actor="GPT 5.6" accent="indigo" time="10:06 PM">
+              <div className="nx-prose"><p>Re-review is clean. The cached winner now fails over symmetrically before open, no endpoint flips after a healthy session, custom relays cannot inherit the hosted alias, and every new branch has a reachable regression.</p></div>
+              <div className="nx-batch"><span className="nx-batch-line"><ChevronRight size={14} aria-hidden="true" />Ran 4 tools · 693 host tests passed</span></div>
+            </DemoTurn>
+          )}
+          {phase >= 38 && (
+            <DemoTurn actor="Fable 5" accent="green" time="10:09 PM">
+              <div className="nx-prose"><p>Final gate passed: CLI, host, web, and the packed fresh-install proof are all green. Deployed to <strong>codor.app</strong> 🚀 Everything is green ✅</p></div>
+              <div className="nx-batch"><span className="nx-batch-line is-active"><Upload size={14} aria-hidden="true" />Production deployment complete · 0 regressions</span></div>
+            </DemoTurn>
+          )}
+            </ol>
+            {active && <DemoTyping actor={active.actor} accent={active.accent} />}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -419,14 +567,15 @@ function HeroActivity() {
 
 function WorkflowStory() {
   const reduced = useMemo(prefersReducedMotion, []);
-  const [sectionRef, entered] = useEnteredViewport<HTMLElement>(0.3);
+  const [sectionRef, entered, visible] = useViewportPresence<HTMLElement>(0.3);
   const [active, setActive] = useState(0);
 
   useEffect(() => {
-    if (reduced || !entered) return;
+    // Gate rotation on live visibility so it stops once scrolled past.
+    if (reduced || !visible) return;
     const timer = window.setInterval(() => setActive((current) => (current + 1) % WORKFLOWS.length), 4_800);
     return () => window.clearInterval(timer);
-  }, [entered, reduced]);
+  }, [visible, reduced]);
 
   const workflow = WORKFLOWS[active] ?? WORKFLOWS[0];
   return (
@@ -468,7 +617,14 @@ function WorkflowStory() {
                   {harnessMark(member.harness, 28)}
                   <i aria-hidden="true" />
                 </span>
-                <span><small><RoleIcon size={12} aria-hidden="true" /> {member.role}</small><strong>{member.name}</strong></span>
+                <span className="nx-workflow-identity">
+                  <small><RoleIcon size={12} aria-hidden="true" /> {member.role}</small>
+                  <strong>{member.name}</strong>
+                </span>
+                <ul>
+                  {member.responsibilities.map((responsibility) => <li key={responsibility}>{responsibility}</li>)}
+                </ul>
+                <span className="nx-workflow-output"><i aria-hidden="true" /> {member.output}</span>
                 <i className="nx-workflow-order" aria-hidden="true">{index + 1}</i>
               </article>
             );
@@ -514,25 +670,34 @@ function ConnectivityMap() {
   );
 }
 
-const VOICE_LEVELS = [
-  [0.26, 0.42, 0.63, 0.35, 0.78, 0.48, 0.31, 0.69, 0.88, 0.52, 0.34, 0.61, 0.44, 0.72, 0.28],
-  [0.38, 0.67, 0.43, 0.81, 0.52, 0.33, 0.74, 0.46, 0.59, 0.84, 0.39, 0.28, 0.66, 0.48, 0.36],
-  [0.31, 0.48, 0.72, 0.54, 0.36, 0.82, 0.58, 0.29, 0.77, 0.43, 0.68, 0.51, 0.32, 0.62, 0.41],
-  [0.44, 0.29, 0.58, 0.76, 0.47, 0.66, 0.38, 0.86, 0.49, 0.31, 0.73, 0.42, 0.57, 0.35, 0.52],
+const VOICE_ENVELOPE = [
+  0.08, 0.12, 0.2, 0.36, 0.58, 0.76, 0.62, 0.86, 0.7, 0.43, 0.2, 0.1,
+  0.09, 0.18, 0.38, 0.68, 0.91, 0.73, 0.48, 0.24, 0.11,
+  0.08, 0.16, 0.33, 0.57, 0.78, 0.66, 0.84, 0.52, 0.27, 0.12,
+  0.09, 0.22, 0.42, 0.25, 0.1,
 ] as const;
+
+// A deterministic speech envelope: phrase clusters rise and decay around short
+// pauses, while each animation frame adds small asymmetric syllable energy.
+const VOICE_LEVELS = Array.from({ length: 18 }, (_, frame) => VOICE_ENVELOPE.map((base, index) => {
+  const syllable = 0.86 + 0.16 * Math.sin(frame * 0.92 + index * 1.71);
+  const formant = 0.93 + 0.09 * Math.sin(frame * 0.47 - index * 0.63);
+  return Math.max(0.07, Math.min(0.98, base * syllable * formant));
+}));
 
 function VoiceVisual() {
   const reduced = useMemo(prefersReducedMotion, []);
-  const [visualRef, entered] = useEnteredViewport<HTMLDivElement>(0.45);
+  const [visualRef, , visible] = useViewportPresence<HTMLDivElement>(0.45);
   const [frame, setFrame] = useState(0);
 
   useEffect(() => {
-    if (reduced || !entered) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % VOICE_LEVELS.length), 170);
+    // Live visibility: the 92ms waveform interval must not run offscreen.
+    if (reduced || !visible) return;
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % VOICE_LEVELS.length), 92);
     return () => window.clearInterval(timer);
-  }, [entered, reduced]);
+  }, [visible, reduced]);
 
-  const levels = VOICE_LEVELS[frame] ?? VOICE_LEVELS[0];
+  const levels = VOICE_LEVELS[frame] ?? VOICE_ENVELOPE;
   return (
     <div ref={visualRef} className="nx-feature-visual nx-voice-visual" aria-label="Voice control preview">
       <div className="nx-voice-recording"><span><Mic size={17} aria-hidden="true" /> Recording 0:08</span><i /></div>
@@ -560,9 +725,9 @@ function ContextRing({ value }: { value: number }) {
 
 function LimitsVisual() {
   const members = [
-    { name: 'Richard', detail: 'Owner', accent: 'user' as const, human: true, state: 'Owner', context: 0, fiveHour: 0, weekly: 0 },
-    { name: 'Fable 5', detail: 'claude-code · opus', accent: 'green' as const, human: false, state: 'Idle', context: 32, fiveHour: 72, weekly: 18 },
-    { name: 'GPT 5.6', detail: 'codex · gpt-5.6', accent: 'indigo' as const, human: false, state: 'Working', context: 68, fiveHour: 43, weekly: 61 },
+    { name: 'Richard', handle: 'richard', detail: 'Channel owner', accent: 'user' as const, human: true, state: 'Owner', context: 0, fiveHour: 0, weekly: 0 },
+    { name: 'Fable 5', handle: 'fable', detail: 'claude-code · opus', accent: 'green' as const, human: false, state: 'Idle', context: 32, fiveHour: 72, weekly: 18 },
+    { name: 'GPT 5.6', handle: 'codex', detail: 'codex · gpt-5.6', accent: 'indigo' as const, human: false, state: 'Working', context: 68, fiveHour: 43, weekly: 61 },
   ];
   return (
     <div className="nx-feature-visual nx-limits-visual" aria-label="People and agents with live usage limits">
@@ -573,19 +738,21 @@ function LimitsVisual() {
       </header>
       <div className="nx-landing-roster">
         {members.map((member) => (
-          <article className="nx-landing-member" key={member.name}>
+          <article className={`nx-landing-member ${member.human ? 'is-owner' : ''}`} key={member.name}>
             <div className="nx-landing-member-row">
               <Chip name={member.name} accent={member.accent} size={31} presence={member.human ? undefined : member.state === 'Working' ? 'live' : 'idle'} />
-              <span className="nx-landing-member-id"><strong>@{member.name.toLowerCase().replace(/\s+/g, '')}</strong><small>{member.detail}</small></span>
+              <span className="nx-landing-member-id"><strong>@{member.handle}</strong><small>{member.detail}</small></span>
               {member.human
                 ? <span className="nx-landing-owner">Owner</span>
                 : <StatusPill tone={member.state === 'Working' ? 'live' : 'neutral'}>{member.state}</StatusPill>}
-              {!member.human && <ContextRing value={member.context} />}
             </div>
             {!member.human && (
-              <div className="nx-landing-member-limits">
-                <span><b>5h</b><i><em style={{ '--limit-width': `${String(member.fiveHour)}%` } as CSSProperties} /></i><small>{member.fiveHour}% left</small></span>
-                <span><b>weekly</b><i><em style={{ '--limit-width': `${String(member.weekly)}%` } as CSSProperties} /></i><small>{member.weekly}% left</small></span>
+              <div className="nx-landing-member-detail">
+                <ContextRing value={member.context} />
+                <div className="nx-landing-member-limits">
+                  <span><b>5h usage</b><small>{member.fiveHour}% left</small><i><em style={{ '--limit-width': `${String(member.fiveHour)}%` } as CSSProperties} /></i></span>
+                  <span><b>Weekly</b><small>{member.weekly}% left</small><i><em style={{ '--limit-width': `${String(member.weekly)}%` } as CSSProperties} /></i></span>
+                </div>
               </div>
             )}
           </article>
@@ -596,29 +763,20 @@ function LimitsVisual() {
 }
 
 function ReviewVisual() {
-  const reduced = useMemo(prefersReducedMotion, []);
   const [visualRef, entered] = useEnteredViewport<HTMLDivElement>(0.45);
-  const [active, setActive] = useState<'preview' | 'diff'>('preview');
-
-  useEffect(() => {
-    if (reduced || !entered) return;
-    const timer = window.setInterval(() => setActive((current) => current === 'preview' ? 'diff' : 'preview'), 4_200);
-    return () => window.clearInterval(timer);
-  }, [entered, reduced]);
 
   return (
-    <div ref={visualRef} className="nx-feature-visual nx-review-visual" aria-label="Preview gallery and diff viewer">
-      <div className="nx-review-tabs" role="tablist" aria-label="Review views">
-        <button type="button" role="tab" aria-selected={active === 'preview'} className={active === 'preview' ? 'is-active' : ''} onClick={() => setActive('preview')}><Eye size={13} aria-hidden="true" /> Preview</button>
-        <button type="button" role="tab" aria-selected={active === 'diff'} className={active === 'diff' ? 'is-active' : ''} onClick={() => setActive('diff')}><GitCompareArrows size={13} aria-hidden="true" /> Diff</button>
-      </div>
-      {active === 'preview' ? (
-        <div className="nx-review-gallery" role="tabpanel">
+    <div ref={visualRef} className={`nx-feature-visual nx-review-visual ${entered ? 'is-entered' : ''}`} aria-label="Preview gallery and diff viewer">
+      <section className="nx-review-window nx-review-preview-window" aria-label="Attachment preview">
+        <header><span><Eye size={13} aria-hidden="true" /> Preview</span><small>2 attachments</small></header>
+        <div className="nx-review-gallery">
           <article className="nx-review-image-card"><div><span /><i /><b /></div><strong>mobile-reference.png</strong><small>Image · #527 · 164 KB</small></article>
           <article className="nx-review-doc-card"><FileText size={22} aria-hidden="true" /><strong>handoff.md</strong><small>Document · #531 · 8 KB</small><span>Download</span></article>
         </div>
-      ) : (
-        <div className="nx-review-diff" role="tabpanel">
+      </section>
+      <section className="nx-review-window nx-review-diff-window" aria-label="Git diff and history">
+        <header><span><GitCompareArrows size={13} aria-hidden="true" /> Diff</span><small><span className="nx-stat-add">+84</span> <span className="nx-stat-del">−31</span></small></header>
+        <div className="nx-review-diff">
           <aside className="nx-review-history">
             <header><GitBranch size={13} aria-hidden="true" /><strong>Git history</strong><small>12 commits</small></header>
             <span className="is-active"><b>Landing micro-motion</b><code>15b7a00</code><small>Richard · now</small></span>
@@ -634,7 +792,7 @@ function ReviewVisual() {
             <code>  Independent review is clean.</code>
           </div>
         </div>
-      )}
+      </section>
     </div>
   );
 }

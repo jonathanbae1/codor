@@ -65,9 +65,15 @@ test.describe('local setup landing', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
     const settled = page.getByTestId('landing-demo');
-    await expect(settled).toContainText('Ran 3 tools · wrote 2 files +34 −12');
-    await expect(settled).toContainText('Independent review is clean');
-    await expect(settled.locator('.nx-demo-windowbar')).toHaveCount(0);
+    await expect(settled).toContainText('Ran 4 tools · wrote 2 files +68 −24');
+    await expect(settled).toContainText('Re-review is clean');
+    await expect(settled).toContainText('Deployed to codor.app 🚀 Everything is green ✅');
+    // Richard sends the approval himself, as his own message, between the
+    // approval control and Fable launching the workflows (Codex review #556).
+    const approval = settled.locator('.nx-turn', { hasText: 'Approved — run all four phases' });
+    await expect(approval.locator('.nx-turn-author')).toHaveText('Richard');
+    await expect(settled.locator('.nx-demo-thread > .nx-turn')).toHaveCount(22);
+    await expect(page.locator('.nx-demo-windowbar')).toHaveCount(1);
     await expect(settled.getByRole('textbox')).toHaveCount(0);
   });
 
