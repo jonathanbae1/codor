@@ -34,6 +34,8 @@ export interface ComputerSessionView extends ComputerActivitySummary {
   label: string;
   active: boolean;
   ready: boolean;
+  /** Positive device-auth refusal evidence; unlike a quiet disconnect this needs repair. */
+  authRefused: boolean;
 }
 
 export interface ComputerSessionsSnapshot {
@@ -463,6 +465,7 @@ export class ComputerSessionManager {
         label: entry.material.computer.label,
         active: entry.material.computer.id === this.activeId,
         ready: this.usable(entry),
+        authRefused: entry.store.getState().authRefused,
         ...this.summary(entry),
       })),
     };

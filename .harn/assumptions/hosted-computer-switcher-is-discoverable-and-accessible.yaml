@@ -1,0 +1,16 @@
+id: hosted-computer-switcher-is-discoverable-and-accessible
+hash: a-dc90f2ddee96
+title: Hosted computer switching is an obvious accessible control
+state: active
+statement: The hosted room footer must expose a visibly interactive,
+  keyboard-operable computer control that names the active computer and its
+  connection state, announces actionable aggregate activity on other computers,
+  and opens responsive full-row choices with honest connected, reconnecting,
+  repair, unread, attention, and working state; recovery must reuse that choice
+  presentation, because switching and alternate- computer notifications cannot
+  depend on discovering a text-like label.
+depends_on:
+  - hosted-computer-switching-reuses-warm-session
+  - hosted-background-computer-activity-is-visible
+  - hosted-offline-recovery-offers-other-computers
+created_by: relay-live-computers-p3-ui

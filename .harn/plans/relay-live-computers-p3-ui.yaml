@@ -1,0 +1,104 @@
+id: relay-live-computers-p3-ui
+title: Relay live-computers phase 3 - obvious switcher and guided Add Computer
+notes: >
+  Third and final approved relay-usability phase, after reviewed warm-session
+  Phase 2. Polish only the stable hosted computer controls. Replace the footer's
+  text-like trigger with a compact, visibly interactive control carrying a
+  computer icon, active label, honest status dot, chevron, focus/hover
+  treatment, and one actionable aggregate badge for inactive-computer
+  attention/unread/ working activity. Present each computer as a full-row switch
+  target with an honest Connected, Reconnecting, or Repair required state and
+  its existing activity detail; retain rename, Forget, and Add without
+  duplicating manager logic. Reuse the same small computer-choice presentation
+  in RecoveryCard. Turn Add Computer into a two-step card: run `codor pair` on
+  the other computer with a copy action, then enter the existing eight-character
+  single-use code; state the ten-minute expiry and private-relay boundary and
+  reuse PairingCodeInput unchanged. Make trigger, popover, recovery choices, and
+  modal keyboard/focus-safe and usable at phone widths. Update the hosted
+  multiple- computers documentation to describe warm in-place switching and
+  background activity. Luna implements; investigator reviews before ship. No
+  session, crypto, relay, server, protocol, push, account, Settings, channel, or
+  broader visual redesign.
+assumptions:
+  create:
+    - id: hosted-computer-switcher-is-discoverable-and-accessible
+      title: Hosted computer switching is an obvious accessible control
+      statement: The hosted room footer must expose a visibly interactive,
+        keyboard-operable computer control that names the active computer and
+        its connection state, announces actionable aggregate activity on other
+        computers, and opens responsive full-row choices with honest connected,
+        reconnecting, repair, unread, attention, and working state; recovery
+        must reuse that choice presentation, because switching and alternate-
+        computer notifications cannot depend on discovering a text-like label.
+      reason: This is the observable discoverability and accessibility contract for
+        Richard's switch-computer and other-computer notification requests.
+      depends_on:
+        - hosted-computer-switching-reuses-warm-session
+        - hosted-background-computer-activity-is-visible
+        - hosted-offline-recovery-offers-other-computers
+    - id: hosted-add-computer-explains-pairing-code-source
+      title: Add Computer explains how to obtain and use its pairing code
+      statement: The hosted Add Computer dialog must tell the operator to run `codor
+        pair` on the other computer, offer that command as a copyable first
+        step, then reuse the existing pairing-code input for the resulting
+        eight-character code while disclosing that it is single-use, expires in
+        ten minutes, and travels through the existing private relay, because an
+        unexplained code field is not an actionable onboarding flow.
+      reason: The real pairing workflow already exists; the dialog needs only enough
+        guidance to make it self-contained without changing cryptography.
+      depends_on:
+        - hosted-computer-switcher-is-discoverable-and-accessible
+  reviewed:
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: Full-row choices still call the existing readiness-safe manager
+        activation and never reload the document.
+    - id: hosted-background-computer-activity-is-visible
+      outcome: unchanged
+      reason: UI derives badges and labels only from the existing isolated
+        per-computer summaries, adding repair presentation if needed.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: Recovery keeps the same activation behavior while sharing the clearer
+        computer-choice presentation.
+    - id: pairing-codes-redacted-from-content
+      outcome: unchanged
+      reason: The dialog documents and copies the static `codor pair` command, never a
+        generated pairing code or secret.
+files:
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/src/app/computer-sessions.spec.ts
+  - packages/web-next/src/room/ComputerSwitcher.tsx
+  - packages/web-next/src/room/ComputerSwitcher.spec.tsx
+  - packages/web-next/src/room/ComputerChoice.tsx
+  - packages/web-next/src/room/ComputerChoice.spec.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.spec.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+  - packages/web-next/tests/room35-startup-recovery.e2e.spec.ts
+  - packages/web-next/tests/room36-computer-ui.e2e.spec.ts
+  - docs/SELF-HOST.md
+anchors:
+  hosted-computer-switcher-is-discoverable-and-accessible:
+    discoverable-computer-control:
+      action: change
+      reason: Add the trigger, shared choice rows, responsive styles, focus behavior,
+        activity badge, recovery presentation, and regressions.
+  hosted-add-computer-explains-pairing-code-source:
+    guided-add-computer:
+      action: change
+      reason: Add the two-step copyable command guidance, expiry/relay copy,
+        documentation, and tests while retaining PairingCodeInput.
+  hosted-background-computer-activity-is-visible:
+    background-computer-summary:
+      action: change
+      reason: Expose the already-owned auth-refused state as an honest Repair required
+        label without changing background ingestion.
+  hosted-offline-recovery-offers-other-computers:
+    multi-computer-recovery-exit:
+      action: change
+      reason: Replace plain recovery buttons with the same accessible computer-choice
+        presentation while preserving activation.
+applied:
+  applied_at: 2026-08-02T15:55:11.870Z

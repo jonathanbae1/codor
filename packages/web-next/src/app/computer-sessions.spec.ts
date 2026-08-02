@@ -137,6 +137,19 @@ describe('ComputerSessionManager', () => {
     manager.dispose();
   });
 
+  it('publishes positive auth refusal evidence for repair presentation', async () => {
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    h.connectorOptions.get('B')?.store?.getState().setAuthRefused(true);
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'B')).toMatchObject({
+      authRefused: true,
+      connected: true,
+    });
+    manager.dispose();
+  });
+
   it('adds, renames and forgets only the addressed session', async () => {
     const h = harness();
     const manager = new ComputerSessionManager(h.deps);

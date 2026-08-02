@@ -4,6 +4,7 @@ import { SESSION_COPY, SESSION_REPAIR_HINT, SESSION_TERMINAL_COPY, type SessionC
 import { forgetRelayPairing } from '../runtime/crypto.js';
 import { relayActive } from '../runtime/relay-mode.js';
 import { computerSessions, type ComputerSessionsSnapshot } from '../app/computer-sessions.js';
+import { ComputerChoice } from '../room/ComputerChoice.js';
 
 export type RecoveryState = Exclude<SessionConnectionState, 'online'>;
 
@@ -130,20 +131,17 @@ export function RecoveryCard({
             .filter((computer) => !computer.active)
             .sort((left, right) => Number(right.connected) - Number(left.connected))
             .map((computer) => (
-              <button
+              <ComputerChoice
                 key={computer.id}
-                type="button"
-                className="nx-btn"
-                data-testid={`recovery-computer-${computer.id}`}
+                computer={computer}
+                testid={`recovery-computer-${computer.id}`}
                 disabled={!computer.ready}
-                onClick={() => {
+                onSelect={() => {
                   void manager.activate(computer.id).then(async (activated) => {
                     if (activated) await onComputerSwitch?.();
                   });
                 }}
-              >
-                {computer.label}{computer.connected ? ' · Connected' : ' · Reconnecting'}
-              </button>
+              />
             ))}
         </div>
       ) : null}

@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
 const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
@@ -103,7 +104,7 @@ test.describe('multi-computer pairing', () => {
     await pasteCode(page, a.code);
     await page.getByTestId('pairing-code-submit').click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
     await page.evaluate(() => { (window as unknown as { __computerDocument?: string }).__computerDocument = 'same-document'; });
 
     // Add computer B (host B) through the switcher's "Add a computer".
@@ -111,16 +112,19 @@ test.describe('multi-computer pairing', () => {
     const b = await control<{ code: string }>('/relay-pair-b');
     await page.getByTestId('computer-current').click();
     await page.getByTestId('computer-add').click();
+    await page.getByTestId('computer-add-next').click();
     await pasteCode(page, b.code);
     await page.getByTestId('pairing-code-submit').click();
 
     // B is the LAST PAIRED → active in the SAME document, with A still warm.
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     await page.getByTestId('computer-current').click();
     await expect(menuItem(page, 'Computer 1').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
     await expect(menuItem(page, 'Computer 2').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
+    const popupA11y = await new AxeBuilder({ page }).include('.nx-computer-menu').analyze();
+    expect(popupA11y.violations).toEqual([]);
     await page.getByTestId('computer-current').click();
 
     const initialDials = await page.evaluate(() => ({
@@ -146,7 +150,7 @@ test.describe('multi-computer pairing', () => {
     await page.getByTestId('computer-current').click();
     await menuItem(page, 'Computer 1').getByRole('button').first().click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     expect(await page.evaluate(() => ({
       ...(window as unknown as { __relaySessionDials: Record<string, number> }).__relaySessionDials,
@@ -169,8 +173,8 @@ test.describe('multi-computer pairing', () => {
     const bDialsBeforeRecovery = Object.entries(initialDials).find(([url]) => url.includes(bSession))?.[1];
     await control('/relay-down-a-only');
     await expect(page.getByTestId('recovery')).toBeVisible({ timeout: 20_000 });
-    await page.getByRole('button', { name: /Computer 2 · Connected/ }).click();
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2');
+    await page.getByRole('button', { name: /Computer 2, Connected/ }).click();
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/);
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     const bDialsAfterRecovery = await page.evaluate((session) => Object.entries(
@@ -185,7 +189,7 @@ test.describe('multi-computer pairing', () => {
     // Forget computer B → it disappears, A stays active.
     await menuItem(page, 'Computer 2').getByRole('button', { name: 'Forget' }).click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
     await page.getByTestId('computer-current').click();
     await expect(menuItem(page, 'Computer 2')).toHaveCount(0);
   });

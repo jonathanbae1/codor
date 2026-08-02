@@ -1,0 +1,13 @@
+id: hosted-add-computer-explains-pairing-code-source
+hash: a-e754bd33cc3c
+title: Add Computer explains how to obtain and use its pairing code
+state: active
+statement: The hosted Add Computer dialog must tell the operator to run `codor
+  pair` on the other computer, offer that command as a copyable first step, then
+  reuse the existing pairing-code input for the resulting eight-character code
+  while disclosing that it is single-use, expires in ten minutes, and travels
+  through the existing private relay, because an unexplained code field is not
+  an actionable onboarding flow.
+depends_on:
+  - hosted-computer-switcher-is-discoverable-and-accessible
+created_by: relay-live-computers-p3-ui

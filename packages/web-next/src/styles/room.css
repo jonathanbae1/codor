@@ -3039,23 +3039,88 @@
   resize: vertical;
 }
 
-/* P3 computer switcher — the Connected-box list of paired computers. */
-.nx-computer-switcher { position: relative; }
+/* P3 computer switcher — compact trigger with a real, accessible popup. */
+.nx-computer-switcher { position: relative; min-width: 0; }
 .nx-computer-current {
-  font: inherit; color: var(--c-secondary); background: none; border: 0;
-  padding: 0; cursor: pointer; text-align: left;
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px;
+  padding: 4px 8px; border: 1px solid var(--c-line); border-radius: var(--r-control);
+  background: var(--c-raised); color: var(--c-secondary); font: inherit; text-align: left;
+  cursor: pointer;
 }
+.nx-computer-current:hover { border-color: var(--c-line-strong); background: var(--c-muted); color: var(--c-ink); }
+.nx-computer-current-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-computer-current-dot,
+.nx-computer-choice-dot {
+  width: 7px; height: 7px; flex: none; border-radius: var(--r-full); background: var(--c-faded);
+}
+.nx-computer-current-dot.is-connected,
+.nx-computer-choice-dot.is-connected { background: var(--c-live); }
+.nx-computer-current-dot.is-reconnecting,
+.nx-computer-choice-dot.is-reconnecting { background: var(--c-warn); }
+.nx-computer-current-dot.is-repair,
+.nx-computer-choice-dot.is-repair { background: var(--c-error); }
+.nx-computer-activity-badge {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--r-full); background: var(--c-ink); color: var(--c-surface);
+  font: var(--t-caption-strong); line-height: 1;
+}
+.nx-computer-current-chevron { flex: none; color: var(--c-faded); }
 .nx-computer-menu {
-  position: absolute; bottom: 100%; left: 0; z-index: 20; min-width: 200px;
-  margin-bottom: 6px; padding: var(--sp-2); background: var(--c-surface);
-  border: 1px solid var(--c-line); border-radius: var(--r-panel); box-shadow: var(--e-float);
+  position: absolute; bottom: 100%; left: 0; z-index: 20; width: min(340px, calc(100vw - 24px));
+  max-height: min(70dvh, 520px); margin-bottom: 6px; padding: var(--sp-2);
+  overflow-y: auto; background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: var(--r-panel); box-shadow: var(--e-float);
 }
-.nx-computer-menu ul { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: grid; gap: 2px; }
-.nx-computer-menu li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.nx-computer-name, .nx-computer-forget {
-  font: inherit; background: none; border: 0; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+.nx-computer-menu-heading {
+  padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--c-faded); font: var(--t-eyebrow);
+  text-transform: uppercase;
 }
-.nx-computer-name { color: var(--c-primary); flex: 1; text-align: left; }
-.nx-computer-forget { color: var(--c-secondary); }
-.nx-computer-name:hover, .nx-computer-forget:hover { background: color-mix(in srgb, var(--c-primary) 8%, transparent); }
-.nx-computer-rename { font: inherit; flex: 1; }
+.nx-computer-menu ul { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: grid; gap: var(--sp-1); }
+.nx-computer-menu li { min-width: 0; }
+.nx-computer-choice-row { display: flex; align-items: stretch; gap: var(--sp-1); min-width: 0; }
+.nx-computer-choice {
+  display: flex; flex: 1; min-width: 0; min-height: 58px; padding: var(--sp-2);
+  border: 1px solid var(--c-line); border-radius: var(--r-control); background: var(--c-raised);
+  color: var(--c-body); text-align: left; cursor: pointer;
+}
+.nx-computer-choice:hover:not(:disabled) { border-color: var(--c-line-strong); background: var(--c-muted); }
+.nx-computer-choice[aria-current='true'] { border-color: var(--c-line-strong); background: var(--c-muted); }
+.nx-computer-choice:disabled { opacity: 0.5; cursor: not-allowed; }
+.nx-computer-choice-copy { display: grid; gap: 3px; min-width: 0; width: 100%; }
+.nx-computer-choice-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.nx-computer-choice-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--t-ui-strong); }
+.nx-computer-choice-active { flex: none; color: var(--c-faded); font: var(--t-caption); }
+.nx-computer-choice-status { display: inline-flex; align-items: center; gap: 6px; font: var(--t-caption-strong); color: var(--c-secondary); }
+.nx-computer-choice-status.is-connected { color: var(--c-live-text); }
+.nx-computer-choice-status.is-reconnecting { color: var(--c-warn-text); }
+.nx-computer-choice-status.is-repair { color: var(--c-error-text); }
+.nx-computer-choice-activity { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--c-secondary); font: var(--t-caption); }
+.nx-computer-choice-actions { display: flex; flex-direction: column; justify-content: center; gap: 2px; flex: none; }
+.nx-computer-forget {
+  padding: 5px 6px; border-radius: 6px; background: none; color: var(--c-secondary); font: var(--t-caption); cursor: pointer;
+}
+.nx-computer-forget:hover { background: var(--c-muted); color: var(--c-ink); }
+.nx-computer-rename {
+  width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--c-line-strong);
+  border-radius: 6px; background: var(--c-surface); color: var(--c-ink); font: inherit;
+}
+.nx-computer-add-step { display: grid; gap: var(--sp-3); }
+.nx-computer-add-step h3 { margin: 0; font: var(--t-ui-strong); }
+.nx-computer-add-step p { margin: 0; color: var(--c-body); }
+.nx-computer-pair-command {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--c-line); border-radius: var(--r-control);
+  background: var(--c-muted);
+}
+.nx-computer-pair-command .nx-code { color: var(--c-ink); }
+.nx-computer-pair-command .nx-btn.is-quiet { color: var(--c-body); }
+.nx-computer-add-actions { display: flex; justify-content: flex-end; }
+
+@media (max-width: 719px) {
+  .nx-computer-menu {
+    left: 0; width: min(360px, calc(100vw - 24px)); max-height: min(68dvh, 480px);
+  }
+  .nx-computer-current { max-width: min(100%, 270px); }
+  .nx-computer-choice { min-height: 62px; }
+  .nx-computer-choice-actions { gap: 4px; }
+}
