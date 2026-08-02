@@ -8,7 +8,9 @@ import {
   hydrateActive,
   listComputers,
   migrateIfNeeded,
+  persistComputerRoom,
   recordPairedComputer,
+  readComputerMaterial,
   renameComputer,
   switchToComputer,
 } from './relay-store.js';
@@ -86,15 +88,43 @@ describe('relay-store (generation-swapped)', () => {
     expect(await kv.get('computer:B:1:room:A')).toBeUndefined();
   });
 
-  it('switch is a single index put; the reload boot hydrates the target', async () => {
+  it('switch atomically flips the index and hydrates the target generation in place', async () => {
     const kv = mapKv();
     await pair(kv, 'A', '2026-01-01');
     await pair(kv, 'B', '2026-01-02');
     await switchToComputer(kv, 'A');
     expect((await listComputers(kv)).active_id).toBe('A'); // marker flipped atomically
-    await hydrateActive(kv); // the reload boot
     expect(activeRelay(kv)).toBe('A');
     expect(globalRooms(kv)).toEqual(['room:A']);
+  });
+
+  it('reads one indexed generation without hydrating or exposing another computer', async () => {
+    const kv = mapKv();
+    await pair(kv, 'A', '2026-01-01');
+    await pair(kv, 'B', '2026-01-02');
+    const loaded = await readComputerMaterial(kv, 'A');
+    expect(loaded).toMatchObject({
+      computer: { id: 'A', gen: 1 },
+      relay: { relay_url: 'A' },
+      peer: { device_id: 'A' },
+      rooms: [{ room: 'A', value: { room: 'A', key: 'A' } }],
+    });
+    expect(activeRelay(kv)).toBe('B'); // the read never changed the active cache
+  });
+
+  it('persists an explicitly owned room-key change through a new complete generation', async () => {
+    const kv = mapKv();
+    await pair(kv, 'A', '2026-01-01');
+    await pair(kv, 'B', '2026-01-02');
+    expect(await persistComputerRoom(kv, 'A', 'shared', { room: 'shared', key: 'A-new' })).toBe(true);
+    expect((await listComputers(kv)).active_id).toBe('B');
+    expect((await listComputers(kv)).computers.find((computer) => computer.id === 'A')?.gen).toBe(2);
+    expect(await kv.get('computer:A:2:relay')).toEqual({ relay_url: 'A' });
+    expect(await kv.get('computer:A:2:room:shared')).toEqual({ room: 'shared', key: 'A-new' });
+    expect(await kv.get('computer:B:1:room:shared')).toBeUndefined();
+    expect(await kv.get('room:shared')).toBeUndefined();
+    await switchToComputer(kv, 'A');
+    expect(await kv.get('room:shared')).toEqual({ room: 'shared', key: 'A-new' });
   });
 
   it('crash mid-re-pair: a half-written new generation is ignored; boot hydrates the old one', async () => {

@@ -7,10 +7,11 @@ import {
   type Role,
   type Room,
   type RoomMeter,
+  type RoomSummary,
   type RoomSupport,
   type ServerFrame,
 } from '@codor/protocol';
-import { create } from 'zustand';
+import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import {
   appendRunEvent,
@@ -36,7 +37,7 @@ export interface RoomSlice {
   errors: string[];
 }
 
-interface ClientState {
+export interface ClientState {
   connected: boolean;
   /** The connector parked on a device-auth refusal (app-WS 4403): positive
    *  pairing-dead evidence for the recovery surface. Cleared on (re)connect. */
@@ -44,11 +45,14 @@ interface ClientState {
   activeRoom: string;
   rooms: Record<string, RoomSlice>;
   roomList: Room[];
+  roomSummaries: RoomSummary[];
+  roomSummariesLoaded: boolean;
   applyFrame(frame: ServerFrame, fallbackRoom?: string): void;
   mergeHistoryPage(room: string, messages: Message[]): void;
   setActiveRoom(room: string): void;
   setConnected(connected: boolean): void;
   setAuthRefused(authRefused: boolean): void;
+  setRoomSummaries(summaries: RoomSummary[]): void;
   reset(): void;
 }
 
@@ -101,7 +105,6 @@ interface HydrationStaging {
   support?: RoomSupport;
 }
 
-const staging = new Map<string, HydrationStaging>();
 const freshStaging = (): HydrationStaging => ({ members: {}, messages: {}, inbox: {} });
 
 function frameRoom(frame: ServerFrame, fallback?: string): string | undefined {
@@ -151,12 +154,20 @@ function rollingTail(messages: Record<number, Message>, next: Message): Record<n
   );
 }
 
-export const useClientStore = create<ClientState>((set, get) => ({
+export type ClientStore = UseBoundStore<StoreApi<ClientState>>;
+
+/** Build one fully-isolated client store. Hosted computer sessions each own one;
+ *  the exported singleton below remains the unchanged direct/self-hosted path. */
+export function createClientStore(): ClientStore {
+  const staging = new Map<string, HydrationStaging>();
+  return create<ClientState>((set, get) => ({
   connected: false,
   authRefused: false,
   activeRoom: '',
   rooms: {},
   roomList: [],
+  roomSummaries: [],
+  roomSummariesLoaded: false,
 
   applyFrame: (frame, fallbackRoom) => {
     if (frame.type === 'rooms') {
@@ -371,11 +382,29 @@ export const useClientStore = create<ClientState>((set, get) => ({
 
   setConnected: (connected) => set(connected ? { connected, authRefused: false } : { connected }),
   setAuthRefused: (authRefused) => set({ authRefused }),
+  setRoomSummaries: (roomSummaries) => set({ roomSummaries, roomSummariesLoaded: true }),
   reset: () => {
     staging.clear();
-    set({ connected: false, authRefused: false, activeRoom: '', rooms: {}, roomList: [] });
+    set({ connected: false, authRefused: false, activeRoom: '', rooms: {}, roomList: [], roomSummaries: [], roomSummariesLoaded: false });
   },
-}));
+  }));
+}
+
+export const useClientStore = createClientStore();
+
+let mirroredStore: ClientStore | undefined;
+let stopMirroring: (() => void) | undefined;
+
+/** Point the legacy UI hook at one managed hosted store. State methods retain
+ *  their source-store closures, and the subscription republishes every change. */
+export function mirrorClientStore(store: ClientStore): void {
+  if (mirroredStore === store) return;
+  stopMirroring?.();
+  mirroredStore = store;
+  const publish = (state: ClientState): void => { useClientStore.setState(state, true); };
+  publish(store.getState());
+  stopMirroring = store.subscribe(publish);
+}
 
 export const roomSlice = (state: ClientState, room: string): RoomSlice =>
   state.rooms[room] ?? EMPTY_ROOM;

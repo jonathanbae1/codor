@@ -47,6 +47,10 @@ export interface RelayMaterial {
   rooms: Array<{ room: string; value: unknown }>;
 }
 
+export interface IndexedRelayMaterial extends RelayMaterial {
+  computer: RelayComputer;
+}
+
 /** Run under the KV's serializer when it has one; otherwise straight through. */
 function serialize<T>(kv: Kv, fn: () => Promise<T>): Promise<T> {
   return kv.lock ? kv.lock(fn) : fn();
@@ -181,13 +185,73 @@ export async function recordPairedComputer(
   });
 }
 
-/** Switch active computer — one atomic index put; boot hydrates on the reload. */
+/** Switch active computer and hydrate its derived global cache under one lock. */
 export async function switchToComputer(kv: Kv, id: string): Promise<void> {
   return serialize(kv, async () => {
     const index = await readIndex(kv);
-    if (!index.computers.some((c) => c.id === id)) return;
+    const computer = index.computers.find((c) => c.id === id);
+    if (!computer) return;
     await kv.put(INDEX_KEY, setActive(index, id));
+    await hydrateGeneration(kv, computer.id, computer.gen);
   });
+}
+
+/** Read exactly the generation selected by the index for one computer. Hosted
+ *  sessions use this instead of the mutable active-cache globals. */
+export async function readComputerMaterial(kv: Kv, id: string): Promise<IndexedRelayMaterial | undefined> {
+  return serialize(kv, async () => {
+    const computer = (await readIndex(kv)).computers.find((entry) => entry.id === id);
+    if (!computer) return undefined;
+    const relay = await kv.get(archiveKey(computer.id, computer.gen, 'relay'));
+    const peer = await kv.get(archiveKey(computer.id, computer.gen, 'peer:switchboard'));
+    const access = await kv.get(archiveKey(computer.id, computer.gen, 'access:switchboard'));
+    if (relay === undefined || peer === undefined || access === undefined) return undefined;
+    const prefix = archiveKey(computer.id, computer.gen, 'room:');
+    const rooms: RelayMaterial['rooms'] = [];
+    for (const key of await kv.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const value = await kv.get(key);
+      if (value !== undefined) rooms.push({ room: key.slice(prefix.length), value });
+    }
+    return { computer, relay, peer, access, rooms };
+  });
+}
+
+/** Persist a room-key change to one explicit computer by completing a new
+ *  generation before the index points at it. The caller owns any derived
+ *  global-cache hydration; this never infers ownership from shared active_id. */
+export async function persistComputerRoom(
+  kv: Kv,
+  computerId: string,
+  room: string,
+  value: unknown,
+): Promise<boolean> {
+  return serialize(kv, async () => {
+    const index = await readIndex(kv);
+    const computer = index.computers.find((entry) => entry.id === computerId);
+    if (!computer) return false;
+    const nextGen = computer.gen + 1;
+    const oldPrefix = genRoot(computer.id, computer.gen);
+    const nextPrefix = genRoot(computer.id, nextGen);
+    for (const key of await kv.keys()) {
+      if (!key.startsWith(oldPrefix)) continue;
+      const archived = await kv.get(key);
+      if (archived !== undefined) await kv.put(`${nextPrefix}${key.slice(oldPrefix.length)}`, archived);
+    }
+    await kv.put(archiveKey(computer.id, nextGen, `room:${room}`), value);
+    await kv.put(INDEX_KEY, {
+      ...index,
+      computers: index.computers.map((entry) => entry.id === computer.id
+        ? { ...entry, gen: nextGen }
+        : entry),
+    } satisfies RelayIndex);
+    await pruneOldGenerations(kv, computer.id, nextGen);
+    return true;
+  });
+}
+
+export async function hasRelayComputerIndex(kv: Kv): Promise<boolean> {
+  return (await kv.get(INDEX_KEY)) !== undefined;
 }
 
 /** Rename a computer's label in place (index-only; keys/active untouched). */

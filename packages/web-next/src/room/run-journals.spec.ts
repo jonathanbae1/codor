@@ -1,5 +1,6 @@
 import type { WireEvent } from '@codor/protocol';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetActiveComputerForTest, setActiveComputer } from '@runtime/active-computer.js';
 
 const api = vi.hoisted(() => ({ fetchRunEvents: vi.fn() }));
 vi.mock('@runtime/api.js', () => api);
@@ -20,12 +21,27 @@ const journal = (room: string): WireEvent[] => [{
 }];
 
 beforeEach(() => {
+  resetActiveComputerForTest();
   resetRunJournalsForTest();
   api.fetchRunEvents.mockReset();
   api.fetchRunEvents.mockImplementation(async (room: string) => journal(room));
 });
 
 describe('room-keyed run journal cache', () => {
+  it('does not reuse identical room and run ids across computers', async () => {
+    setActiveComputer('A');
+    activateRunJournalRoom('shared');
+    requestRunJournal('shared', () => 'token-A', 7, { terminal: true });
+    await vi.waitFor(() => expect(getRunJournal('shared', 7)).toEqual(journal('shared')));
+
+    setActiveComputer('B');
+    expect(getRunJournal('shared', 7)).toBeUndefined();
+    activateRunJournalRoom('shared');
+    requestRunJournal('shared', () => 'token-B', 7, { terminal: true });
+    await vi.waitFor(() => expect(api.fetchRunEvents).toHaveBeenCalledTimes(2));
+    expect(api.fetchRunEvents.mock.calls.map((call) => call[2]?.token)).toEqual(['token-A', 'token-B']);
+  });
+
   it('retains a visited room without colliding on room-local message ids', async () => {
     activateRunJournalRoom('alpha');
     requestRunJournal('alpha', token, 7, { terminal: true });

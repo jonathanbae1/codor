@@ -11,7 +11,7 @@ import { BROWSER_PROTOCOL_EPOCH, type Act, type ServerFrame } from '@codor/proto
 import { setActiveBrowserAccessToken } from '@runtime/crypto.js';
 import type { Connection } from '@runtime/ws.js';
 
-import { HISTORY_PAGE_SIZE, roomSlice, useClientStore } from './store.js';
+import { HISTORY_PAGE_SIZE, roomSlice, useClientStore, type ClientStore } from './store.js';
 import { requireBrowserUpgrade } from './compatibility.js';
 
 export interface RoomConnector extends Connection {
@@ -35,9 +35,18 @@ export interface ConnectorOptions {
    *  (re)open, so when the tunnel session drops and closes the app-WS socket,
    *  the next open builds a fresh app-WS stream on the NEW session. */
   socketFactory?: (url: string) => WebSocket;
+  /** Isolated session store. Omitted by the direct/self-hosted singleton path. */
+  store?: ClientStore;
+  /** Session-local token sink. Defaults to the legacy active-token singleton. */
+  setToken?: (token: string) => string;
+  /** Whether this connector owns the legacy e2e window hook. */
+  expose?: boolean;
   /** Called for EVERY legal resume — lifecycle or watchdog — so recovery work
    *  that must follow a replacement has one place to live. */
   onResume?: (room: string) => void;
+  /** Session managers park inactive incompatible computers locally and publish
+   *  the global gate only if that computer is selected. */
+  onUpgradeRequired?: (frame: Extract<ServerFrame, { type: 'upgrade_required' }>) => void;
   refreshToken?: () => Promise<string>;
 }
 
@@ -64,6 +73,8 @@ const PROBE_TIMEOUT_MS = 8_000;
 export function createConnector(options: ConnectorOptions): RoomConnector {
   const origin = (options.origin ?? window.location.origin).replace(/^http/, 'ws');
   const socketFactory = options.socketFactory ?? ((url: string) => new WebSocket(url));
+  const clientStore = options.store ?? useClientStore;
+  const setToken = options.setToken ?? setActiveBrowserAccessToken;
   let currentRoom = options.room;
   let socket: WebSocket | undefined;
   let subscribed = new Set<string>();
@@ -85,7 +96,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
   // reset `connected`, schedule retries, or resubscribe on a dead wire.
   let generation = 0;
 
-  useClientStore.getState().setActiveRoom(currentRoom);
+  clientStore.getState().setActiveRoom(currentRoom);
 
   const clearRetry = (): void => {
     if (retryTimer !== undefined) clearTimeout(retryTimer);
@@ -114,7 +125,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       room,
       // Each room resumes from ITS OWN committed cursor, so a resubscribe
       // replays only what that room missed and never re-hydrates it.
-      since_seq: roomSlice(useClientStore.getState(), room).seq,
+      since_seq: roomSlice(clientStore.getState(), room).seq,
       hydrate_limit: HISTORY_PAGE_SIZE,
       room_addressed: true,
       browser_protocol: BROWSER_PROTOCOL_EPOCH,
@@ -150,7 +161,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
    */
   const reconcile = (roomSeqs: Record<string, number> | undefined, priorSubscribed: Set<string>): void => {
     if (roomSeqs === undefined) return;
-    const store = useClientStore.getState();
+    const store = clientStore.getState();
     for (const [room, serverSeq] of Object.entries(roomSeqs)) {
       if (!priorSubscribed.has(room)) continue;
       const committed = roomSlice(store, room).seq;
@@ -222,7 +233,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       if (!live()) return;
       retryMs = 500;
       state = 'connected';
-      useClientStore.getState().setConnected(true);
+      clientStore.getState().setConnected(true);
       // The selected room hydrates first; the rooms listing then fans the same
       // socket out to every other authorized room, each from its own cursor.
       subscribe(currentRoom);
@@ -236,13 +247,14 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         // A server-chosen park: never resumed automatically, only by reload.
         state = 'parked-upgrade';
         clearProbes();
-        useClientStore.getState().setConnected(false);
-        requireBrowserUpgrade(frame);
+        clientStore.getState().setConnected(false);
+        if (options.onUpgradeRequired) options.onUpgradeRequired(frame);
+        else requireBrowserUpgrade(frame);
         retire(socket);
         socket = undefined;
         return;
       }
-      useClientStore.getState().applyFrame(frame, currentRoom);
+      clientStore.getState().applyFrame(frame, currentRoom);
       if (frame.type === 'rooms') {
         awaitingProbe = false;
         if (probeDeadline !== undefined) clearTimeout(probeDeadline);
@@ -258,7 +270,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       if (!live()) return;
       clearProbes();
       if (state === 'connected' || state === 'disconnected') state = 'disconnected';
-      useClientStore.getState().setConnected(false);
+      clientStore.getState().setConnected(false);
       if (state !== 'disconnected') return; // parked or disposed: stay put
       if (event.code === 4403) {
         // The credential was revoked. Reopening with it would hammer the server
@@ -268,8 +280,8 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         state = 'parked-auth';
         // Positive pairing-dead evidence for the recovery surface: the host is up
         // (we had a working session) and turned this browser's credential away.
-        useClientStore.getState().setAuthRefused(true);
-        setActiveBrowserAccessToken('');
+        clientStore.getState().setAuthRefused(true);
+        setToken('');
         return;
       }
       const reconnect = (): void => {
@@ -282,7 +294,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         void options.refreshToken().then(
           (refreshed) => {
             if (!live()) return;
-            token = setActiveBrowserAccessToken(refreshed);
+            token = setToken(refreshed);
             reconnect();
           },
           reconnect,
@@ -354,7 +366,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       generation += 1;
       retire(socket);
       socket = undefined;
-      useClientStore.getState().setConnected(false);
+      clientStore.getState().setConnected(false);
     },
     reconnect: () => {
       // Only the OPERATOR's own park is reconnectable. An upgrade park needs a
@@ -367,7 +379,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
     switchRoom: (room: string) => {
       if (room === currentRoom) return;
       currentRoom = room;
-      useClientStore.getState().setActiveRoom(room);
+      clientStore.getState().setActiveRoom(room);
       subscribe(room);
     },
     dispose: () => {
@@ -375,7 +387,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       clearRetry();
       clearProbes();
       // The page is going away: nothing should still read as connected.
-      useClientStore.getState().setConnected(false);
+      clientStore.getState().setConnected(false);
       generation += 1; // any in-flight callback is now superseded
       window.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pageshow', onPageShow as EventListener);
@@ -385,6 +397,8 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
     },
   };
   // e2e hook, same contract as the legacy module exposed
-  (window as unknown as { __codor?: Connection }).__codor = connector;
+  if (options.expose ?? options.store === undefined) {
+    (window as unknown as { __codor?: Connection }).__codor = connector;
+  }
   return connector;
 }

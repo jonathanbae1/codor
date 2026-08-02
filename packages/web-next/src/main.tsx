@@ -18,6 +18,7 @@ import { StartupConnecting } from './surfaces/StartupConnecting.js';
 import { RecoveryCard } from './surfaces/RecoveryCard.js';
 import { SettingsPage } from './surfaces/SettingsPage.js';
 import { RoomPage } from './room/RoomPage.js';
+import { computerSessions } from './app/computer-sessions.js';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/primitives.css';
@@ -48,7 +49,17 @@ async function surfaceFor(path: string, room: string, token: string) {
   // LedgerPage is REST-only with no session, so the recovery state can't apply,
   // and landing/pairing/no-channels are their own terminal screens.
   if (path === '/settings') {
-    return <RecoveryOverlay><SettingsPage room={room} token={token} refreshToken={resolveAccessToken} /></RecoveryOverlay>;
+    const managed = computerSessions()?.active();
+    return (
+      <RecoveryOverlay>
+        <SettingsPage
+          room={managed?.room ?? room}
+          token={managed?.token ?? token}
+          refreshToken={resolveAccessToken}
+          connection={managed?.connector}
+        />
+      </RecoveryOverlay>
+    );
   }
   if (path === '/ledger') {
     const { LedgerPage } = await import('./surfaces/LedgerPage.js');
@@ -75,10 +86,23 @@ async function render(): Promise<void> {
   const reactRoot = createRoot(rootElement);
   reactRoot.render(<StrictMode><StartupConnecting /></StrictMode>);
   await initRelayMode(); // relay-paired browsers route transport through the tunnel
+  const managedSessions = computerSessions();
   const token = await resolveAccessToken();
   if (token !== '') await checkBrowserCompatibility(token);
   const path = window.location.pathname;
   const returnTo = `${path}${window.location.search}${window.location.hash}`;
+  const openWarmComputer = async (): Promise<void> => {
+    const active = computerSessions()?.active();
+    if (!active) return;
+    await checkBrowserCompatibility(active.token);
+    canonicalizeRoom(path, active.room);
+    const recovered = await surfaceFor(path, active.room, active.token);
+    reactRoot.render(<StrictMode><CompatibilityGate>{recovered}</CompatibilityGate></StrictMode>);
+  };
+  const managedColdSurfaceNotReady = (): boolean =>
+    managedSessions !== undefined
+    && managedSessions.active() === undefined
+    && (path === '/' || path === '/settings');
   const page = await (async () => {
     if (path === '/pair') {
       const { PairingPage } = await import('./surfaces/PairingPage.js');
@@ -93,7 +117,7 @@ async function render(): Promise<void> {
       // positive evidence). Genuinely-unpaired browsers (no pairing at all) keep
       // Landing / auto-pair unchanged.
       if (relayActive() || await hasStoredBrowserAccess(window.location.origin)) {
-        return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} />;
+        return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} onComputerSwitch={openWarmComputer} />;
       }
       if (path === '/') {
         const { LandingPage } = await import('./surfaces/LandingPage.js');
@@ -113,6 +137,7 @@ async function render(): Promise<void> {
     // unavailable screen at once instead of a blank root for minutes.
     const authorized = await resolveAuthorizedRooms(token, {
       relayMode: relayActive(),
+      multipleComputers: (managedSessions?.getSnapshot().computers.length ?? 0) > 1,
       explicit,
       remembered: rememberedRoom(),
     });
@@ -127,7 +152,10 @@ async function render(): Promise<void> {
         // Paired, but the channel list couldn't load and there's no room to fall back
         // to. Render the same recovery card (with Retry + relay-mode Re-pair) instead
         // of the terse StartupUnavailable — one honest screen for every boot failure.
-        return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} />;
+        return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} onComputerSwitch={openWarmComputer} />;
+      }
+      if (managedColdSurfaceNotReady()) {
+        return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} onComputerSwitch={openWarmComputer} />;
       }
       rememberRoom(offlineRoom);
       canonicalizeRoom(path, offlineRoom);
@@ -140,6 +168,12 @@ async function render(): Promise<void> {
       if (rememberedRoom() !== undefined) forgetRoom();
       const { NoChannels } = await import('./surfaces/NoChannels.js');
       return <NoChannels token={token} />;
+    }
+    // A managed token can arrive before its room-list retry has produced the
+    // connector. Never let cold Room or Settings own a second connector (or
+    // throw); the subscribed recovery card exposes any already-warm alternative.
+    if (managedColdSurfaceNotReady()) {
+      return <RecoveryCard presentation="fullscreen" state={bootRecoveryState()} onComputerSwitch={openWarmComputer} />;
     }
     // A stale or invalid remembered id is discarded rather than carried.
     const remembered = rememberedRoom();

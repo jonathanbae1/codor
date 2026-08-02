@@ -1,0 +1,12 @@
+id: hosted-computer-sessions-keep-state-isolated
+hash: a-3c9b87a63ba0
+title: Concurrent computer sessions keep credentials and channel state isolated
+state: active
+statement: Each hosted computer session must read only its indexed archive
+  generation and own its token, tunnel, connector and client store, so
+  credentials, cursors, messages, room keys and even identical room ids from one
+  computer cannot enter another computer's state while sessions run
+  concurrently.
+depends_on:
+  - hosted-app-keeps-all-paired-computers-live
+created_by: relay-live-computers-p2-sessions

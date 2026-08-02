@@ -1,0 +1,131 @@
+id: relay-live-computers-p2-review-fixes
+title: Relay live-computers phase 2 review fixes - close isolation and recovery holes
+notes: >
+  Investigator review of the applied phase-2 warm-session commit found a small
+  set of correctness holes that must be fixed before merge. Keep the existing
+  per-computer manager and protocol/backend boundaries. Make activation
+  readiness-safe, keep a revoked active connector mounted for RecoveryOverlay,
+  and make forgetting an active computer choose a ready fallback or force the
+  existing boot recovery path. Restore the existing mutable-run-journal resume
+  callback. Add one per-tab active-computer context used only to namespace
+  browser-side run-journal and git-diff caches and to attribute room-key writes
+  to the originating indexed computer; a service worker has no such context and
+  must not guess an archive owner. Distinguish a loaded empty managed room list
+  from an uninitialized direct-path fallback. Prevent an inactive computer's
+  UpgradeRequired frame from globally replacing a healthy active computer UI,
+  while surfacing it when that computer is selected. With multiple paired
+  computers, stop after the first bounded active-host room-list failure so the
+  existing recovery alternatives appear instead of entering the legacy
+  multi-minute relay retry. Remount the active UI subtree when the computer id
+  changes so identical room ids cannot retain component-local state. No relay
+  protocol, Worker, switchboard, visual redesign, or phase-3 work.
+assumptions:
+  reviewed:
+    - id: hosted-app-keeps-all-paired-computers-live
+      outcome: unchanged
+      reason: Review fixes retain every background session and change only active-UI
+        gating and scoped callbacks.
+    - id: hosted-computer-sessions-keep-state-isolated
+      outcome: unchanged
+      reason: Browser-only caches and room-key persistence are corrected to honor the
+        already-declared per-computer boundary, including identical room ids.
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: Switching still reuses a warm session in place, but only after that
+        session has a usable connector and credential.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: Revocation, not-ready alternatives, active forget, and bounded startup
+        now reach recovery without leaving RoomPage connectorless.
+    - id: hosted-background-computer-activity-is-visible
+      outcome: unchanged
+      reason: Background stores and summaries remain live; only active-only UI effects
+        are prevented from leaking across sessions.
+    - id: settings-navigation-reuses-live-session
+      outcome: unchanged
+      reason: Settings remains mounted on the selected warm connector and receives the
+        same readiness-safe activation behavior as the room surface.
+    - id: paired-browser-challenge-session
+      outcome: unchanged
+      reason: Revoked credentials still park their exact session and now remain
+        renderable by the existing recovery surface.
+    - id: push-decrypts-on-device-only
+      outcome: unchanged
+      reason: Service-worker decryption remains local; without a per-tab computer
+        owner it must not guess which indexed archive receives a rotated key.
+    - id: browser-created-channel-delivers-its-room-key
+      outcome: unchanged
+      reason: Active hosted room creation still persists the opened key before
+        completion, now into the explicitly active computer generation.
+    - id: browser-protocol-epoch-blocks-only-stale-browser-ui
+      outcome: unchanged
+      reason: UpgradeRequired still gates the browser, but an inactive computer cannot
+        gate the healthy active UI until selected.
+    - id: durable-room-summaries-stream-and-fallback
+      outcome: unchanged
+      reason: Summary truth is unchanged; a valid managed empty set no longer falls
+        back to a prior computer's cold bootstrap data.
+    - id: diff-panel-floats-refresh-and-overlays-history
+      outcome: unchanged
+      reason: The existing stale-while-revalidate cache behavior is retained within a
+        per-computer namespace.
+files:
+  - packages/web-next/src/main.tsx
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/src/app/computer-sessions.spec.ts
+  - packages/web-next/src/app/connector.ts
+  - packages/web-next/src/app/connector.spec.ts
+  - packages/web-next/src/app/startup.ts
+  - packages/web-next/src/app/startup-retry.spec.ts
+  - packages/web-next/src/app/store.ts
+  - packages/web-next/src/app/store.spec.ts
+  - packages/web-next/src/app/summary.ts
+  - packages/web-next/src/app/summary.spec.tsx
+  - packages/web-next/src/runtime/active-computer.ts
+  - packages/web-next/src/runtime/active-computer.spec.ts
+  - packages/web-next/src/runtime/crypto.ts
+  - packages/web-next/src/runtime/relay-store.ts
+  - packages/web-next/src/runtime/relay-store.spec.ts
+  - packages/web-next/src/room/RoomPage.tsx
+  - packages/web-next/src/room/ComputerSwitcher.tsx
+  - packages/web-next/src/room/run-journals.ts
+  - packages/web-next/src/room/run-journals.spec.ts
+  - packages/web-next/src/room/git-diff.ts
+  - packages/web-next/src/room/git-diff.spec.ts
+  - packages/web-next/src/surfaces/RecoveryCard.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.spec.tsx
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+  - packages/web-next/tests/room35-startup-recovery.e2e.spec.ts
+anchors:
+  hosted-app-keeps-all-paired-computers-live:
+    computer-session-lifecycle:
+      action: change
+      reason: Make the existing manager survive revocation, not-ready activation,
+        active forget, and scoped teardown without dropping other warm sessions.
+  hosted-computer-sessions-keep-state-isolated:
+    per-computer-session-state:
+      action: change
+      reason: Close browser cache and room-key attribution leaks for identical room
+        ids while retaining isolated stores and connectors.
+  hosted-computer-switching-reuses-warm-session:
+    warm-computer-activation:
+      action: change
+      reason: Validate readiness before mutating persisted or visible active state and
+        reset the active UI boundary by computer id.
+  hosted-offline-recovery-offers-other-computers:
+    multi-computer-recovery-exit:
+      action: change
+      reason: Reach existing alternatives after the first bounded failure and prevent
+        connectorless recovery transitions.
+  hosted-background-computer-activity-is-visible:
+    background-computer-summary:
+      action: change
+      reason: Keep background ingestion while confining resume and upgrade side
+        effects to the active computer.
+  settings-navigation-reuses-live-session:
+    mounted-settings-route:
+      action: change
+      reason: Preserve the mounted Settings route across readiness-safe
+        active-computer changes.
+applied:
+  applied_at: 2026-08-02T15:08:03.613Z

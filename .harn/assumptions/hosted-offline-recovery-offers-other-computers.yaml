@@ -1,0 +1,12 @@
+id: hosted-offline-recovery-offers-other-computers
+hash: a-8dfe22b93476
+title: An offline hosted computer cannot trap the operator in recovery
+state: active
+statement: When the active hosted computer fails its first bounded startup or
+  becomes unavailable mid-session, recovery must keep all computer sessions
+  running and offer every other paired computer, with connected alternatives
+  first, so choosing one returns to its warm app state without retrying or
+  repairing the offline computer.
+depends_on:
+  - hosted-computer-switching-reuses-warm-session
+created_by: relay-live-computers-p2-sessions

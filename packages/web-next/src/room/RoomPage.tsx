@@ -1,5 +1,5 @@
 import { ChevronLeft, MoreVertical, Plus, Search, Settings, Share2, Users, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { Connection } from '@runtime/ws.js';
 
@@ -25,6 +25,15 @@ import { HoldBanner, InboxControl, SearchOverlay } from './panels.js';
 import { Transcript } from './Transcript.js';
 import { costProvenanceLabel } from './spend-label.js';
 import { SettingsPage } from '../surfaces/SettingsPage.js';
+import {
+  computerSessions,
+  type ActiveComputerSession,
+  type ComputerSessionManager,
+  type ComputerSessionsSnapshot,
+} from '../app/computer-sessions.js';
+
+const EMPTY_COMPUTER_SNAPSHOT: ComputerSessionsSnapshot = { computers: [] };
+const noComputerSubscription = (): (() => void) => () => undefined;
 
 export function RoomPage(props: {
   room: string;
@@ -32,12 +41,38 @@ export function RoomPage(props: {
   refreshToken?: () => Promise<string>;
 }) {
   // harn:assume settings-navigation-reuses-live-session ref=mounted-settings-route
-  const token = useAccessToken(props.token);
+  const manager = computerSessions();
+  useSyncExternalStore(
+    manager?.subscribe ?? noComputerSubscription,
+    manager?.getSnapshot ?? (() => EMPTY_COMPUTER_SNAPSHOT),
+    () => EMPTY_COMPUTER_SNAPSHOT,
+  );
+  const managed = manager?.active();
+  return (
+    <MountedRoomPage
+      key={managed?.id ?? 'direct'}
+      {...props}
+      manager={manager}
+      managed={managed}
+    />
+  );
+}
+
+function MountedRoomPage(props: {
+  room: string;
+  token: string;
+  refreshToken?: () => Promise<string>;
+  manager: ComputerSessionManager | undefined;
+  managed: ActiveComputerSession | undefined;
+}) {
+  const { manager, managed } = props;
+  const activeToken = managed?.token ?? props.token;
+  const token = useAccessToken(activeToken);
   // The room is resolved and validated before this component exists, so the
   // connector never opens on a speculative id.
   const [room, setRoom] = useState(props.room);
   const connectorRef = useRef<RoomConnector | null>(null);
-  if (connectorRef.current === null) {
+  if (!manager && connectorRef.current === null) {
     connectorRef.current = createConnector({
       room: props.room,
       token: props.token,
@@ -55,7 +90,8 @@ export function RoomPage(props: {
       ...relayConnectExtras(),
     });
   }
-  const connection = connectorRef.current;
+  const connection = managed?.connector ?? connectorRef.current;
+  if (!connection) throw new Error('RoomPage requires a room connector');
   const [pageSurface, setPageSurface] = useState<'room' | 'settings'>('room');
 
   // In-place channel switching: select the room's keyed slice, keep the shared
@@ -64,7 +100,8 @@ export function RoomPage(props: {
     if (next === room) return;
     connection.switchRoom(next);
     setRoom(next);
-    rememberRoom(next);
+    if (manager) manager.rememberActiveRoom(next);
+    else rememberRoom(next);
     window.history.pushState(null, '', `/?room=${encodeURIComponent(next)}`);
   };
 
@@ -83,20 +120,27 @@ export function RoomPage(props: {
   useEffect(() => () => { connectorRef.current?.dispose(); }, []);
 
   useEffect(() => {
+    if (!managed || managed.room === room) return;
+    setRoom(managed.room);
+    const path = window.location.pathname === '/settings' ? '/settings' : '/';
+    window.history.replaceState(null, '', `${path}?room=${encodeURIComponent(managed.room)}`);
+  }, [managed, room]);
+
+  useEffect(() => {
     const onPop = (): void => {
       // Back/forward reaches rooms and Settings entries this session already opened.
       const next = pageParams().room;
       if (next !== undefined && next !== connection.room()) {
         connection.switchRoom(next);
         setRoom(next);
-        rememberRoom(next);
+        if (manager) manager.rememberActiveRoom(next);
+        else rememberRoom(next);
       }
       setPageSurface(window.location.pathname === '/settings' ? 'settings' : 'room');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connection, manager]);
 
   // Mobile is a two-surface stack (channels ⇄ room), never a drawer.
   const isMobile = useIsMobile();
@@ -122,7 +166,7 @@ export function RoomPage(props: {
     return (
       <SettingsPage
         room={room}
-        token={props.token}
+        token={activeToken}
         refreshToken={props.refreshToken}
         connection={connection}
         onBack={openRoom}

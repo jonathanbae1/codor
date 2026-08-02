@@ -1,6 +1,8 @@
 // The diff explorer's client read. Kept in web-next (not @runtime/api) so the
 // whole feature stays in one batch; mirrors the fetchJson auth shape.
 
+import { activeComputerId } from '@runtime/active-computer.js';
+
 export type GitFileStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
 
 export interface GitFile {
@@ -118,7 +120,10 @@ const STORE_PREFIX = 'nx-gitdiff:';
 const REALLY_STALE_MS = 24 * 60 * 60 * 1000;
 const MAX_PERSIST_CHARS = 1_500_000;
 
-const cacheKey = (room: string, cwd?: string): string => `${room}|${cwd ?? ''}`;
+const cacheKey = (room: string, cwd?: string): string => {
+  const computer = activeComputerId();
+  return `${computer === undefined ? '' : `computer:${computer}|`}${room}|${cwd ?? ''}`;
+};
 
 export function cachedGitWorkingState(room: string, cwd?: string): GitWorkingState | undefined {
   const key = cacheKey(room, cwd);
@@ -148,4 +153,8 @@ export function rememberGitWorkingState(room: string, cwd: string | undefined, s
   } catch {
     // Quota or private mode — the in-memory copy still serves this session.
   }
+}
+
+export function resetGitWorkingStateCacheForTest(): void {
+  memoryCache.clear();
 }

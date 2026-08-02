@@ -1,39 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 
 import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
-import { Button, Modal } from '../primitives/primitives.js';
 import {
-  forgetPairedComputer,
-  listPairedComputers,
-  pairThroughRelay,
-  renamePairedComputer,
-  switchComputer,
-} from '../runtime/crypto.js';
+  computerSessions,
+  type ComputerSessionsSnapshot,
+} from '../app/computer-sessions.js';
+import { Button, Modal } from '../primitives/primitives.js';
 import { relayUrlConfigured } from '../runtime/relay-mode.js';
-import type { RelayComputer } from '../runtime/relay-records.js';
 import { PairingCodeInput } from '../surfaces/PairingCodeInput.js';
 
-/**
- * The Connected-box computer switcher (P3), rendered below the user name — the
- * single home for the current computer's label, switching between paired
- * computers, adding one (via the universal-code flow), and per-computer Forget.
- * Hosted-only: renders NOTHING on a switchboard-served SPA (no relay URL).
- */
+const EMPTY: ComputerSessionsSnapshot = { computers: [] };
+const noSubscription = (): (() => void) => () => undefined;
+
+/** Functional hosted-only switcher over already-warm managed sessions. */
 export function ComputerSwitcher(): React.ReactNode {
   const relayUrl = relayUrlConfigured();
-  const [list, setList] = useState<{ computers: RelayComputer[]; active_id?: string }>();
+  const manager = computerSessions();
+  const list = useSyncExternalStore(
+    manager?.subscribe ?? noSubscription,
+    manager?.getSnapshot ?? (() => EMPTY),
+    () => EMPTY,
+  );
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState<string>();
   const [renaming, setRenaming] = useState<string>();
 
-  const refresh = (): void => { void listPairedComputers().then(setList); };
-  useEffect(() => { if (relayUrl) refresh(); }, [relayUrl]);
-
-  if (!relayUrl || !list || list.computers.length === 0) return null;
-  const active = list.computers.find((c) => c.id === list.active_id)
-    ?? list.computers[list.computers.length - 1];
+  if (!relayUrl || !manager || list.computers.length === 0) return null;
+  const active = list.computers.find((computer) => computer.active) ?? list.computers.at(-1);
 
   const add = (code: string): void => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -42,16 +37,19 @@ export function ComputerSwitcher(): React.ReactNode {
     }
     setPairing(true);
     setError(undefined);
-    // Records the new computer as active; reload boots straight into it.
-    void pairThroughRelay(code, relayUrl)
-      .then(() => window.location.assign('/'))
-      .catch(() => {
+    void manager.add(code, relayUrl).then(
+      (ready) => {
         setPairing(false);
-        // Offline AT rejection time is a device problem, not a bad code.
+        if (ready) setAdding(false);
+        else setError(SESSION_COPY['agent-offline'].body);
+      },
+      () => {
+        setPairing(false);
         setError(typeof navigator !== 'undefined' && !navigator.onLine
           ? SESSION_COPY['device-offline'].body
           : PAIRING_TIME_COPY['code-bad'].body);
-      });
+      },
+    );
   };
 
   return (
@@ -61,47 +59,64 @@ export function ComputerSwitcher(): React.ReactNode {
         className="nx-computer-current"
         data-testid="computer-current"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen((value) => !value)}
       >
         {active?.label ?? 'This computer'}
       </button>
       {open ? (
         <div className="nx-computer-menu" role="menu">
           <ul>
-            {list.computers.map((c) => (
-              <li key={c.id} data-testid={`computer-${c.id}`}>
-                {renaming === c.id ? (
+            {list.computers.map((computer) => (
+              <li key={computer.id} data-testid={`computer-${computer.id}`}>
+                {renaming === computer.id ? (
                   <input
                     className="nx-computer-rename"
                     autoFocus
-                    defaultValue={c.label}
-                    data-testid={`computer-rename-${c.id}`}
-                    onBlur={(e) => {
-                      void renamePairedComputer(c.id, e.target.value.trim() || c.label)
-                        .then(() => { setRenaming(undefined); refresh(); });
+                    defaultValue={computer.label}
+                    data-testid={`computer-rename-${computer.id}`}
+                    onBlur={(event) => {
+                      void manager.rename(computer.id, event.target.value.trim() || computer.label)
+                        .then(() => setRenaming(undefined));
                     }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') (event.target as HTMLInputElement).blur();
+                    }}
                   />
                 ) : (
                   <button
                     type="button"
                     className="nx-computer-name"
-                    data-testid={`computer-switch-${c.id}`}
-                    onDoubleClick={() => setRenaming(c.id)}
+                    data-testid={`computer-switch-${computer.id}`}
+                    disabled={!computer.active && !computer.ready}
+                    onDoubleClick={() => setRenaming(computer.id)}
                     onClick={() => {
-                      if (c.id !== list.active_id) {
-                        void switchComputer(c.id).then(() => window.location.assign('/'));
-                      }
+                      if (!computer.active) void manager.activate(computer.id).then(() => setOpen(false));
                     }}
                   >
-                    {c.label}{c.id === list.active_id ? ' ✓' : ''}
+                    {computer.label}{computer.active ? ' ✓' : ''}
                   </button>
                 )}
+                <span data-testid={`computer-connection-${computer.id}`}>
+                  {computer.connected ? 'Connected' : 'Reconnecting'}
+                </span>
+                {computer.unread > 0 ? (
+                  <span data-testid={`computer-unread-${computer.id}`}>{computer.unread}</span>
+                ) : null}
+                {computer.attention ? (
+                  <span data-testid={`computer-attention-${computer.id}`}>Attention</span>
+                ) : null}
+                {computer.working > 0 ? (
+                  <span data-testid={`computer-working-${computer.id}`}>{computer.working} working</span>
+                ) : null}
                 <button
                   type="button"
                   className="nx-computer-forget"
-                  data-testid={`computer-forget-${c.id}`}
-                  onClick={() => { void forgetPairedComputer(c.id).then(() => window.location.assign('/')); }}
+                  data-testid={`computer-forget-${computer.id}`}
+                  onClick={() => {
+                    void manager.forget(computer.id).then((keptMounted) => {
+                      if (!keptMounted) window.location.assign('/');
+                    });
+                  }}
                 >
                   Forget
                 </button>

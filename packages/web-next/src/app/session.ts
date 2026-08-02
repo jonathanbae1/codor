@@ -21,6 +21,7 @@ import { relayAccessOriginActive, relayConnectExtras } from '@runtime/relay-mode
 import type { Room } from '@codor/protocol';
 
 import { useClientStore } from './store.js';
+import { computerSessions } from './computer-sessions.js';
 
 /**
  * The room named in the URL, or nothing. Never a placeholder: `'default'` was
@@ -37,6 +38,8 @@ export function pageParams(): { room?: string } {
  *  PWA cold launches and stripped from the URL; otherwise paired-browser access restores
  *  from encrypted storage; empty string means unpaired. */
 export async function resolveAccessToken(): Promise<string> {
+  const managed = computerSessions();
+  if (managed) return managed.activeToken();
   const url = new URL(window.location.href);
   const explicit = url.searchParams.get('token') ?? '';
   if (explicit !== '') {

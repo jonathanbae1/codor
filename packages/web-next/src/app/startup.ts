@@ -5,6 +5,9 @@ import { fetchRooms } from '@runtime/api.js';
 import { fetchSummaries, primeRoomSummaries } from './summary.js';
 
 const REMEMBERED_ROOM_KEY = 'codor:web-next:room';
+const rememberedRoomKey = (computerId?: string): string => computerId === undefined
+  ? REMEMBERED_ROOM_KEY
+  : `${REMEMBERED_ROOM_KEY}:${computerId}`;
 
 /**
  * The room this launch should open, or `undefined` when the account has none.
@@ -46,25 +49,25 @@ export function orderRooms(rooms: RoomSummary[]): RoomSummary[] {
   });
 }
 
-export function rememberedRoom(): string | undefined {
+export function rememberedRoom(computerId?: string): string | undefined {
   try {
-    return window.localStorage.getItem(REMEMBERED_ROOM_KEY) ?? undefined;
+    return window.localStorage.getItem(rememberedRoomKey(computerId)) ?? undefined;
   } catch {
     return undefined; // storage denied: a launch must still open a room
   }
 }
 
-export function rememberRoom(id: string): void {
+export function rememberRoom(id: string, computerId?: string): void {
   try {
-    window.localStorage.setItem(REMEMBERED_ROOM_KEY, id);
+    window.localStorage.setItem(rememberedRoomKey(computerId), id);
   } catch {
     // Remembering is a convenience, never a precondition for opening a room.
   }
 }
 
-export function forgetRoom(): void {
+export function forgetRoom(computerId?: string): void {
   try {
-    window.localStorage.removeItem(REMEMBERED_ROOM_KEY);
+    window.localStorage.removeItem(rememberedRoomKey(computerId));
   } catch {
     // Nothing to do; the stale id is already ignored by validation.
   }
@@ -160,11 +163,21 @@ export async function retryAuthorizedRooms(token: string, deps: RetryDeps = {}):
  */
 export async function resolveAuthorizedRooms(
   token: string,
-  opts: RetryDeps & { relayMode: boolean; explicit?: string; remembered?: string },
+  opts: RetryDeps & {
+    relayMode: boolean;
+    multipleComputers?: boolean;
+    explicit?: string;
+    remembered?: string;
+  },
 ): Promise<RoomSummary[] | undefined> {
   const first = await loadAuthorizedRoomsOnce(token, opts);
   if (first !== undefined) return first;
-  if (opts.relayMode && opts.explicit === undefined && opts.remembered === undefined) {
+  if (
+    opts.relayMode
+    && !opts.multipleComputers
+    && opts.explicit === undefined
+    && opts.remembered === undefined
+  ) {
     return retryAuthorizedRooms(token, opts);
   }
   return undefined;

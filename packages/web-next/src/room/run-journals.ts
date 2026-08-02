@@ -2,6 +2,7 @@ import type { WireEvent } from '@codor/protocol';
 import { useSyncExternalStore } from 'react';
 
 import { fetchRunEvents } from '@runtime/api.js';
+import { activeComputerNamespace } from '@runtime/active-computer.js';
 
 // ── One room-scoped journal cache for the whole transcript (codex #516) ──────
 // Both journal readers — the finalized-segment batch and every RunContent — go
@@ -65,6 +66,8 @@ function freshRoomCache(): RoomCache {
   };
 }
 
+const roomNamespace = (room: string): string => `${activeComputerNamespace()}\0${room}`;
+
 /** Get and touch a room in insertion-order LRU order. */
 function roomCache(room: string): RoomCache {
   const cached = rooms.get(room) ?? freshRoomCache();
@@ -82,9 +85,10 @@ function roomCache(room: string): RoomCache {
  * Recently visited room caches remain addressable by their room id, so returning
  * to a channel is immediate without allowing room-local message ids to collide. */
 export function activateRunJournalRoom(room: string): void {
-  if (room === currentRoom) return;
-  currentRoom = room;
-  roomCache(room);
+  const namespace = roomNamespace(room);
+  if (namespace === currentRoom) return;
+  currentRoom = namespace;
+  roomCache(namespace);
   bump();
 }
 
@@ -115,10 +119,10 @@ function enqueueRead(
 }
 
 
-function pump(room: string, cache: RoomCache, token: () => string): void {
+function pump(namespace: string, room: string, cache: RoomCache, token: () => string): void {
   // Demoted rooms may finish reads already on the wire, but they never start
   // queued work until selected again.
-  if (room !== currentRoom || rooms.get(room) !== cache) return;
+  if (namespace !== currentRoom || rooms.get(namespace) !== cache) return;
   while (cache.active < MAX_CONCURRENT && cache.queue.length > 0) {
     // Running runs first: a reader watching a live turn must not wait behind a
     // backlog of archived journals.
@@ -128,20 +132,20 @@ function pump(room: string, cache: RoomCache, token: () => string): void {
     cache.inflight.set(next.id, next.terminal);
     void fetchRunEvents(room, next.id, { token: token() })
       .then((events) => {
-        if (rooms.get(room) === cache) {
+        if (rooms.get(namespace) === cache) {
           cache.journals.set(next.id, { events, terminal: next.terminal });
         }
       })
       .catch(() => {
         // Remember the failure at this terminality so it retries at most once
         // more (when the run settles), never in a loop.
-        if (rooms.get(room) === cache) {
+        if (rooms.get(namespace) === cache) {
           cache.journals.set(next.id, { events: [], terminal: next.terminal });
         }
       })
       .finally(() => {
         cache.active -= 1;
-        if (rooms.get(room) !== cache) return; // evicted while the read was in flight
+        if (rooms.get(namespace) !== cache) return; // evicted while the read was in flight
         cache.inflight.delete(next.id);
         if (cache.wantTerminal.delete(next.id)) {
           enqueueRead(cache, { id: next.id, terminal: true, priority: false });
@@ -151,8 +155,8 @@ function pump(room: string, cache: RoomCache, token: () => string): void {
           enqueueRead(cache, { id: next.id, terminal: false, priority: false });
         }
         cache.wantRefresh.delete(next.id);
-        if (room === currentRoom) bump();
-        pump(room, cache, token);
+        if (namespace === currentRoom) bump();
+        pump(namespace, room, cache, token);
       });
   }
 }
@@ -171,8 +175,9 @@ export function requestRunJournal(
 ): void {
   // Effects belonging to a room that was just demoted must not steal the active
   // namespace back. Its queued work resumes when activateRunJournalRoom selects it.
-  if (room !== currentRoom) return;
-  const cache = roomCache(room);
+  const namespace = roomNamespace(room);
+  if (namespace !== currentRoom) return;
+  const cache = roomCache(namespace);
   const have = cache.journals.get(id);
   if (have?.terminal === true) return; // settled and read — never again
   if (have !== undefined && !opts.terminal) return; // the running snapshot still serves
@@ -184,7 +189,7 @@ export function requestRunJournal(
   }
 
   enqueueRead(cache, { id, terminal: opts.terminal, priority: opts.priority === true });
-  pump(room, cache, token);
+  pump(namespace, room, cache, token);
 }
 
 /**
@@ -201,8 +206,9 @@ export function requestRunJournal(
  * refresh rather than one per call.
  */
 export function refreshMutableRunJournals(room: string, token: () => string): void {
-  if (room !== currentRoom) return; // inactive rooms are not read at all
-  const cache = rooms.get(room);
+  const namespace = roomNamespace(room);
+  if (namespace !== currentRoom) return; // inactive rooms are not read at all
+  const cache = rooms.get(namespace);
   if (cache === undefined) return;
   // A read that is still in flight has no cached entry yet, so both sources
   // have to be considered or a resume during an outstanding read refreshes
@@ -218,12 +224,12 @@ export function refreshMutableRunJournals(room: string, token: () => string): vo
     }
     enqueueRead(cache, { id, terminal: false, priority: false });
   }
-  pump(room, cache, token);
+  pump(namespace, room, cache, token);
 }
 
 /** The cached journal for a run, or undefined while it is still unread. */
 export function getRunJournal(room: string, id: number): WireEvent[] | undefined {
-  return rooms.get(room)?.journals.get(id)?.events;
+  return rooms.get(roomNamespace(room))?.journals.get(id)?.events;
 }
 
 function subscribe(listener: () => void): () => void {

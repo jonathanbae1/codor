@@ -24,6 +24,32 @@ export async function fetchSummaries(token: string): Promise<RoomSummary[]> {
   return body.rooms;
 }
 
+export function resolveRoomSummaries(
+  managedCold: RoomSummary[],
+  managedColdLoaded: boolean,
+  cold: RoomSummary[],
+  rooms: ReturnType<typeof useClientStore.getState>['rooms'],
+): RoomSummary[] {
+  const base = managedColdLoaded ? managedCold : cold;
+  const byId = new Map(base.map((summary) => [summary.id, summary]));
+  for (const slice of Object.values(rooms)) {
+    if (slice.support !== undefined) {
+      byId.set(slice.support.room, slice.support.summary);
+    } else if (slice.room !== undefined && !byId.has(slice.room.id)) {
+      byId.set(slice.room.id, {
+        id: slice.room.id,
+        name: slice.room.name,
+        created_ts: slice.room.created_ts,
+        color: slice.room.config.color,
+        working: false,
+        attention: false,
+        unread: 0,
+      });
+    }
+  }
+  return [...byId.values()];
+}
+
 /**
  * REST supplies the cold rail before the socket is ready. From then on each
  * room's addressed room_support frame is the live authority; there is no timer
@@ -31,6 +57,8 @@ export async function fetchSummaries(token: string): Promise<RoomSummary[]> {
  */
 export function useRoomSummaries(token: () => string): RoomSummary[] {
   const rooms = useClientStore((state) => state.rooms);
+  const managedCold = useClientStore((state) => state.roomSummaries);
+  const managedColdLoaded = useClientStore((state) => state.roomSummariesLoaded);
   const [cold, setCold] = useState<RoomSummary[]>(primed ?? []);
 
   useEffect(() => {
@@ -63,22 +91,6 @@ export function useRoomSummaries(token: () => string): RoomSummary[] {
   }, [token]);
 
   return useMemo(() => {
-    const byId = new Map(cold.map((summary) => [summary.id, summary]));
-    for (const slice of Object.values(rooms)) {
-      if (slice.support !== undefined) {
-        byId.set(slice.support.room, slice.support.summary);
-      } else if (slice.room !== undefined && !byId.has(slice.room.id)) {
-        byId.set(slice.room.id, {
-          id: slice.room.id,
-          name: slice.room.name,
-          created_ts: slice.room.created_ts,
-          color: slice.room.config.color,
-          working: false,
-          attention: false,
-          unread: 0,
-        });
-      }
-    }
-    return [...byId.values()];
-  }, [cold, rooms]);
+    return resolveRoomSummaries(managedCold, managedColdLoaded, cold, rooms);
+  }, [cold, managedCold, managedColdLoaded, rooms]);
 }

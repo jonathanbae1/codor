@@ -1370,6 +1370,10 @@ createServer((req, res) => {
         mockRelay.dropHosts();
         payload = { ok: true };
       }
+      if (url.pathname === '/relay-down-a-only') {
+        relayLink.stop();
+        payload = { ok: true };
+      }
       if (url.pathname === '/relay-up') {
         relayLink.start();
         payload = { ok: true };
@@ -1378,6 +1382,14 @@ createServer((req, res) => {
         const host = new RelayPairingHost({ store: relayStoreB, pairing: cryptoB.pairing, identity: cryptoB.keys.publicIdentity() });
         const offer = await host.pair(`http://127.0.0.1:${API_PORT_B}`);
         payload = { ...offer, code: offer.pairing_code, relayUrl: mockRelay.url };
+      }
+      if (url.pathname === '/computer-b-activity') {
+        const running = daemonB.store.updateMember('eng', computerBAgent.id, { state: 'running' });
+        daemonB.emitMember('eng', running);
+        const message = daemonB.postAgentMessage(
+          'eng', computerBAgent.id, '@richard check the warm background computer', undefined, true,
+        );
+        payload = { message_id: message.id };
       }
       if (url.pathname === '/relay-down-b') { relayLinkB.stop(); payload = { ok: true }; }
       if (url.pathname === '/relay-up-b') { relayLinkB.start(); payload = { ok: true }; }
@@ -1590,10 +1602,11 @@ const daemonB = new Daemon({
   adapters: [new FakeAdapter('fake')],
   ledger: new LedgerManager({ dataDir: dirB }),
 });
-// A room id host A does NOT have, so the two-host e2e proves each computer's
-// archive holds only its own rooms — never another computer's.
-daemonB.createRoom({ id: 'switcher-b', name: 'Host B', owner: { handle: 'richard', display_name: 'Richard' } });
-cryptoB.roomKeys.ensureRoom('switcher-b');
+// Deliberately reuse host A's `eng` room id. The two-host browser spec must prove
+// that identical ids still resolve to different credentials, stores and data.
+daemonB.createRoom({ id: 'eng', name: 'Host B', owner: { handle: 'richard', display_name: 'Richard' } });
+const computerBAgent = daemonB.spawnMember('eng', { harness: 'fake', handle: 'builder', cwd: dirB });
+cryptoB.roomKeys.ensureRoom('eng');
 relayStoreB = new RelayStore(dirB);
 relayStoreB.enable(mockRelay.url);
 relayLinkB = new RelayLink({

@@ -1,0 +1,13 @@
+id: hosted-computer-switching-reuses-warm-session
+hash: a-eb4afa29bb9d
+title: Hosted computer switching activates an existing warm session in place
+state: active
+statement: Selecting another paired computer must atomically persist and hydrate
+  that indexed generation, point active REST and UI state at its already-running
+  token, tunnel, connector and store, and restore its last valid room without
+  reloading the document or closing other computer sessions, because switching
+  should be immediate and reversible.
+depends_on:
+  - hosted-app-keeps-all-paired-computers-live
+  - hosted-computer-sessions-keep-state-isolated
+created_by: relay-live-computers-p2-sessions
