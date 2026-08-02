@@ -65,8 +65,8 @@ describe('RecoveryCard computer readiness', () => {
     const snapshot = {
       activeId: 'A',
       computers: [
-        { id: 'A', label: 'A', active: true, ready: true, connected: false, unread: 0, attention: false, working: 0 },
-        { id: 'B', label: 'B', active: false, ready: false, connected: false, unread: 0, attention: false, working: 0 },
+        { id: 'A', label: 'A', active: true, ready: true, connected: false, authRefused: false, unread: 0, attention: false, working: 0 },
+        { id: 'B', label: 'B', active: false, ready: false, connected: false, authRefused: false, unread: 0, attention: false, working: 0 },
       ],
     };
     sessions.get.mockReturnValue({
@@ -79,6 +79,30 @@ describe('RecoveryCard computer readiness', () => {
     await act(async () => { root.render(<RecoveryCard state="agent-offline" />); });
     const html = host.innerHTML;
     expect(html).toMatch(/data-testid="recovery-computer-B"[^>]*disabled=""/);
+    await act(async () => { root.unmount(); });
+    sessions.get.mockReturnValue(undefined);
+    delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('uses the shared repair status presentation for an auth-refused alternative', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const snapshot = {
+      activeId: 'A',
+      computers: [
+        { id: 'A', label: 'A', active: true, ready: true, connected: false, authRefused: false, unread: 0, attention: false, working: 0 },
+        { id: 'B', label: 'B', active: false, ready: false, connected: true, authRefused: true, unread: 0, attention: false, working: 0 },
+      ],
+    };
+    sessions.get.mockReturnValue({
+      subscribe: () => () => undefined,
+      getSnapshot: () => snapshot,
+      activate: vi.fn(),
+    });
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    await act(async () => { root.render(<RecoveryCard state="agent-offline" />); });
+    expect(host.querySelector('[data-testid="computer-connection-B"]')?.textContent).toBe('Repair required');
+    expect(host.querySelector('[data-testid="recovery-computer-B"]')).toBeTruthy();
     await act(async () => { root.unmount(); });
     sessions.get.mockReturnValue(undefined);
     delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;

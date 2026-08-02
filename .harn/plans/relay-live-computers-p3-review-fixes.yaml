@@ -1,0 +1,55 @@
+id: relay-live-computers-p3-review-fixes
+title: Relay live-computers phase 3 review fixes - modal focus and phone containment
+notes: >
+  Investigator review of the applied Phase 3 UI commit found three contained
+  presentation defects before merge. First, opening Add sets popup closed and
+  modal open in one render; the popup's focus-return effect can run after the
+  Modal mount effect and move focus back to the trigger behind the modal.
+  Suppress popup focus restoration for the Add transition and prove focus stays
+  inside the modal. Second, the document-capture Escape handler closes the popup
+  before a rename input sees Escape, leaving rename state armed when the popup
+  reopens; all popup close paths must clear transient rename state. Third, the
+  phone popup is left-anchored to an indented footer child while its width
+  approaches the viewport, so it can extend beyond the right edge; center or
+  otherwise contain it and assert its bounding box stays inside a 390px
+  viewport. Give the shared full-card recovery choices explicit grid spacing. No
+  copy, status, aggregation, session, documentation, or broader design change.
+assumptions:
+  reviewed:
+    - id: hosted-computer-switcher-is-discoverable-and-accessible
+      outcome: unchanged
+      reason: The review fixes make the already-declared focus and
+        responsive-containment contract actually hold without changing its
+        meaning.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: Recovery activation is unchanged; only deliberate spacing is added
+        around the shared choice cards.
+    - id: hosted-add-computer-explains-pairing-code-source
+      outcome: unchanged
+      reason: Add content and pairing behavior remain unchanged while focus correctly
+        enters its existing modal.
+files:
+  - packages/web-next/src/room/ComputerSwitcher.tsx
+  - packages/web-next/src/room/ComputerSwitcher.spec.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room36-computer-ui.e2e.spec.ts
+anchors:
+  hosted-computer-switcher-is-discoverable-and-accessible:
+    discoverable-computer-control:
+      action: change
+      reason: Clear rename state on popup close, preserve modal focus during Add
+        transition, and contain the phone popup with regressions.
+  hosted-offline-recovery-offers-other-computers:
+    multi-computer-recovery-exit:
+      action: change
+      reason: Add explicit layout spacing to the shared recovery choice list without
+        altering selection behavior.
+  hosted-add-computer-explains-pairing-code-source:
+    guided-add-computer:
+      action: change
+      reason: Ensure opening the already-guided Add flow leaves focus inside its modal
+        rather than behind it.
+applied:
+  applied_at: 2026-08-02T16:07:45.674Z

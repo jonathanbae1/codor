@@ -465,17 +465,24 @@ mechanics are documented in the [relay protocol reference](RELAY-PROTOCOL.md).
 
 When you use the hosted app at codor.app, it remembers **every** computer you have
 paired, not just the last one. Each computer is its own switchboard reached over its
-own tunnel; the app keeps their keys in separate namespaces and shows a switcher in
-the channel rail:
+own tunnel; the app keeps their keys in separate namespaces, keeps those sessions
+warm, and shows a switcher in the channel rail:
 
-- **Add a computer** — run `codor pair` on the other machine and paste its code into
-  "Add a computer". The newly paired computer becomes active; the app reloads into it.
-- **Switch** — pick a computer from the switcher to reload into its session and tunnel.
-  The most recently paired computer is the default on a fresh load.
+<!-- harn:assume hosted-add-computer-explains-pairing-code-source ref=guided-add-computer -->
+- **Add a computer** — start with `codor pair` on the other machine. Copy the command
+  from the first step in "Add a computer", then enter the printed eight-character code.
+  It is single-use, expires after ten minutes, and travels through the existing private
+  relay. The newly paired computer becomes active in place.
+- **Switch** — pick a computer from the switcher to activate its already-warm session
+  and tunnel in place, without a document reload. Connected, reconnecting, or repair
+  status is shown honestly, and unread, attention, or working activity on inactive
+  computers remains visible in the switcher. The most recently paired computer is the
+  default on a fresh load.
 - **Rename** — double-click a computer's name to give it a label (it defaults to
   "Computer 1", "Computer 2", …).
 - **Forget** — remove a computer; the app falls back to the next one, or to the pairing
   screen when the last is forgotten.
+<!-- harn:end hosted-add-computer-explains-pairing-code-source -->
 
 Every switch and pairing is crash-safe: the app never presents one computer's identity
 with another's channel keys, and switching between tabs cannot corrupt the stored set

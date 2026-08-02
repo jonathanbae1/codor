@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
 const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
@@ -33,29 +34,32 @@ test.describe('startup recovery (boot path)', () => {
     await page.goto(`${SPA_ORIGIN}/`);
     await pasteCode(page, a.code);
     await page.getByTestId('pairing-code-submit').click();
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1', { timeout: 30_000 });
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/, { timeout: 30_000 });
 
     const b = await control<{ code: string }>('/relay-pair-b');
     await page.getByTestId('computer-current').click();
     await page.getByTestId('computer-add').click();
+    await page.getByTestId('computer-add-next').click();
     await pasteCode(page, b.code);
     await page.getByTestId('pairing-code-submit').click();
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2', { timeout: 30_000 });
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/, { timeout: 30_000 });
 
     // Persist A as active, then boot with only A absent. Both session retry loops
     // start, B becomes warm, and the first bounded A failure exposes B.
     await page.getByTestId('computer-current').click();
     await page.locator('.nx-computer-menu li', { hasText: 'Computer 1' }).getByRole('button').first().click();
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
     await control('/relay-down-a-only');
     await page.reload();
     await expect(page.getByTestId('recovery')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole('button', { name: /Computer 2 · Connected/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Computer 2, Connected/ })).toBeVisible();
+    const recoveryA11y = await new AxeBuilder({ page }).include('[data-testid="recovery"]').analyze();
+    expect(recoveryA11y.violations).toEqual([]);
 
     await page.evaluate(() => { (window as unknown as { __bootRecoveryDocument?: boolean }).__bootRecoveryDocument = true; });
-    await page.getByRole('button', { name: /Computer 2 · Connected/ }).click();
+    await page.getByRole('button', { name: /Computer 2, Connected/ }).click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2');
+    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/);
     expect(await page.evaluate(() => (window as unknown as { __bootRecoveryDocument?: boolean }).__bootRecoveryDocument)).toBe(true);
     await control('/relay-up');
   });
