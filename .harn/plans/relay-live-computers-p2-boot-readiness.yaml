@@ -1,0 +1,63 @@
+id: relay-live-computers-p2-boot-readiness
+title: Relay live-computers phase 2 final review - gate boot surfaces on
+  connector readiness
+notes: >
+  Final investigator review found one narrow composition race after the applied
+  review-fix commit. A managed active entry can authenticate and expose a token
+  before its room-list retry has produced a connector. After the manager's
+  bounded wait, the independent bootstrap room request can succeed in that
+  interval: RoomPage then throws because a manager exists without an active
+  connector, while cold Settings creates an unintended second connector over the
+  managed tunnel. Gate both authenticated surfaces on the managed active
+  connector and show the existing subscribed RecoveryCard with computer
+  alternatives until a usable session is selected; direct mode and genuinely
+  empty accounts remain unchanged. Also, if Add computer records a new active
+  index entry but that new session misses its bounded readiness wait, restore
+  the previously mounted usable computer as persisted active truth before
+  returning the existing failure result. No new UI, protocol, backend, retry, or
+  phase-3 work.
+assumptions:
+  reviewed:
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: A hosted surface may mount only the already-running connector selected
+        by the manager, and failed Add must leave persisted and visible active
+        state aligned.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: The bounded token-before-connector boot interval now reaches the
+        existing computer recovery choices rather than throwing or opening a
+        duplicate connector.
+    - id: settings-navigation-reuses-live-session
+      outcome: unchanged
+      reason: Cold Settings must wait for the same managed connector instead of
+        creating a second one, while direct cold Settings remains unchanged.
+    - id: hosted-app-keeps-all-paired-computers-live
+      outcome: unchanged
+      reason: Readiness gating does not stop any background session or retry loop.
+files:
+  - packages/web-next/src/main.tsx
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/src/app/computer-sessions.spec.ts
+  - packages/web-next/tests/room35-startup-recovery.e2e.spec.ts
+anchors:
+  hosted-computer-switching-reuses-warm-session:
+    warm-computer-activation:
+      action: change
+      reason: Restore the prior persisted active computer when a newly paired target
+        is not usable.
+  hosted-offline-recovery-offers-other-computers:
+    multi-computer-recovery-exit:
+      action: change
+      reason: Gate cold room and Settings surfaces on an actual managed connector and
+        reuse existing recovery alternatives.
+  settings-navigation-reuses-live-session:
+    mounted-settings-route:
+      action: change
+      reason: Prevent cold Settings from owning a duplicate connector during the
+        managed boot-readiness interval.
+  hosted-app-keeps-all-paired-computers-live:
+    computer-session-lifecycle:
+      action: change
+      reason: Keep incomplete active startup in the existing manager retry loop while
+        the UI remains recoverable.
