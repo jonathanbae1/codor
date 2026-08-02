@@ -902,9 +902,25 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       event.type === 'timeline' &&
       event.item.type === 'compaction' &&
       event.item.status === 'completed');
-    if (!completed) return;
+    if (completed) {
+      this.clearCompaction(runtime);
+      pending.settle(usage?.type === 'usage_updated' ? usage.usage : undefined);
+      return;
+    }
+    // harn:assume manual-compaction-settles-on-terminal-result ref=claude-compaction-noop-settle
+    // A session with nothing to compact emits no compact_boundary, but the SDK
+    // still ends the /compact turn with a terminal result. Settle that as a no-op
+    // (nothing re-baselined) — or surface its failure — instead of waiting out the
+    // 180s missing-boundary guard, which stays only for an engine that goes silent.
+    const finished = events.find((event) => event.type === 'run.completed');
+    if (finished?.type !== 'run.completed') return;
     this.clearCompaction(runtime);
-    pending.settle(usage?.type === 'usage_updated' ? usage.usage : undefined);
+    if (finished.status === 'completed') {
+      pending.settle(undefined);
+    } else {
+      pending.fail(new Error(finished.error ?? `Claude compaction ${finished.status}`));
+    }
+    // harn:end manual-compaction-settles-on-terminal-result
   }
 
   /** Every terminal path clears the pending state; none may leak a promise. */

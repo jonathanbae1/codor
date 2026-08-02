@@ -570,6 +570,27 @@ describe('manual compaction', () => {
     }
   });
 
+  it('settles as a no-op when /compact ends with a result and no boundary', async () => {
+    // The real SDK emits a terminal result but no compact_boundary for a session
+    // that is already compact (confirmed by instrumented smoke); settle promptly
+    // instead of waiting out the 180s missing-boundary guard.
+    const { adapter, session } = await ranOneTurn(() => result('nothing to compact'));
+    await expect(adapter.compactSession(session)).resolves.toBeUndefined();
+  });
+
+  it('fails with the native reason when the /compact turn ends in a failed result', async () => {
+    const failed = message({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'compaction blew up',
+      session_id: SESSION_ID,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const { adapter, session } = await ranOneTurn(() => failed);
+    await expect(adapter.compactSession(session)).rejects.toThrow(/compaction blew up/);
+  });
+
   it('rejects with the native reason when the SDK query dies mid-compaction', async () => {
     const records: MockQueryRecord[] = [];
     const factory = queryFactory(async function* (input) {

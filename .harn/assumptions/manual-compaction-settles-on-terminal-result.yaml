@@ -1,0 +1,16 @@
+id: manual-compaction-settles-on-terminal-result
+hash: a-cbbf7919d71b
+title: A manual /compact with nothing to compact settles from the turn result
+state: active
+statement: >
+  compactSession must resolve when the injected /compact turn ends with a
+  terminal result (the SDK's run.completed) even though no compact_boundary is
+  emitted — resolving undefined for a success (nothing to re-baseline) and
+  failing with the native reason for a failure — so a session that is already
+  compact returns promptly instead of waiting out the missing-boundary guard;
+  the guard timer remains only for an engine that emits no terminal signal at
+  all. A boundary, when present, is observed first and still settles the
+  re-baseline, so a normal compaction is unaffected.
+depends_on:
+  - claude-compaction-follows-native-system-events
+created_by: fix-headless-compact-guard
