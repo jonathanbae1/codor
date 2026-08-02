@@ -16,6 +16,7 @@ import {
 import { checkBrowserCompatibility, CompatibilityGate } from './app/compatibility.js';
 import { StartupConnecting } from './surfaces/StartupConnecting.js';
 import { RecoveryCard } from './surfaces/RecoveryCard.js';
+import { SettingsPage } from './surfaces/SettingsPage.js';
 import { RoomPage } from './room/RoomPage.js';
 import './styles/tokens.css';
 import './styles/base.css';
@@ -47,7 +48,6 @@ async function surfaceFor(path: string, room: string, token: string) {
   // LedgerPage is REST-only with no session, so the recovery state can't apply,
   // and landing/pairing/no-channels are their own terminal screens.
   if (path === '/settings') {
-    const { SettingsPage } = await import('./surfaces/SettingsPage.js');
     return <RecoveryOverlay><SettingsPage room={room} token={token} refreshToken={resolveAccessToken} /></RecoveryOverlay>;
   }
   if (path === '/ledger') {

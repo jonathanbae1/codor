@@ -32,6 +32,8 @@ export function SettingsPage(props: {
   room: string;
   token: string;
   refreshToken?: () => Promise<string>;
+  connection?: RoomConnector;
+  onBack?: () => void;
 }) {
   // Settings is reached from a room; keep that room when returning, and fall
   // back to the remembered one rather than a placeholder channel.
@@ -40,9 +42,9 @@ export function SettingsPage(props: {
     () => () => currentBrowserAccessToken(props.token),
     [props.token],
   );
-  const connectorRef = useRef<RoomConnector | null>(null);
-  if (connectorRef.current === null) {
-    connectorRef.current = createConnector({
+  const ownedConnectorRef = useRef<RoomConnector | null>(null);
+  if (props.connection === undefined && ownedConnectorRef.current === null) {
+    ownedConnectorRef.current = createConnector({
       room: page.room,
       token: props.token,
       refreshToken: props.refreshToken,
@@ -51,19 +53,33 @@ export function SettingsPage(props: {
       ...relayConnectExtras(),
     });
   }
+  const connection = props.connection ?? ownedConnectorRef.current;
+  if (connection === null || connection === undefined) throw new Error('Settings requires a room connector');
+
+  useEffect(() => () => {
+    if (props.connection === undefined) ownedConnectorRef.current?.dispose();
+  }, [props.connection]);
 
   return (
     <main className="nx-surface is-settings" aria-label="Settings">
       <div className="nx-settings">
         <header className="nx-settings-head">
-          <a className="nx-btn is-quiet nx-settings-back" href={`/?room=${encodeURIComponent(page.room)}`}>
+          <a
+            className="nx-btn is-quiet nx-settings-back"
+            href={`/?room=${encodeURIComponent(page.room)}`}
+            onClick={(event) => {
+              if (props.onBack === undefined) return;
+              event.preventDefault();
+              props.onBack();
+            }}
+          >
             <ArrowLeft size={15} aria-hidden="true" /> Back to the channel
           </a>
           <h1>Settings</h1>
         </header>
         <AppearanceSection />
         <NotificationsSection token={token} />
-        <BrakesSection connection={connectorRef.current} />
+        <BrakesSection connection={connection} />
         <DevicesSection token={token} />
         <PrivacySection />
       </div>

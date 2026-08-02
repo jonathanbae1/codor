@@ -24,12 +24,14 @@ import { CreateChannelDialog } from './CreateChannel.js';
 import { HoldBanner, InboxControl, SearchOverlay } from './panels.js';
 import { Transcript } from './Transcript.js';
 import { costProvenanceLabel } from './spend-label.js';
+import { SettingsPage } from '../surfaces/SettingsPage.js';
 
 export function RoomPage(props: {
   room: string;
   token: string;
   refreshToken?: () => Promise<string>;
 }) {
+  // harn:assume settings-navigation-reuses-live-session ref=mounted-settings-route
   const token = useAccessToken(props.token);
   // The room is resolved and validated before this component exists, so the
   // connector never opens on a speculative id.
@@ -54,6 +56,7 @@ export function RoomPage(props: {
     });
   }
   const connection = connectorRef.current;
+  const [pageSurface, setPageSurface] = useState<'room' | 'settings'>('room');
 
   // In-place channel switching: select the room's keyed slice, keep the shared
   // socket and every background subscription alive, and let the URL follow.
@@ -65,18 +68,30 @@ export function RoomPage(props: {
     window.history.pushState(null, '', `/?room=${encodeURIComponent(next)}`);
   };
 
+  const openSettings = (): void => {
+    window.history.pushState(null, '', `/settings?room=${encodeURIComponent(room)}`);
+    setPageSurface('settings');
+  };
+
+  const openRoom = (): void => {
+    window.history.pushState(null, '', `/?room=${encodeURIComponent(room)}`);
+    setPageSurface('room');
+  };
+
   // The connector owns global listeners and a socket; unmounting without
   // disposing leaves both alive to act on a page that no longer exists.
   useEffect(() => () => { connectorRef.current?.dispose(); }, []);
 
   useEffect(() => {
     const onPop = (): void => {
-      // Back/forward only ever reaches rooms this session already opened.
+      // Back/forward reaches rooms and Settings entries this session already opened.
       const next = pageParams().room;
-      if (next === undefined) return;
-      connection.switchRoom(next);
-      setRoom(next);
-      rememberRoom(next);
+      if (next !== undefined && next !== connection.room()) {
+        connection.switchRoom(next);
+        setRoom(next);
+        rememberRoom(next);
+      }
+      setPageSurface(window.location.pathname === '/settings' ? 'settings' : 'room');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -103,6 +118,18 @@ export function RoomPage(props: {
     return () => query.removeEventListener('change', onChange);
   }, [responsiveContext]);
 
+  if (pageSurface === 'settings') {
+    return (
+      <SettingsPage
+        room={room}
+        token={props.token}
+        refreshToken={props.refreshToken}
+        connection={connection}
+        onBack={openRoom}
+      />
+    );
+  }
+
   if (isMobile) {
     return (
       <div className="nx-app is-mobile" data-testid="app" data-surface={surface}>
@@ -114,6 +141,7 @@ export function RoomPage(props: {
               switchRoom(next);
               setSurface('room');
             }}
+            onSettings={openSettings}
           />
         ) : (
           <ChatPanel
@@ -140,7 +168,7 @@ export function RoomPage(props: {
 
   return (
     <div className="nx-app" data-testid="app">
-      <ChannelRail activeRoom={room} token={token} onSwitch={switchRoom} />
+      <ChannelRail activeRoom={room} token={token} onSwitch={switchRoom} onSettings={openSettings} />
       <ChatPanel
         room={room}
         connection={connection}
@@ -170,6 +198,7 @@ export function RoomPage(props: {
       )}
     </div>
   );
+  // harn:end settings-navigation-reuses-live-session
 }
 
 // ── Channel rail ─────────────────────────────────────────────────────────
@@ -178,6 +207,7 @@ function ChannelRail(props: {
   activeRoom: string;
   token: () => string;
   onSwitch: (room: string) => void;
+  onSettings: () => void;
 }) {
   const [creating, setCreating] = useState(false);
   const summaries = useRoomSummaries(props.token);
@@ -309,7 +339,7 @@ function ChannelRail(props: {
           </span>
           <ComputerSwitcher />
         </span>
-        <IconButton icon={Settings} label="Settings" variant="quiet" onClick={() => { window.location.href = `/settings?room=${props.activeRoom}`; }} />
+        <IconButton icon={Settings} label="Settings" variant="quiet" onClick={props.onSettings} />
       </footer>
       {creating && (
         <CreateChannelDialog
