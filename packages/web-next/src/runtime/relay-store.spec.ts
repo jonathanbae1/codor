@@ -8,7 +8,7 @@ import {
   hydrateActive,
   listComputers,
   migrateIfNeeded,
-  persistActiveComputerRoom,
+  persistComputerRoom,
   recordPairedComputer,
   readComputerMaterial,
   renameComputer,
@@ -112,18 +112,19 @@ describe('relay-store (generation-swapped)', () => {
     expect(activeRelay(kv)).toBe('B'); // the read never changed the active cache
   });
 
-  it('persists an active room-key change through a new complete generation', async () => {
+  it('persists an explicitly owned room-key change through a new complete generation', async () => {
     const kv = mapKv();
     await pair(kv, 'A', '2026-01-01');
     await pair(kv, 'B', '2026-01-02');
-    expect(await persistActiveComputerRoom(kv, 'shared', { room: 'shared', key: 'B-new' })).toBe(true);
-    expect((await listComputers(kv)).computers.find((computer) => computer.id === 'B')?.gen).toBe(2);
-    expect(await kv.get('computer:B:2:relay')).toEqual({ relay_url: 'B' });
-    expect(await kv.get('computer:B:2:room:shared')).toEqual({ room: 'shared', key: 'B-new' });
-    expect(await kv.get('computer:A:1:room:shared')).toBeUndefined();
+    expect(await persistComputerRoom(kv, 'A', 'shared', { room: 'shared', key: 'A-new' })).toBe(true);
+    expect((await listComputers(kv)).active_id).toBe('B');
+    expect((await listComputers(kv)).computers.find((computer) => computer.id === 'A')?.gen).toBe(2);
+    expect(await kv.get('computer:A:2:relay')).toEqual({ relay_url: 'A' });
+    expect(await kv.get('computer:A:2:room:shared')).toEqual({ room: 'shared', key: 'A-new' });
+    expect(await kv.get('computer:B:1:room:shared')).toBeUndefined();
+    expect(await kv.get('room:shared')).toBeUndefined();
     await switchToComputer(kv, 'A');
-    await switchToComputer(kv, 'B');
-    expect(await kv.get('room:shared')).toEqual({ room: 'shared', key: 'B-new' });
+    expect(await kv.get('room:shared')).toEqual({ room: 'shared', key: 'A-new' });
   });
 
   it('crash mid-re-pair: a half-written new generation is ignored; boot hydrates the old one', async () => {

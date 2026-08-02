@@ -18,8 +18,8 @@ async function repair(onComputerSwitch?: () => void | Promise<void>): Promise<vo
   const manager = computerSessions();
   const activeId = manager?.getSnapshot().activeId;
   if (manager && activeId) {
-    await manager.forget(activeId);
-    if (manager.active()) {
+    const keptMounted = await manager.forget(activeId);
+    if (keptMounted && manager.active()) {
       await onComputerSwitch?.();
       return;
     }
@@ -135,6 +135,7 @@ export function RecoveryCard({
                 type="button"
                 className="nx-btn"
                 data-testid={`recovery-computer-${computer.id}`}
+                disabled={!computer.ready}
                 onClick={() => {
                   void manager.activate(computer.id).then(async (activated) => {
                     if (activated) await onComputerSwitch?.();

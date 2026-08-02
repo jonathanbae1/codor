@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
+import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SESSION_COPY, SESSION_REPAIR_HINT, SESSION_TERMINAL_COPY } from '../app/connection-state.js';
@@ -7,6 +9,8 @@ import { SESSION_COPY, SESSION_REPAIR_HINT, SESSION_TERMINAL_COPY } from '../app
 // relayActive drives whether re-pair is offered; mock it so both branches are pinnable.
 const relay = vi.hoisted(() => ({ active: false }));
 vi.mock('../runtime/relay-mode.js', () => ({ relayActive: () => relay.active }));
+const sessions = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock('../app/computer-sessions.js', () => ({ computerSessions: sessions.get }));
 
 const { RecoveryCard } = await import('./RecoveryCard.js');
 
@@ -52,5 +56,31 @@ describe('RecoveryCard re-pair hint matches the offered action', () => {
       expect(html).toContain(SESSION_REPAIR_HINT);
       expect(html).toContain('recovery-repair');
     }
+  });
+});
+
+describe('RecoveryCard computer readiness', () => {
+  it('disables an unusable alternative', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const snapshot = {
+      activeId: 'A',
+      computers: [
+        { id: 'A', label: 'A', active: true, ready: true, connected: false, unread: 0, attention: false, working: 0 },
+        { id: 'B', label: 'B', active: false, ready: false, connected: false, unread: 0, attention: false, working: 0 },
+      ],
+    };
+    sessions.get.mockReturnValue({
+      subscribe: () => () => undefined,
+      getSnapshot: () => snapshot,
+      activate: vi.fn(),
+    });
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    await act(async () => { root.render(<RecoveryCard state="agent-offline" />); });
+    const html = host.innerHTML;
+    expect(html).toMatch(/data-testid="recovery-computer-B"[^>]*disabled=""/);
+    await act(async () => { root.unmount(); });
+    sessions.get.mockReturnValue(undefined);
+    delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 });

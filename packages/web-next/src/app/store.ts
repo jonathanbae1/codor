@@ -46,6 +46,7 @@ export interface ClientState {
   rooms: Record<string, RoomSlice>;
   roomList: Room[];
   roomSummaries: RoomSummary[];
+  roomSummariesLoaded: boolean;
   applyFrame(frame: ServerFrame, fallbackRoom?: string): void;
   mergeHistoryPage(room: string, messages: Message[]): void;
   setActiveRoom(room: string): void;
@@ -166,6 +167,7 @@ export function createClientStore(): ClientStore {
   rooms: {},
   roomList: [],
   roomSummaries: [],
+  roomSummariesLoaded: false,
 
   applyFrame: (frame, fallbackRoom) => {
     if (frame.type === 'rooms') {
@@ -380,10 +382,10 @@ export function createClientStore(): ClientStore {
 
   setConnected: (connected) => set(connected ? { connected, authRefused: false } : { connected }),
   setAuthRefused: (authRefused) => set({ authRefused }),
-  setRoomSummaries: (roomSummaries) => set({ roomSummaries }),
+  setRoomSummaries: (roomSummaries) => set({ roomSummaries, roomSummariesLoaded: true }),
   reset: () => {
     staging.clear();
-    set({ connected: false, authRefused: false, activeRoom: '', rooms: {}, roomList: [], roomSummaries: [] });
+    set({ connected: false, authRefused: false, activeRoom: '', rooms: {}, roomList: [], roomSummaries: [], roomSummariesLoaded: false });
   },
   }));
 }

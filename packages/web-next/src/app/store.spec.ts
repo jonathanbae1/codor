@@ -183,3 +183,12 @@ describe('resubscribe preserves a hydrated, paged room', () => {
     expect(after.seq).toBe(41);
   });
 });
+
+describe('managed room-summary initialization', () => {
+  it('distinguishes an authoritative empty load from an uninitialized store', () => {
+    expect(useClientStore.getState().roomSummariesLoaded).toBe(false);
+    useClientStore.getState().setRoomSummaries([]);
+    expect(useClientStore.getState().roomSummaries).toEqual([]);
+    expect(useClientStore.getState().roomSummariesLoaded).toBe(true);
+  });
+});

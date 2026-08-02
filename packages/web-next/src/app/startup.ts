@@ -163,11 +163,21 @@ export async function retryAuthorizedRooms(token: string, deps: RetryDeps = {}):
  */
 export async function resolveAuthorizedRooms(
   token: string,
-  opts: RetryDeps & { relayMode: boolean; explicit?: string; remembered?: string },
+  opts: RetryDeps & {
+    relayMode: boolean;
+    multipleComputers?: boolean;
+    explicit?: string;
+    remembered?: string;
+  },
 ): Promise<RoomSummary[] | undefined> {
   const first = await loadAuthorizedRoomsOnce(token, opts);
   if (first !== undefined) return first;
-  if (opts.relayMode && opts.explicit === undefined && opts.remembered === undefined) {
+  if (
+    opts.relayMode
+    && !opts.multipleComputers
+    && opts.explicit === undefined
+    && opts.remembered === undefined
+  ) {
     return retryAuthorizedRooms(token, opts);
   }
   return undefined;

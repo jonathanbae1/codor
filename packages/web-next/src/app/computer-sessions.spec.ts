@@ -2,6 +2,13 @@
 import type { RoomSummary } from '@codor/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
+const recovery = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  upgrade: vi.fn(),
+}));
+vi.mock('../room/run-journals.js', () => ({ refreshMutableRunJournals: recovery.refresh }));
+vi.mock('./compatibility.js', () => ({ requireBrowserUpgrade: recovery.upgrade }));
+
 import type { HostedComputerMaterial } from '@runtime/crypto.js';
 import type { TunnelState } from '@runtime/relay.js';
 
@@ -44,6 +51,7 @@ function harness() {
   const tunnelDisposals: string[] = [];
   const connectorDisposals: string[] = [];
   const switches: string[] = [];
+  const connectorOptions = new Map<string, ConnectorOptions>();
 
   const deps: ComputerSessionDeps = {
     load: async () => ({ materials, activeId }),
@@ -64,6 +72,7 @@ function harness() {
     loadRooms: async (token) => [summary(token.slice(-1), token.endsWith('B') ? 7 : 1)],
     makeConnector: (options: ConnectorOptions): RoomConnector => {
       const id = options.token.slice(-1);
+      connectorOptions.set(id, options);
       connectorStarts.push(id);
       options.store!.getState().setConnected(true);
       let room = options.room;
@@ -101,6 +110,7 @@ function harness() {
     tunnelDisposals,
     connectorDisposals,
     switches,
+    connectorOptions,
   };
 }
 
@@ -168,5 +178,97 @@ describe('ComputerSessionManager', () => {
     expect(h.tunnelDisposals).toEqual([]);
     manager.dispose();
     delete (window as unknown as { __CODOR_SESSION_BOOT_MS?: number }).__CODOR_SESSION_BOOT_MS;
+  });
+
+  it('keeps a revoked active connector mounted and rejects selecting it later', async () => {
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    h.connectorOptions.get('A')?.setToken?.('');
+    expect(manager.active()).toMatchObject({ id: 'A', token: '' });
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'A')?.ready).toBe(false);
+    expect(await manager.activate('B')).toBe(true);
+    const before = [...h.switches];
+    expect(await manager.activate('A')).toBe(false);
+    expect(h.switches).toEqual(before);
+    expect(manager.active()?.id).toBe('B');
+    manager.dispose();
+  });
+
+  it('rejects a connectorless target before persisted or in-memory activation', async () => {
+    const h = harness();
+    h.deps.loadRooms = async (token) => token.endsWith('B') ? [] : [summary('A', 1)];
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+    for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'B')?.ready).toBe(false);
+    const before = [...h.switches];
+    expect(await manager.activate('B')).toBe(false);
+    expect(h.switches).toEqual(before);
+    expect(manager.active()?.id).toBe('A');
+    manager.dispose();
+  });
+
+  it('refreshes mutable journals only for the active connector with its own token', async () => {
+    recovery.refresh.mockReset();
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    h.connectorOptions.get('B')?.onResume?.('same-room');
+    expect(recovery.refresh).not.toHaveBeenCalled();
+    h.connectorOptions.get('A')?.onResume?.('same-room');
+    expect(recovery.refresh).toHaveBeenCalledTimes(1);
+    expect(recovery.refresh.mock.calls[0]?.[1]()).toBe('token-A');
+
+    await manager.activate('B');
+    h.connectorOptions.get('B')?.onResume?.('same-room');
+    expect(recovery.refresh.mock.calls[1]?.[1]()).toBe('token-B');
+    manager.dispose();
+  });
+
+  it('parks an inactive upgrade without replacing the active UI and gates it when selected', async () => {
+    recovery.upgrade.mockReset();
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+    const frame = {
+      type: 'upgrade_required' as const,
+      current_browser_protocol: 1,
+      minimum_browser_protocol: 99,
+    };
+
+    h.connectorOptions.get('B')?.onUpgradeRequired?.(frame);
+    expect(recovery.upgrade).not.toHaveBeenCalled();
+    expect(manager.active()?.id).toBe('A');
+    expect(await manager.activate('B')).toBe(true);
+    expect(recovery.upgrade).toHaveBeenCalledWith(frame);
+    manager.dispose();
+  });
+
+  it('forgets an active computer only into a ready fallback', async () => {
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    expect(await manager.forget('A')).toBe(true);
+    expect(manager.active()?.id).toBe('B');
+    expect(h.switches.at(-1)).toBe('B');
+    manager.dispose();
+  });
+
+  it('requests reload instead of publishing a connectorless active fallback', async () => {
+    const h = harness();
+    h.deps.loadRooms = async (token) => token.endsWith('B') ? [] : [summary('A', 1)];
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+    for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+    const before = manager.getSnapshot();
+
+    expect(await manager.forget('A')).toBe(false);
+    expect(manager.getSnapshot()).toBe(before);
+    manager.dispose();
   });
 });

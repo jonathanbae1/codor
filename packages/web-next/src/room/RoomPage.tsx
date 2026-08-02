@@ -25,7 +25,12 @@ import { HoldBanner, InboxControl, SearchOverlay } from './panels.js';
 import { Transcript } from './Transcript.js';
 import { costProvenanceLabel } from './spend-label.js';
 import { SettingsPage } from '../surfaces/SettingsPage.js';
-import { computerSessions, type ComputerSessionsSnapshot } from '../app/computer-sessions.js';
+import {
+  computerSessions,
+  type ActiveComputerSession,
+  type ComputerSessionManager,
+  type ComputerSessionsSnapshot,
+} from '../app/computer-sessions.js';
 
 const EMPTY_COMPUTER_SNAPSHOT: ComputerSessionsSnapshot = { computers: [] };
 const noComputerSubscription = (): (() => void) => () => undefined;
@@ -43,6 +48,24 @@ export function RoomPage(props: {
     () => EMPTY_COMPUTER_SNAPSHOT,
   );
   const managed = manager?.active();
+  return (
+    <MountedRoomPage
+      key={managed?.id ?? 'direct'}
+      {...props}
+      manager={manager}
+      managed={managed}
+    />
+  );
+}
+
+function MountedRoomPage(props: {
+  room: string;
+  token: string;
+  refreshToken?: () => Promise<string>;
+  manager: ComputerSessionManager | undefined;
+  managed: ActiveComputerSession | undefined;
+}) {
+  const { manager, managed } = props;
   const activeToken = managed?.token ?? props.token;
   const token = useAccessToken(activeToken);
   // The room is resolved and validated before this component exists, so the

@@ -1,4 +1,4 @@
-import type { Room, RoomSummary } from '@codor/protocol';
+import type { Room, RoomSummary, ServerFrame } from '@codor/protocol';
 
 import {
   forgetPairedComputer,
@@ -14,10 +14,13 @@ import {
 } from '@runtime/crypto.js';
 import { setRelayTransport } from '@runtime/relay-transport.js';
 import { TunnelClient, type TunnelState } from '@runtime/relay.js';
+import { setActiveComputer } from '@runtime/active-computer.js';
 
 import { createConnector, type ConnectorOptions, type RoomConnector } from './connector.js';
+import { requireBrowserUpgrade } from './compatibility.js';
 import { rememberedRoom, rememberRoom, resolveStartupRoom } from './startup.js';
 import { createClientStore, mirrorClientStore, type ClientStore } from './store.js';
+import { refreshMutableRunJournals } from '../room/run-journals.js';
 
 export interface ComputerActivitySummary {
   connected: boolean;
@@ -61,6 +64,7 @@ interface SessionEntry {
   store: ClientStore;
   token: string;
   connector?: RoomConnector;
+  upgrade?: Extract<ServerFrame, { type: 'upgrade_required' }>;
   disposed: boolean;
   ready: Promise<void>;
   resolveReady: () => void;
@@ -162,7 +166,7 @@ export class ComputerSessionManager {
 
   active(): ActiveComputerSession | undefined {
     const entry = this.activeId === undefined ? undefined : this.entries.get(this.activeId);
-    if (!entry?.connector || entry.token === '') return undefined;
+    if (!entry?.connector) return undefined;
     return {
       id: entry.material.computer.id,
       room: entry.connector.room(),
@@ -196,11 +200,12 @@ export class ComputerSessionManager {
   // harn:assume hosted-computer-switching-reuses-warm-session ref=warm-computer-activation
   async activate(id: string): Promise<boolean> {
     const entry = this.entries.get(id);
-    if (!entry || entry.disposed) return false;
+    if (!this.usable(entry)) return false;
     await this.deps.switchStored(id);
     this.activeId = id;
     this.applyActiveRuntime();
     if (entry.connector) rememberRoom(entry.connector.room(), id);
+    if (entry.upgrade) requireBrowserUpgrade(entry.upgrade);
     this.publish();
     return entry.connector !== undefined;
   }
@@ -228,23 +233,36 @@ export class ComputerSessionManager {
     return this.activate(added.material.computer.id);
   }
 
-  async forget(id: string): Promise<void> {
+  async forget(id: string): Promise<boolean> {
+    const wasActive = id === this.activeId;
+    const fallback = wasActive
+      ? [...this.entries.values()]
+        .filter((entry) => entry.material.computer.id !== id && this.usable(entry))
+        .sort((left, right) => Number(right.store.getState().connected) - Number(left.store.getState().connected))[0]
+      : undefined;
     await this.deps.forget(id);
     this.disposeEntry(id);
     const loaded = await this.deps.load();
-    this.activeId = loaded.activeId;
     if (loaded.materials.length === 0) {
       setRelayTransport(undefined);
       setActiveBrowserAccessToken('');
+      setActiveComputer(undefined);
+      this.activeId = undefined;
       this.snapshot = { computers: [] };
-      return;
+      return false;
     }
     for (const material of loaded.materials) {
       const existing = this.entries.get(material.computer.id);
       if (!existing) this.startEntry(material);
     }
+    if (wasActive) {
+      if (!fallback || !this.entries.has(fallback.material.computer.id)) return false;
+      await this.deps.switchStored(fallback.material.computer.id);
+      this.activeId = fallback.material.computer.id;
+    }
     this.applyActiveRuntime();
     this.publish();
+    return true;
   }
 
   async rename(id: string, label: string): Promise<void> {
@@ -334,6 +352,16 @@ export class ComputerSessionManager {
           store: entry.store,
           setToken: (next) => this.setEntryToken(entry, next),
           refreshToken: () => this.refreshEntryToken(entry),
+          onResume: (room) => {
+            if (entry.material.computer.id === this.activeId) {
+              refreshMutableRunJournals(room, () => entry.token);
+            }
+          },
+          onUpgradeRequired: (frame) => {
+            entry.upgrade = frame;
+            if (entry.material.computer.id === this.activeId) requireBrowserUpgrade(frame);
+            this.publish();
+          },
           expose: false,
         });
         entry.resolveReady();
@@ -363,6 +391,7 @@ export class ComputerSessionManager {
   private applyActiveRuntime(): void {
     const entry = this.activeId === undefined ? undefined : this.entries.get(this.activeId);
     if (!entry) return;
+    setActiveComputer(entry.material.computer.id);
     const origin = relayAccessOrigin(entry.material.relay.relay_url);
     setRelayTransport({ origin, fetch: entry.tunnel.fetch.bind(entry.tunnel) });
     setActiveBrowserAccessToken(entry.token);
@@ -388,6 +417,10 @@ export class ComputerSessionManager {
       && left.relay.host_static_pub === right.relay.host_static_pub
       && left.switchboard.device_id === right.switchboard.device_id
       && left.switchboard.sign_public_key === right.switchboard.sign_public_key;
+  }
+
+  private usable(entry: SessionEntry | undefined): entry is SessionEntry {
+    return entry !== undefined && !entry.disposed && entry.connector !== undefined && entry.token !== '';
   }
 
   // harn:assume hosted-background-computer-activity-is-visible ref=background-computer-summary
@@ -418,7 +451,7 @@ export class ComputerSessionManager {
         id: entry.material.computer.id,
         label: entry.material.computer.label,
         active: entry.material.computer.id === this.activeId,
-        ready: entry.connector !== undefined,
+        ready: this.usable(entry),
         ...this.summary(entry),
       })),
     };

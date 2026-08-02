@@ -127,3 +127,5 @@ anchors:
       action: change
       reason: Preserve the mounted Settings route across readiness-safe
         active-computer changes.
+applied:
+  applied_at: 2026-08-02T15:08:03.613Z

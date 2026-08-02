@@ -142,4 +142,22 @@ describe('resolveAuthorizedRooms (relay-only extended retry)', () => {
     expect(rooms).toBeUndefined();
     expect(sleeps).toEqual([]); // a remembered room is the offline fallback — no long retry
   });
+
+  it('does not enter the legacy retry when another warm computer can recover', async () => {
+    fetchSummaries.mockRejectedValue(new Error('offline'));
+    fetchRooms.mockRejectedValue(new Error('offline'));
+    const sleeps: number[] = [];
+    const rooms = await resolveAuthorizedRooms('tok', {
+      relayMode: true,
+      multipleComputers: true,
+      delaysMs: [10, 20],
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+      attemptTimeout: never,
+    });
+    expect(rooms).toBeUndefined();
+    expect(sleeps).toEqual([]);
+  });
 });

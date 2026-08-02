@@ -10,6 +10,7 @@ import {
 } from '@codor/tunnel';
 import { relayDialCandidates } from './relay-dial.js';
 import { relayFetch } from './relay-transport.js';
+import { roomKeyPersistenceOwner } from './active-computer.js';
 import { type RelayComputer, selectActiveComputer } from './relay-records.js';
 import {
   type Kv,
@@ -18,7 +19,8 @@ import {
   hydrateActive,
   listComputers,
   migrateIfNeeded,
-  persistActiveComputerRoom,
+  hasRelayComputerIndex,
+  persistComputerRoom,
   recordPairedComputer,
   readComputerMaterial,
   renameComputer,
@@ -710,12 +712,23 @@ export async function persistBrowserRoomKey(
   if (key.length !== sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES) {
     throw new Error('channel key length is invalid');
   }
+  const value = { room, generation, key: encode(key) } satisfies StoredBrowserRoomKey;
+  const owner = roomKeyPersistenceOwner(await hasRelayComputerIndex(browserKv));
+  if (owner?.kind === 'computer') {
+    const material = await readComputerMaterial(browserKv, owner.id);
+    const current = material?.rooms.find((entry) => entry.room === room)?.value as StoredBrowserRoomKey | undefined;
+    if (current && current.generation > generation) return;
+    if (await persistComputerRoom(browserKv, owner.id, room, value)) {
+      await writeState(`room:${room}`, value);
+    }
+    return;
+  }
+  // A worker has no tab-local owner. If this is a hosted database, leave both
+  // the computer archives and the shared derived cache untouched.
+  if (owner === undefined) return;
   const current = await storedBrowserRoomKey(room);
   if (current && current.generation > generation) return;
-  const value = { room, generation, key: encode(key) } satisfies StoredBrowserRoomKey;
-  if (!await persistActiveComputerRoom(browserKv, room, value)) {
-    await writeState(`room:${room}`, value);
-  }
+  await writeState(`room:${room}`, value);
 }
 
 export async function storeBrowserAccess(access: StoredBrowserAccess): Promise<void> {

@@ -44,6 +44,9 @@ export interface ConnectorOptions {
   /** Called for EVERY legal resume — lifecycle or watchdog — so recovery work
    *  that must follow a replacement has one place to live. */
   onResume?: (room: string) => void;
+  /** Session managers park inactive incompatible computers locally and publish
+   *  the global gate only if that computer is selected. */
+  onUpgradeRequired?: (frame: Extract<ServerFrame, { type: 'upgrade_required' }>) => void;
   refreshToken?: () => Promise<string>;
 }
 
@@ -245,7 +248,8 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         state = 'parked-upgrade';
         clearProbes();
         clientStore.getState().setConnected(false);
-        requireBrowserUpgrade(frame);
+        if (options.onUpgradeRequired) options.onUpgradeRequired(frame);
+        else requireBrowserUpgrade(frame);
         retire(socket);
         socket = undefined;
         return;

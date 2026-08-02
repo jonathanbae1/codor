@@ -206,6 +206,26 @@ describe('connector resume', () => {
     connector.dispose();
   });
 
+  it('lets a managed session own upgrade presentation', () => {
+    const onUpgradeRequired = vi.fn();
+    const connector = createConnector({
+      room: 'eng',
+      token: 'token',
+      onUpgradeRequired,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    latest().accept();
+    const frame = {
+      type: 'upgrade_required' as const,
+      current_browser_protocol: 1,
+      minimum_browser_protocol: 99,
+    };
+    latest().deliver(frame);
+    expect(onUpgradeRequired).toHaveBeenCalledWith(frame);
+    expect(connector.state()).toBe('parked-upgrade');
+    connector.dispose();
+  });
+
   it('never leaves a revoked-credential park, by resume or by reconnect', async () => {
     const connector = build();
     latest().accept();

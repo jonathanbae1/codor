@@ -132,6 +132,7 @@ async function render(): Promise<void> {
     // unavailable screen at once instead of a blank root for minutes.
     const authorized = await resolveAuthorizedRooms(token, {
       relayMode: relayActive(),
+      multipleComputers: (computerSessions()?.getSnapshot().computers.length ?? 0) > 1,
       explicit,
       remembered: rememberedRoom(),
     });

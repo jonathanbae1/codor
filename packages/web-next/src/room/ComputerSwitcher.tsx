@@ -87,6 +87,7 @@ export function ComputerSwitcher(): React.ReactNode {
                     type="button"
                     className="nx-computer-name"
                     data-testid={`computer-switch-${computer.id}`}
+                    disabled={!computer.active && !computer.ready}
                     onDoubleClick={() => setRenaming(computer.id)}
                     onClick={() => {
                       if (!computer.active) void manager.activate(computer.id).then(() => setOpen(false));
@@ -112,8 +113,8 @@ export function ComputerSwitcher(): React.ReactNode {
                   className="nx-computer-forget"
                   data-testid={`computer-forget-${computer.id}`}
                   onClick={() => {
-                    void manager.forget(computer.id).then(() => {
-                      if (manager.getSnapshot().computers.length === 0) window.location.assign('/');
+                    void manager.forget(computer.id).then((keptMounted) => {
+                      if (!keptMounted) window.location.assign('/');
                     });
                   }}
                 >

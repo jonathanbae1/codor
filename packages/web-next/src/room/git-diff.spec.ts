@@ -1,10 +1,33 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetActiveComputerForTest, setActiveComputer } from '@runtime/active-computer.js';
 
-import { fetchGitCommitState, fetchGitHistory } from './git-diff.js';
+import {
+  cachedGitWorkingState,
+  fetchGitCommitState,
+  fetchGitHistory,
+  rememberGitWorkingState,
+  resetGitWorkingStateCacheForTest,
+  type GitWorkingState,
+} from './git-diff.js';
+
+beforeEach(() => {
+  resetActiveComputerForTest();
+  resetGitWorkingStateCacheForTest();
+});
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('git history client', () => {
+  it('does not reuse an identical room working tree across computers', () => {
+    const state: GitWorkingState = { cwds: ['/a'], selected: '/a', clean: true, files: [] };
+    setActiveComputer('A');
+    rememberGitWorkingState('shared', undefined, state);
+    expect(cachedGitWorkingState('shared')).toEqual(state);
+
+    setActiveComputer('B');
+    expect(cachedGitWorkingState('shared')).toBeUndefined();
+  });
+
   it('encodes cwd, cursor, limit, and browser authorization', async () => {
     const fetchMock = vi.fn(async (_input: string, _init?: RequestInit) =>
       new Response(JSON.stringify({ commits: [] }), { status: 200 }));
