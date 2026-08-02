@@ -106,11 +106,31 @@ describe('ComputerSwitcher', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('clears rename state when Escape closes and the popup is reopened', async () => {
+    await render([view(), view({ id: 'B', label: 'Laptop', active: false })]);
+    const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
+    await act(async () => { trigger.click(); });
+    await act(async () => {
+      host!.querySelector('[data-testid="computer-switch-B"]')?.dispatchEvent(
+        new MouseEvent('dblclick', { bubbles: true }),
+      );
+    });
+    expect(host!.querySelector('[data-testid="computer-rename-B"]')).not.toBeNull();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => { trigger.click(); });
+    expect(host!.querySelector('[data-testid="computer-rename-B"]')).toBeNull();
+  });
+
   it('guides Add Computer through a copyable command before the unchanged code input', async () => {
     await render([view()]);
     const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
     await act(async () => { trigger.click(); });
     await act(async () => { (host!.querySelector('[data-testid="computer-add"]') as HTMLButtonElement).click(); });
+    const modal = document.body.querySelector('[data-testid="computer-add-modal"]') as HTMLElement;
+    expect(modal.contains(document.activeElement)).toBe(true);
     expect(document.body.querySelector('[data-testid="computer-add-step-1"]')).not.toBeNull();
     expect(document.body.textContent).toContain('codor pair');
     expect(document.body.textContent).toContain('single-use');

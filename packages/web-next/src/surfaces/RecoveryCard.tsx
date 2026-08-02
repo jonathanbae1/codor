@@ -125,7 +125,7 @@ export function RecoveryCard({
       </div>
       {/* harn:assume hosted-offline-recovery-offers-other-computers ref=multi-computer-recovery-exit */}
       {manager && computers.computers.length > 1 ? (
-        <div data-testid="recovery-computers">
+        <div className="nx-recovery-computers" data-testid="recovery-computers">
           <p>Or open another paired computer:</p>
           {[...computers.computers]
             .filter((computer) => !computer.active)

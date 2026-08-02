@@ -3096,6 +3096,7 @@
 .nx-computer-choice-status.is-repair { color: var(--c-error-text); }
 .nx-computer-choice-activity { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--c-secondary); font: var(--t-caption); }
 .nx-computer-choice-actions { display: flex; flex-direction: column; justify-content: center; gap: 2px; flex: none; }
+.nx-recovery-computers { display: grid; gap: var(--sp-2); }
 .nx-computer-forget {
   padding: 5px 6px; border-radius: 6px; background: none; color: var(--c-secondary); font: var(--t-caption); cursor: pointer;
 }
@@ -3118,7 +3119,8 @@
 
 @media (max-width: 719px) {
   .nx-computer-menu {
-    left: 0; width: min(360px, calc(100vw - 24px)); max-height: min(68dvh, 480px);
+    left: 50%; width: min(360px, calc(100vw - 24px)); max-height: min(68dvh, 480px);
+    transform: translateX(-50%);
   }
   .nx-computer-current { max-width: min(100%, 270px); }
   .nx-computer-choice { min-height: 62px; }

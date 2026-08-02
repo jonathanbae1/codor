@@ -61,6 +61,12 @@ export function ComputerSwitcher(): React.ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
   const wasAdding = useRef(false);
+  const skipFocusRestore = useRef(false);
+
+  const closePopup = (): void => {
+    setOpen(false);
+    setRenaming(undefined);
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -70,10 +76,10 @@ export function ComputerSwitcher(): React.ReactNode {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
-      setOpen(false);
+      closePopup();
     };
     const onPointerDown = (event: PointerEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) closePopup();
     };
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown);
@@ -86,6 +92,10 @@ export function ComputerSwitcher(): React.ReactNode {
   useEffect(() => {
     if (!open && wasOpen.current) {
       wasOpen.current = false;
+      if (skipFocusRestore.current) {
+        skipFocusRestore.current = false;
+        return;
+      }
       triggerRef.current?.focus();
     }
   }, [open]);
@@ -129,7 +139,8 @@ export function ComputerSwitcher(): React.ReactNode {
   };
 
   const openAdd = (): void => {
-    setOpen(false);
+    skipFocusRestore.current = true;
+    closePopup();
     setAdding(true);
     setAddStep(1);
     setCopied(false);
@@ -175,7 +186,7 @@ export function ComputerSwitcher(): React.ReactNode {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={SWITCHER_DIALOG_ID}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => { if (open) closePopup(); else setOpen(true); }}
       >
         <Monitor size={15} strokeWidth={1.8} aria-hidden="true" />
         <span className="nx-computer-current-label">{active?.label ?? 'This computer'}</span>
@@ -210,7 +221,7 @@ export function ComputerSwitcher(): React.ReactNode {
                   onDoubleClick={() => setRenaming(computer.id)}
                   onSelect={() => {
                     if (!computer.active) void manager.activate(computer.id).then((activated) => {
-                      if (activated) setOpen(false);
+                      if (activated) closePopup();
                     });
                   }}
                 >

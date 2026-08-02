@@ -44,6 +44,10 @@ test.describe('computer switcher UI', () => {
     await expect(page.getByTestId('computer-current')).toBeVisible();
     await page.getByTestId('computer-current').click();
     await expect(page.getByRole('dialog', { name: /Active computer/ })).toBeVisible();
+    const popupBox = await page.locator('.nx-computer-menu').boundingBox();
+    expect(popupBox).not.toBeNull();
+    expect(popupBox!.x).toBeGreaterThanOrEqual(0);
+    expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(390);
     const popupA11y = await new AxeBuilder({ page }).include('.nx-computer-menu').analyze();
     expect(popupA11y.violations).toEqual([]);
 
