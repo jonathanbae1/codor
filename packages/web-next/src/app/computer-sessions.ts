@@ -216,6 +216,7 @@ export class ComputerSessionManager {
   }
 
   async add(code: string, relayUrl: string): Promise<boolean> {
+    const previous = this.activeId === undefined ? undefined : this.entries.get(this.activeId);
     await this.deps.pair(code, relayUrl);
     const loaded = await this.deps.load();
     for (const material of loaded.materials) {
@@ -227,9 +228,9 @@ export class ComputerSessionManager {
       }
     }
     const added = loaded.activeId === undefined ? undefined : this.entries.get(loaded.activeId);
-    if (!added) return false;
+    if (!added) return this.restoreAfterFailedAdd(previous);
     await Promise.race([added.ready, this.deps.sleep(bootWaitMs())]);
-    if (!added.connector) return false;
+    if (!this.usable(added)) return this.restoreAfterFailedAdd(previous);
     return this.activate(added.material.computer.id);
   }
 
@@ -421,6 +422,16 @@ export class ComputerSessionManager {
 
   private usable(entry: SessionEntry | undefined): entry is SessionEntry {
     return entry !== undefined && !entry.disposed && entry.connector !== undefined && entry.token !== '';
+  }
+
+  private async restoreAfterFailedAdd(previous: SessionEntry | undefined): Promise<false> {
+    if (this.usable(previous)) {
+      await this.deps.switchStored(previous.material.computer.id);
+      this.activeId = previous.material.computer.id;
+      this.applyActiveRuntime();
+      this.publish();
+    }
+    return false;
   }
 
   // harn:assume hosted-background-computer-activity-is-visible ref=background-computer-summary

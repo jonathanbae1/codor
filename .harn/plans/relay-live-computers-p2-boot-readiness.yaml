@@ -61,3 +61,5 @@ anchors:
       action: change
       reason: Keep incomplete active startup in the existing manager retry loop while
         the UI remains recoverable.
+applied:
+  applied_at: 2026-08-02T15:22:05.007Z

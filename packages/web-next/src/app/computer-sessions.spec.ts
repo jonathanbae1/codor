@@ -157,6 +157,41 @@ describe('ComputerSessionManager', () => {
     manager.dispose();
   });
 
+  it('restores the prior usable session when a newly paired computer misses readiness', async () => {
+    const h = harness();
+    const loadRooms = h.deps.loadRooms;
+    h.deps.loadRooms = async (token, tunnel) => token.endsWith('C')
+      ? new Promise<RoomSummary[]>(() => undefined)
+      : loadRooms(token, tunnel);
+    h.deps.sleep = async () => undefined;
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    expect(await manager.add('CODE', 'wss://relay.test')).toBe(false);
+    expect(manager.active()?.id).toBe('A');
+    expect((await h.deps.load()).activeId).toBe('A');
+    expect(h.switches).toEqual(['A', 'A']);
+    expect(h.tunnelDisposals).toEqual([]);
+    manager.dispose();
+  });
+
+  it('can expose a token before the active connector is ready', async () => {
+    const h = harness();
+    const loadRooms = h.deps.loadRooms;
+    h.deps.loadRooms = async (token, tunnel) => token.endsWith('A')
+      ? new Promise<RoomSummary[]>(() => undefined)
+      : loadRooms(token, tunnel);
+    h.deps.sleep = async () => undefined;
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+    for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+
+    expect(manager.activeToken()).toBe('token-A');
+    expect(manager.active()).toBeUndefined();
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'B')?.ready).toBe(true);
+    manager.dispose();
+  });
+
   it('keeps retry work alive after the active session misses its bounded boot wait', async () => {
     const h = harness();
     const authenticate = h.deps.authenticate;
