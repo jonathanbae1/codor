@@ -67,6 +67,9 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
   let currentRoom = options.room;
   let socket: WebSocket | undefined;
   let subscribed = new Set<string>();
+  // Rooms with an in-flight reconciliation resync, mapped to the server seq we
+  // are catching up to. One resync per room; reset with the socket generation.
+  let resyncing = new Map<string, number>();
   let state: ConnectorState = 'disconnected';
   let retryMs = 500;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,6 +122,50 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
     });
   };
 
+  /**
+   * Warm-resync a room that fell behind, bypassing the `subscribed` guard: it is
+   * already subscribed, so we only replay the delta from its committed cursor.
+   */
+  const resync = (room: string, sinceSeq: number): void => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    send({
+      type: 'subscribe',
+      room,
+      since_seq: sinceSeq,
+      hydrate_limit: HISTORY_PAGE_SIZE,
+      room_addressed: true,
+      browser_protocol: BROWSER_PROTOCOL_EPOCH,
+      client_kind: 'browser',
+    });
+  };
+
+  /**
+   * Reconcile subscribed rooms against the server's per-room seqs carried on the
+   * `rooms` reply (the watchdog probe already ticks it). A room whose committed
+   * cursor trails the server gets ONE in-flight warm resync; the marker clears
+   * once the cursor catches up, so a future lag re-arms. Rooms only just
+   * subscribed this round are hydrating already and are skipped, as is an older
+   * server that omits the field (graceful no-op). A spurious lag — a frame in
+   * flight when the reply was computed — resyncs to an empty delta, harmless.
+   */
+  const reconcile = (roomSeqs: Record<string, number> | undefined, priorSubscribed: Set<string>): void => {
+    if (roomSeqs === undefined) return;
+    const store = useClientStore.getState();
+    for (const [room, serverSeq] of Object.entries(roomSeqs)) {
+      if (!priorSubscribed.has(room)) continue;
+      const committed = roomSlice(store, room).seq;
+      const target = resyncing.get(room);
+      if (target !== undefined) {
+        if (committed >= target) resyncing.delete(room);
+        else continue; // one in-flight resync per room
+      }
+      if (serverSeq > committed) {
+        resyncing.set(room, serverSeq);
+        resync(room, committed);
+      }
+    }
+  };
+
   /** Detach a socket from this connector before replacing or closing it. */
   const retire = (victim: WebSocket | undefined): void => {
     if (victim === undefined) return;
@@ -141,6 +188,9 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
    */
   const startProbes = (mine: number): void => {
     clearProbes();
+    // Test seam: e2e sets a short cadence to exercise seq reconciliation without
+    // a wall-clock wait; production uses the fixed foreground interval.
+    const interval = (window as unknown as { __codorProbeMs?: number }).__codorProbeMs ?? PROBE_INTERVAL_MS;
     probeTimer = setInterval(() => {
       if (mine !== generation || state !== 'connected') return;
       if (document.visibilityState !== 'visible') return; // only while foregrounded
@@ -154,7 +204,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         awaitingProbe = false;
         resume();
       }, PROBE_TIMEOUT_MS);
-    }, PROBE_INTERVAL_MS);
+    }, interval);
   };
 
   const open = (): void => {
@@ -164,6 +214,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
     const mine = ++generation;
     retire(socket);
     subscribed = new Set();
+    resyncing = new Map();
     socket = socketFactory(`${origin}/ws?token=${encodeURIComponent(token)}`);
     const live = (): boolean => mine === generation && state !== 'disposed';
 
@@ -196,7 +247,11 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         awaitingProbe = false;
         if (probeDeadline !== undefined) clearTimeout(probeDeadline);
         probeDeadline = undefined;
+        // Reconcile rooms we already held BEFORE this round subscribes any new
+        // ones — a freshly subscribed room is hydrating and needs no resync.
+        const priorSubscribed = new Set(subscribed);
         for (const room of frame.rooms) subscribe(room.id);
+        reconcile(frame.room_seqs, priorSubscribed);
       }
     };
     socket.onclose = (event) => {

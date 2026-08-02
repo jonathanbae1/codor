@@ -275,7 +275,17 @@ export const ServerFrameSchema = z.discriminatedUnion('type', [
     current_browser_protocol: z.number().int().positive(),
   }),
   // harn:end browser-protocol-epoch-blocks-only-stale-browser-ui
-  z.object({ type: z.literal('rooms'), rooms: z.array(RoomSchema) }),
+  // harn:assume list-rooms-reply-carries-per-room-seq ref=rooms-reply-seq-schema
+  z.object({
+    type: z.literal('rooms'),
+    rooms: z.array(RoomSchema),
+    // Optional per-room committed seq, keyed by room id, so a client multiplexing
+    // many rooms on one socket can detect a subscribed room that fell behind and
+    // warm-resync only it. Absent from older servers → client skips
+    // reconciliation (graceful no-op).
+    room_seqs: z.record(RoomIdSchema, SeqSchema).optional(),
+  }),
+  // harn:end list-rooms-reply-carries-per-room-seq
   // harn:assume multiplexed-subscriptions-identify-their-room ref=room-addressed-frame-contract
   z.object({ type: z.literal('self'), member_id: MemberIdSchema, room: RoomIdSchema.optional() }),
   // harn:end multiplexed-subscriptions-identify-their-room

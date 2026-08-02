@@ -295,7 +295,13 @@ export const useClientStore = create<ClientState>((set, get) => ({
           next = { ...current, seq: bump, meter: frame.meter };
           break;
         case 'room_support':
-          next = { ...current, seq: bump, support: frame.support };
+          // room_support carries the room's currentSeq, which is NOT a
+          // contiguous delivery cursor: advancing `seq` here would jump the
+          // per-room cursor past a message frame the client missed, making the
+          // gap undetectable by resume OR seq reconciliation (only a cold reload
+          // would recover it). Support is authoritative content; the cursor must
+          // still reflect only actually-delivered ordered frames.
+          next = { ...current, support: frame.support };
           break;
         case 'run_event':
           // Background rooms need summary changes, not partial evidence buffers.

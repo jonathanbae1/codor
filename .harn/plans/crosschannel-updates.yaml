@@ -1,0 +1,58 @@
+id: crosschannel-updates
+title: A multiplexed client must be able to detect and heal a subscribed room
+  that silently fell behind, without a page reload
+assumptions:
+  create:
+    - id: list-rooms-reply-carries-per-room-seq
+      title: The rooms reply optionally carries each room's committed seq for client
+        reconciliation
+      statement: "The list_rooms `rooms` reply optionally carries `room_seqs`, a map
+        from room id to that room's current committed seq. A client multiplexing
+        many rooms on one socket compares each value against its own committed
+        per-room cursor and warm-resyncs (subscribe with since_seq from the
+        committed cursor) only a room that is behind — the recovery path for a
+        live-socket frame miss that is otherwise invisible until a full reload,
+        because the foreground watchdog detects only a fully dead socket and the
+        periodic rooms handling re-subscribes only rooms not already subscribed.
+        The field is additive and optional: an absent field is a graceful no-op,
+        the value is a bounded per-room seq read (no new stream), and a spurious
+        lag simply yields an empty warm delta. Reconciliation is only meaningful
+        if the client's per-room cursor tracks ONLY actually-delivered ordered
+        frames: a room_support frame carries the room's currentSeq, not a
+        contiguous delivery cursor, so applying it must NOT advance the per-room
+        seq — otherwise the cursor jumps past a missed message and the gap is
+        invisible to both reconciliation AND resume, healable only by reload.
+        Convergence holds: every currentSeq bump is a changelog entity (room,
+        member, message, inbox, meter) that, when delivered, advances the
+        cursor; room_support is not such a bump, and a resync's sync_complete
+        fast-forwards the cursor to the room's real seq, so any lag costs at
+        most one empty-delta resync and then converges."
+      reason: "Operator report (#555): with multiple channels updating at once, a
+        non-active room's messages sometimes fail to appear (rail unread and the
+        transcript on switch) until reload. Root cause is the absence of any
+        reconciliation for a subscribed room that missed a frame; recovery today
+        needs socket death or reload. The rooms frame carries only RoomSchema
+        (no freshness), so the client cannot even detect the lag."
+      depends_on:
+        - changelog-is-sync-cursor
+        - multiplexed-subscriptions-identify-their-room
+anchors:
+  list-rooms-reply-carries-per-room-seq:
+    rooms-reply-seq-schema:
+      action: change
+      reason: Add the optional room_seqs field to the `rooms` server frame schema.
+    rooms-reply-seq-populate:
+      action: change
+      reason: Populate room_seqs from currentSeq(room) in the list_rooms reply.
+  unix-socket-same-protocol:
+    unix-websocket-listener:
+      action: change
+      reason: The nested per-room-seq populate edits the list_rooms branch inside this
+        WS message-handler region; the unix/socket protocol contract itself is
+        unchanged.
+files:
+  - packages/protocol/src/ws.ts
+  - packages/switchboard/src/server.ts
+  - packages/switchboard/src/server.spec.ts
+applied:
+  applied_at: 2026-08-01T10:11:35.948Z

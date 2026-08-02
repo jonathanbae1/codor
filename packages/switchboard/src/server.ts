@@ -1484,10 +1484,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
             } else if (!authorizeGlobal(principal, 'read')) {
               throw new Error('forbidden: principal cannot list rooms');
             }
+            // harn:assume list-rooms-reply-carries-per-room-seq ref=rooms-reply-seq-populate
+            const listedRooms = roomsFor(principal);
             send({
               type: 'rooms',
-              rooms: roomsFor(principal).map((room) => daemon.project(room.id, room)),
+              rooms: listedRooms.map((room) => daemon.project(room.id, room)),
+              // Per-room committed seq lets a multiplexed client warm-resync any
+              // room that fell behind since its last applied frame — the recovery
+              // path for a live-socket miss short of a reload.
+              room_seqs: Object.fromEntries(
+                listedRooms.map((room) => [room.id, daemon.store.currentSeq(room.id)]),
+              ),
             });
+            // harn:end list-rooms-reply-carries-per-room-seq
           } else if (frame.type === 'subscribe') {
             // harn:assume browser-protocol-epoch-blocks-only-stale-browser-ui ref=browser-protocol-admission
             const browserClient = principal.kind === 'browser'
