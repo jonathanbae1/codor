@@ -1,0 +1,29 @@
+id: codex-bridges-runtime-command-and-file-approvals
+hash: a-cda7bf84ae99
+title: Codex bridges runtime command and file-change approvals to Codor cards
+state: retired
+statement: The Codex adapter must map read-only and workspace-write to
+  approvalPolicy 'on-request' (full-access stays 'never' with
+  danger-full-access) and bridge exactly the two pinned 0.144.5 v2 server
+  requests item/commandExecution/requestApproval and
+  item/fileChange/requestApproval into the shared approval.raised /
+  respondInteraction interaction, parking each pending decision under its native
+  approvalId or itemId so concurrent approvals resolve independently; it must
+  answer with the pinned v2 decisions accept|acceptForSession|decline, deriving
+  card options from a command request's availableDecisions (omitting
+  acceptForSession when unadvertised) and the fixed enum for file changes with
+  acceptForSession labelled as session-scoped, decline any request that has no
+  matching active non-terminal turn including a stale approval replayed after
+  thread/resume, resolve every still-pending approval with 'cancel' on
+  interrupt/client-close/turn-end so Codex never blocks, and declare
+  capabilities approvals:'runtime' while ask stays false; the other three server
+  requests (item/tool/requestUserInput, mcpServer/elicitation/request,
+  item/permissions/requestApproval) stay unbridged and keep the transport's
+  immediate JSON-RPC error.
+depends_on:
+  - codex-app-server-is-the-member-runtime
+  - canonical-spawn-controls-enforced
+  - interaction-state-machine-persisted
+  - harness-declares-what-a-policy-becomes
+created_by: fix-codex-approvals
+retired_by: fix-codex-extra-asks

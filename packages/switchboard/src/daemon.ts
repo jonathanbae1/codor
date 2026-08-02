@@ -446,11 +446,22 @@ function extensionDescription(event: Extract<WireEvent, { type: 'run.item' }>): 
   return undefined;
 }
 
-/** Semantic identity of an interaction — native ids are process-lifetime only. */
-function interactionKey(kind: 'ask' | 'approval', card: AskCard): string {
+// harn:assume interaction-recorrelation-keys-on-semantic-identity-with-detail ref=interaction-recorrelation-key
+/**
+ * Semantic identity of an interaction — deliberately EXCLUDING the native id
+ * (process-lifetime only) so a crash re-raise with a fresh native id still
+ * re-correlates to the same row and an answered ask replays idempotently.
+ * `detail` is included so two concurrent approvals that differ only in the
+ * command/patch (Codex on-request can raise several per turn) no longer coalesce
+ * onto one row and strand a native id. Residual: two BYTE-IDENTICAL concurrent
+ * approvals still coalesce; that is accepted and bounded because turn teardown
+ * cancels every still-pending approval.
+ */
+export function interactionKey(kind: 'ask' | 'approval', card: AskCard): string {
   const labels = (card.options ?? []).map((o) => o.label).join('|');
-  return `${kind}\0${card.prompt}\0${labels}\0${card.tool ?? ''}`;
+  return `${kind}\0${card.prompt}\0${labels}\0${card.tool ?? ''}\0${card.detail ?? ''}`;
 }
+// harn:end interaction-recorrelation-keys-on-semantic-identity-with-detail
 
 /**
  * The switchboard daemon core: turn pump, interaction state machine,

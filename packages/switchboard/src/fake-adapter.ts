@@ -42,6 +42,14 @@ export type FakeTurn =
       /** Final text once answered (receives the answer). */
       reply: (answer: unknown) => string;
     }
+  | {
+      // Raise several cards concurrently (all before any is answered), then block
+      // until each is answered — models an engine that opens multiple approvals at
+      // once (e.g. two simultaneous elicitations).
+      kind: 'multi_ask';
+      cards: Omit<AskCard, 'interaction_id'>[];
+      reply: (answers: unknown[]) => string;
+    }
   // harn:assume failed-run-details-never-route-as-replies ref=fake-failed-turn-detail
   | { kind: 'fail-on-interrupt'; final_text?: string; error?: string }
   // harn:end failed-run-details-never-route-as-replies
@@ -235,6 +243,29 @@ export class FakeAdapter implements HarnessAdapter {
           type: 'run.completed',
           status: 'completed',
           final_text: turn.reply(value),
+          usage: { input_tokens: 10, output_tokens: 5 },
+        };
+        return;
+      }
+      if (turn.kind === 'multi_ask') {
+        const parked = turn.cards.map((card) => {
+          const nativeId = `fake-req-${++this.nextRequest}`;
+          const answer = new Promise<unknown>((resolve) => this.pendingAnswers.set(nativeId, resolve));
+          return { nativeId, card, answer };
+        });
+        // Raise every card BEFORE awaiting any answer, so they are all pending at once.
+        for (const p of parked) {
+          yield {
+            type: p.card.kind === 'ask' ? 'ask.raised' : 'approval.raised',
+            card: { ...p.card, interaction_id: p.nativeId },
+          };
+        }
+        const values: unknown[] = [];
+        for (const p of parked) values.push(await p.answer);
+        yield {
+          type: 'run.completed',
+          status: 'completed',
+          final_text: turn.reply(values),
           usage: { input_tokens: 10, output_tokens: 5 },
         };
         return;

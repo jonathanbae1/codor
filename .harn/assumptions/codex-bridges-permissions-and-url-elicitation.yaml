@@ -1,0 +1,28 @@
+id: codex-bridges-permissions-and-url-elicitation
+hash: a-bfe2654abf42
+title: Codex bridges permissions approvals and url-mode MCP elicitations
+state: active
+statement: The Codex adapter must bridge item/permissions/requestApproval and
+  mcpServer/elicitation/request (url mode) to approval.raised cards on the
+  shared parking machine, keyed collision-proof by the JSON-RPC request id
+  namespaced by method and client generation. A permissions card discloses the
+  full requested profile (network.enabled and fileSystem
+  read/write/entries/globs/special paths) and answers allow-once ->
+  {permissions:<requested>, scope:'turn'}, allow-for-session ->
+  {permissions:<requested>, scope:'session'}, deny/cancel/no-turn/stale ->
+  {permissions:{}, scope:'turn'}, with strictAutoReview always false/omitted and
+  never combined with session scope. A url elicitation card is surfaced only for
+  an HTTPS URL with a host and no embedded credentials (otherwise, and for
+  form/openai-form modes, the response is an immediate {action:'decline',
+  content:null, _meta:null}); it frames the URL as untrusted from the named MCP
+  server, keeps it inert (no fetch/preview), carries serverName + elicitationId
+  in its semantic detail so two simultaneous elicitations never coalesce, reads
+  acceptance as completed rather than validated, and answers accept/decline
+  while teardown / interrupt / stale association / no deliverable turn
+  (including a between-turn null-turnId elicitation) resolve {action:'cancel',
+  content:null, _meta:null}. requestUserInput stays unbridged (immediate
+  JSON-RPC error).
+depends_on:
+  - codex-bridges-command-and-file-approvals
+  - interaction-recorrelation-keys-on-semantic-identity-with-detail
+created_by: fix-codex-extra-asks

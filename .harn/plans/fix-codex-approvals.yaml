@@ -1,0 +1,208 @@
+id: fix-codex-approvals
+title: Codex surfaces runtime command and file-change approvals to Codor cards
+notes: "Outside full-access, Codex must be able to ask the human before an
+  action its sandbox forbids. The adapter stops hardcoding
+  approvalPolicy:'never' for non-yolo policies (read-only and workspace-write
+  become 'on-request'; full-access stays 'never'+danger-full-access), and the
+  two v2 server requests item/commandExecution/requestApproval and
+  item/fileChange/requestApproval are bridged to the existing approval.raised /
+  respondInteraction mechanism instead of auto-declined. Wire decisions are the
+  PINNED 0.144.5 v2 enums accept|acceptForSession|decline|cancel (validated
+  against /tmp/codex-01445-protocol.a8Enjq/v2, NOT the installed 0.145.0
+  binary): operator allow-once->accept, allow-for-session->acceptForSession,
+  deny->decline; interrupt/client-close/turn-end cancel all pendings; a request
+  with no matching active turn (including a stale approval replayed after
+  thread/resume) is declined immediately. Parking is keyed by the native
+  approvalId (falling back to itemId when null) so concurrent approvals resolve
+  independently. Card options come from the command request's availableDecisions
+  (acceptForSession omitted when not advertised); file-change requests carry no
+  availableDecisions and use the fixed enum. acceptForSession is labelled
+  honestly as session-scoped (cached per live thread, not persisted across
+  recreation/resume). The other three server requests
+  (item/tool/requestUserInput, mcpServer/elicitation/request,
+  item/permissions/requestApproval) stay UNBRIDGED and keep the transport's
+  immediate -32601 error (documented as a known limitation with follow-up
+  named); ask stays false, approvals becomes 'runtime'. Daemon: interactionKey
+  gains card.detail so distinct concurrent approvals no longer coalesce, while
+  native_id stays out of the key so a crash re-raise (fresh native id) still
+  re-correlates and answered asks replay idempotently; the
+  byte-identical-concurrent residual is accepted, documented, and bounded by
+  teardown-cancel. Leftover approval cards are already orphaned on terminal
+  cleanup by the existing orphanLeftoverInteractions call sites (daemon.ts
+  4191/4222/4372/4398) — verified by test only, no daemon change. Scope, wire,
+  and daemon rulings per fable channel #321/#384; #5(a) uses the approved
+  detail-in-key contained alternative, not native-id-in-key."
+assumptions:
+  create:
+    - id: codex-bridges-runtime-command-and-file-approvals
+      title: Codex bridges runtime command and file-change approvals to Codor cards
+      statement: The Codex adapter must map read-only and workspace-write to
+        approvalPolicy 'on-request' (full-access stays 'never' with
+        danger-full-access) and bridge exactly the two pinned 0.144.5 v2 server
+        requests item/commandExecution/requestApproval and
+        item/fileChange/requestApproval into the shared approval.raised /
+        respondInteraction interaction, parking each pending decision under its
+        native approvalId or itemId so concurrent approvals resolve
+        independently; it must answer with the pinned v2 decisions
+        accept|acceptForSession|decline, deriving card options from a command
+        request's availableDecisions (omitting acceptForSession when
+        unadvertised) and the fixed enum for file changes with acceptForSession
+        labelled as session-scoped, decline any request that has no matching
+        active non-terminal turn including a stale approval replayed after
+        thread/resume, resolve every still-pending approval with 'cancel' on
+        interrupt/client-close/turn-end so Codex never blocks, and declare
+        capabilities approvals:'runtime' while ask stays false; the other three
+        server requests (item/tool/requestUserInput,
+        mcpServer/elicitation/request, item/permissions/requestApproval) stay
+        unbridged and keep the transport's immediate JSON-RPC error.
+      reason: Outside --yolo, Codex previously had no escalation path — every non-yolo
+        turn used approvalPolicy:'never' and the two approval requests were
+        auto-declined, so a sandbox-forbidden command stalled or failed silently
+        instead of asking the operator.
+      depends_on:
+        - codex-app-server-is-the-member-runtime
+        - canonical-spawn-controls-enforced
+        - interaction-state-machine-persisted
+        - harness-declares-what-a-policy-becomes
+    - id: interaction-recorrelation-keys-on-semantic-identity-with-detail
+      title: Interaction re-correlation keys on semantic identity including detail
+      statement: The daemon's interaction re-correlation key must be the semantic
+        identity of a card — kind, prompt, option labels, tool, AND detail —
+        deliberately excluding the process-lifetime native id, so that a crash
+        re-raise of the same card with a fresh native id still re-correlates to
+        the same PendingInteraction (and an answered ask replays idempotently)
+        while two concurrent approvals that differ only in detail no longer
+        coalesce onto one row and strand a native id. Two byte-identical
+        concurrent approvals still coalesce; that residual is accepted and
+        bounded because turn teardown cancels every still-pending approval.
+      reason: Codex on-request approvals can raise several cards in one turn that
+        share prompt, options, and tool but differ in the command/patch
+        (detail); keying without detail coalesced them and stranded a native id,
+        while keying with the native id would have broken the locked crash
+        re-raise re-correlation.
+      depends_on:
+        - interaction-state-machine-persisted
+  reviewed:
+    - id: canonical-spawn-controls-enforced
+      outcome: unchanged
+      reason: codexPolicyOptions still validates policy and thinking and maps thinking
+        to native effort; only the approvalPolicy value for non-yolo policies
+        changes from 'never' to 'on-request', which the statement does not
+        constrain.
+    - id: harness-declares-what-a-policy-becomes
+      outcome: unchanged
+      reason: The declared native mode each policy becomes (read-only,
+        workspace-write, --yolo) is unchanged; the policy-mapping regression
+        only updates the approvalPolicy value it also asserts, not the
+        native-mode declaration.
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: The app-server retention, session_ref/thread identity, resume, interrupt
+        routing, and env merge are unchanged; the connect() request handlers now
+        bridge approvals instead of declining, and pending approvals are
+        cancelled on the same lifecycle boundaries the runtime already owns.
+    - id: codex-app-server-contract-is-pinned-to-0-144-5
+      outcome: unchanged
+      reason: The wire stays newline-delimited v2 JSON-RPC verified through the
+        injected fake with no live Codex; only the NOTES prose is updated to
+        describe the now-bridged approvals (the fake already issues arbitrary
+        server requests, so it needs no change).
+    - id: interaction-state-machine-persisted
+      outcome: unchanged
+      reason: The PendingInteraction schema and its crash-safe replay/orphan behavior
+        are unchanged; detail-in-key preserves crash re-raise re-correlation and
+        idempotent answer replay, and leftover approvals still orphan on
+        terminal cleanup via the existing call sites.
+    - id: context-peek-reads-session-artifacts
+      outcome: unchanged
+      reason: peekContextUsage is untouched; the anchored region is only attributed by
+        harn line-shift from the large approval-helper insertion above it in the
+        same file, and the context-peek contract is unchanged.
+    - id: live-inbox-capability-is-evidence-backed-v2
+      outcome: unchanged
+      reason: The live-inbox contract is unchanged; the capabilities snapshot test
+        only updates the approvals value from spawn-time to runtime.
+anchors:
+  codex-bridges-runtime-command-and-file-approvals:
+    codex-approval-bridge:
+      action: change
+      reason: Register the two requestApproval handlers to raise approval.raised and
+        park decisions by native id instead of auto-declining.
+    codex-approval-respond:
+      action: change
+      reason: respondInteraction resolves the parked approval with the mapped v2
+        decision instead of rejecting.
+    codex-approval-bridge-regression:
+      action: change
+      reason: Prove both v2 methods bridge, concurrent independence, cancel on
+        teardown, stale-replay and no-active-turn decline, and an unbridged
+        request erroring immediately.
+  canonical-spawn-controls-enforced:
+    codex-spawn-control-mapping:
+      action: change
+      reason: Non-yolo policies return approvalPolicy 'on-request'; the
+        CodexPolicyOptions approvalPolicy type widens to 'never'|'on-request'.
+  harness-declares-what-a-policy-becomes:
+    adapter-policy-declarations:
+      action: change
+      reason: The capabilities block changes approvals to 'runtime'; the policies
+        native-mode map itself is unchanged.
+    adapter-policy-regression:
+      action: change
+      reason: Assert on-request for read-only/workspace-write and never for
+        full-access; native sandbox modes and declarations are unchanged.
+  codex-app-server-is-the-member-runtime:
+    codex-app-server-session-lifecycle:
+      action: change
+      reason: connect() bridges the approval requests and turn teardown cancels
+        pending approvals within the existing session lifecycle.
+    codex-app-server-session-regression:
+      action: change
+      reason: Update the lifecycle tests that asserted approvalPolicy:'never',
+        auto-decline, and respondInteraction rejection.
+  codex-app-server-contract-is-pinned-to-0-144-5:
+    codex-app-server-contract-notes:
+      action: change
+      reason: Replace the "runtime approvals out of scope" contract text with the
+        bridged-approval contract and the named unbridged-request limitation.
+    codex-app-server-fake:
+      action: change
+      reason: Register the server-request pending before writing so a synchronously
+        returned response (e.g. an unsupported-method error) is not missed.
+  context-peek-reads-session-artifacts:
+    codex-context-peek:
+      action: change
+      reason: Harn attributes this untouched region via line-shift from the
+        approval-helper insertion above it; the contract is unchanged.
+  live-inbox-capability-is-evidence-backed-v2:
+    codex-capability-snapshot:
+      action: change
+      reason: The capabilities snapshot test asserts approvals:'runtime' instead of
+        'spawn-time'; live-inbox behavior is unchanged.
+  interaction-recorrelation-keys-on-semantic-identity-with-detail:
+    interaction-recorrelation-key:
+      action: change
+      reason: interactionKey includes card.detail with a comment stating the
+        byte-identical-concurrent residual and its teardown-cancel bound.
+    interaction-recorrelation-regression:
+      action: change
+      reason: Prove distinct-detail concurrent approvals get distinct rows, a crash
+        re-raise with fresh native id still coalesces, and a leftover approval
+        orphans on terminal cleanup.
+files:
+  - packages/adapters/codex/NOTES.md
+  - packages/adapters/codex/src/adapter.ts
+  - packages/adapters/codex/src/adapter.spec.ts
+  - packages/adapters/codex/src/index.spec.ts
+  - packages/adapters/codex/src/test-utils/fake-app-server.ts
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+verification: Run the Codex adapter suite (adapter/policy/lifecycle/bridge
+  specs), the switchboard daemon suite (interaction re-correlation + orphan),
+  and typecheck for both packages. Then run the spend-gated live smoke
+  (CODOR_LIVE_SMOKE) with one approve path and one deny path across at most a
+  couple of turns to confirm a real approval card surfaces and the decision
+  reaches Codex. Run Harn unstaged and staged gates, apply the locked plan, and
+  commit as one implementation transaction on fix/codex-approvals with no push.
+applied:
+  applied_at: 2026-08-01T07:22:54.287Z

@@ -35,10 +35,42 @@ member environment remain unchanged. Exit, crash, or identity mismatch closes
 that transport; the next delivery starts a new process and resumes the same
 thread id.
 
-Codex app-server can issue requests to its client. Runtime approvals remain out
-of scope: every thread/turn uses `approvalPolicy:"never"`, and an unexpected
-`item/commandExecution/requestApproval` or `item/fileChange/requestApproval`
-is explicitly declined rather than parked or converted to a Codor card.
+Codex app-server can issue requests to its client. Runtime approvals ARE
+bridged: non-yolo policies use `approvalPolicy:"on-request"`, so
+`item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+are surfaced as Codor approval cards (`approval.raised`) and parked by their
+native `approvalId` (or `itemId`) until the operator answers via
+`respondInteraction`. Operator choices map to the pinned 0.144.5 v2 decisions:
+allow-once→`accept`, allow-for-session→`acceptForSession`, deny→`decline`; turn
+teardown, client loss, and a request with no matching active turn (a non-null
+`turnId` must exactly equal the established active turn id; a request bearing one
+while the id is still the pre-turn placeholder is rejected) resolve
+`cancel`/`decline`.
+
+`item/permissions/requestApproval` is also bridged as an `approval.raised` card
+that discloses the FULL requested profile (network + every fileSystem shape:
+read/write/entries/globs). allow-once→`{permissions:<requested>,scope:"turn"}`,
+allow-for-session→`scope:"session"`, deny/no-turn/teardown→`{permissions:{},
+scope:"turn"}`; `strictAutoReview` is always false/omitted and never combined
+with session scope.
+
+`mcpServer/elicitation/request` is bridged for `url` mode only, honoring Codex's
+own security boundary: the URL is surfaced only when HTTPS with a host and no
+embedded credentials, framed as untrusted from the named MCP server and kept
+inert (Codor never fetches or previews it); acceptance means the operator
+completed it, not that Codor validated it. Response is the pinned `{action,
+content:null, _meta:null}`: accept/decline by the operator, `cancel` on
+teardown/stale/no-turn (including a between-turn null-`turnId` elicitation), and
+an immediate `decline` for `form`/`openai/form` modes or an unsafe URL. The
+elicitation card carries `serverName` + a stable elicitation id in its semantic
+detail so two simultaneous elicitations never coalesce. Parking for permissions
+and elicitation is keyed collision-proof by the JSON-RPC request id namespaced by
+method + client generation.
+
+`item/tool/requestUserInput` stays UNBRIDGED (experimental; needs a text-input
+card and `capabilities.ask=true`) — the transport's immediate JSON-RPC error is
+converted by 0.144.5 to empty answers rather than blocking. `full-access` stays
+`approvalPolicy:"never"` with `danger-full-access` (--yolo runs unattended).
 
 ## Exact 0.144.5 request shapes
 
@@ -54,8 +86,8 @@ The canonical policy mappings are:
 
 | Codor policy | thread sandbox | turn sandboxPolicy | approvalPolicy |
 | --- | --- | --- | --- |
-| `read-only` | `read-only` | `{type:"readOnly"}` | `never` |
-| `workspace-write` | `workspace-write` | `{type:"workspaceWrite",networkAccess:false}` | `never` |
+| `read-only` | `read-only` | `{type:"readOnly"}` | `on-request` |
+| `workspace-write` | `workspace-write` | `{type:"workspaceWrite",networkAccess:false}` | `on-request` |
 | `full-access` | `danger-full-access` | `{type:"dangerFullAccess"}` | `never` |
 
 Thinking is the 0.144.5 `turn/start.effort` value (`low`, `medium`, `high`,
@@ -145,9 +177,10 @@ evidence only — it never carries usage and never settles a compaction.
   larger provider session surface. A fresh Codor process directly issues
   `thread/resume` for its one persisted member thread.
 - Paseo exposes runtime approvals, steering, goals, rollback, and subagent
-  surfaces. Those are intentionally not added here. Codor keeps its existing
-  spawn-time-only approval capability and no slash routing. Manual compaction is
-  the exception: it is exposed, as an operator-only act (see `compactSession`).
+  surfaces. Codor bridges runtime command/file-change approvals (above) and
+  active-turn steering (live inbox), but goals, rollback, subagents, and slash
+  routing are intentionally not added. Manual compaction is exposed as an
+  operator-only act (see `compactSession`).
 
 The in-memory fake app-server copies Paseo's harness shape: paired PassThrough
 streams, automatic request responses, notification injection, server-request

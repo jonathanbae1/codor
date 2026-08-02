@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Database from 'better-sqlite3';
 
-import { Daemon, RECOVERY_ATTEMPT_CEILING } from './daemon.js';
+import { Daemon, RECOVERY_ATTEMPT_CEILING, interactionKey } from './daemon.js';
 import { FakeAdapter } from './fake-adapter.js';
 import { localSocketPath } from './local-socket.js';
 import { Store } from './store.js';
@@ -6984,3 +6984,113 @@ describe('manual compaction leases out turn admission', () => {
   });
 });
 // harn:end manual-compaction-leases-out-turn-admission
+// harn:assume interaction-recorrelation-keys-on-semantic-identity-with-detail ref=interaction-recorrelation-regression
+describe('interaction re-correlation keys on semantic identity with detail', () => {
+  it('distinguishes cards by detail and ignores the native id', () => {
+    const base = {
+      kind: 'approval' as const,
+      prompt: 'Allow Codex to run a command?',
+      options: [{ label: 'allow once' }, { label: 'deny' }],
+      tool: 'shell',
+    };
+    const a = interactionKey('approval', { ...base, interaction_id: 'n1', detail: 'rm -rf a' });
+    const b = interactionKey('approval', { ...base, interaction_id: 'n2', detail: 'rm -rf b' });
+    // Different command detail -> different key -> two concurrent cards never coalesce.
+    expect(a).not.toBe(b);
+    // Same semantic card, DIFFERENT native id -> same key -> a crash re-raise still
+    // re-correlates to the same row.
+    const sameA = interactionKey('approval', { ...base, interaction_id: 'n3', detail: 'rm -rf a' });
+    expect(sameA).toBe(a);
+  });
+
+  it('re-correlates a pending approval re-raised with a fresh native id (same row, count 1)', async () => {
+    const alpha = spawnAgent('recorrelate-approval');
+    const card = {
+      kind: 'approval' as const,
+      prompt: 'Allow Codex to run a command?',
+      tool: 'shell',
+      detail: 'curl https://example.com',
+      options: [{ label: 'allow once' }, { label: 'deny' }],
+    };
+    fake.enqueue({ kind: 'ask', card, reply: (a) => `did ${String(a)}` });
+    daemon.postHumanMessage('eng', '@recorrelate-approval please');
+    const interaction = await until(() =>
+      daemon.store.listInteractions('eng', 'pending').find((i) => i.member_id === alpha.id),
+    );
+    const nativeBefore = interaction.native_id;
+    await daemon.close({ force: true }); // crash the blocked run
+
+    daemon = newDaemon();
+    fake.enqueue({ kind: 'ask', card, reply: (a) => `did ${String(a)}` });
+    await daemon.reconcile();
+
+    const recorrelated = await until(() => {
+      const i = daemon.store.getInteraction(interaction.id);
+      return i && i.native_id !== nativeBefore ? i : undefined;
+    });
+    expect(recorrelated.state).toBe('pending');
+    // Exactly one row survived: detail-in-key did not break crash re-correlation.
+    expect(daemon.store.listInteractions('eng').filter((i) => i.member_id === alpha.id)).toHaveLength(1);
+  });
+
+  it('orphans a leftover approval card when its run finalizes without re-raising', async () => {
+    const alpha = spawnAgent('orphan-approval');
+    fake.enqueue({
+      kind: 'ask',
+      card: {
+        kind: 'approval',
+        prompt: 'Allow Codex to run a command?',
+        tool: 'shell',
+        detail: 'make deploy',
+        options: [{ label: 'allow once' }, { label: 'deny' }],
+      },
+      reply: (a) => `did ${String(a)}`,
+    });
+    daemon.postHumanMessage('eng', '@orphan-approval please');
+    const interaction = await until(() =>
+      daemon.store.listInteractions('eng', 'pending').find((i) => i.member_id === alpha.id),
+    );
+    await daemon.close({ force: true });
+
+    daemon = newDaemon();
+    // The retried turn does NOT re-raise the approval; it just completes.
+    fake.enqueue({ kind: 'complete', final_text: 'done without asking' });
+    await daemon.reconcile();
+    await daemon.settle();
+
+    expect(await until(() => {
+      const i = daemon.store.getInteraction(interaction.id);
+      return i && i.state === 'orphaned' ? i : undefined;
+    })).toBeDefined();
+  });
+
+  it('two simultaneous elicitations with distinct elicitationId do not coalesce', async () => {
+    const alpha = spawnAgent('elicit-concurrent');
+    const base = {
+      kind: 'approval' as const,
+      prompt: 'MCP server “acme-mcp” asks you to open a link',
+      tool: 'mcp_elicitation',
+      options: [{ label: 'mark completed' }, { label: 'decline' }],
+    };
+    // Identical prompt/tool/options; the ONLY difference is the elicitationId in
+    // the semantic detail. The daemon must keep them as two distinct rows.
+    fake.enqueue({
+      kind: 'multi_ask',
+      cards: [
+        { ...base, detail: 'acme-mcp · https://a.example/one · elic-1' },
+        { ...base, detail: 'acme-mcp · https://a.example/two · elic-2' },
+      ],
+      reply: () => 'both handled',
+    });
+    daemon.postHumanMessage('eng', '@elicit-concurrent please');
+    const pendings = await until(() => {
+      const list = daemon.store.listInteractions('eng', 'pending').filter((i) => i.member_id === alpha.id);
+      return list.length === 2 ? list : undefined;
+    });
+    expect(pendings).toHaveLength(2);
+    expect(new Set(pendings.map((i) => i.message_id)).size).toBe(2);
+    for (const pending of pendings) await daemon.answerInteraction('eng', pending.id, 'mark completed');
+    await daemon.settle();
+  });
+});
+// harn:end interaction-recorrelation-keys-on-semantic-identity-with-detail
