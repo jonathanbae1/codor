@@ -19,18 +19,28 @@ async function installFakeMedia(page: Page): Promise<void> {
       configurable: true,
       value: { getUserMedia: () => Promise.resolve(stream) },
     });
+    // Mirrors mobile WebKit: a context built after the getUserMedia await is born
+    // suspended and drives no frames until resume(). So a take only captures if
+    // startRecording resumes it — the record→send→record-again test relies on this
+    // to catch a regression that drops resume().
     class FakeAudioContext {
+      state = 'suspended';
       sampleRate = 24_000;
       destination = {};
+      resume() { this.state = 'running'; return Promise.resolve(); }
       createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
       createScriptProcessor() {
+        const context = this;
         const node: { onaudioprocess: ((e: unknown) => void) | null; timer: number; connect: () => void; disconnect: () => void } = {
           onaudioprocess: null,
           timer: 0,
           connect() {
-            node.timer = window.setInterval(() => node.onaudioprocess?.({
-              inputBuffer: { getChannelData: () => new Float32Array(2_048).fill(0.4) },
-            }), 40);
+            node.timer = window.setInterval(() => {
+              if (context.state !== 'running') return; // suspended → no frames
+              node.onaudioprocess?.({
+                inputBuffer: { getChannelData: () => new Float32Array(2_048).fill(0.4) },
+              });
+            }, 40);
           },
           disconnect() { window.clearInterval(node.timer); },
         };
@@ -93,6 +103,30 @@ test.describe('composer dictation (v2.1)', () => {
     await expect(card.locator('.nx-voice-card-duration')).toBeVisible();
     await expect(card).toContainText('dictation'); // the real transcript is the body
     expect(await card.innerText()).not.toContain('🎤'); // no marker glyph in the body
+  });
+
+  test('a second recording after a send still captures and posts (re-record)', async ({ page }) => {
+    await openRoom(page);
+
+    // Drive one full take → send → panel closes, mic + context released.
+    const recordAddSend = async (): Promise<void> => {
+      await page.getByTestId('composer-input').fill('@viewer');
+      await page.getByTestId('composer-mic').click();
+      await expect(page.getByTestId('composer-dictation-panel')).toBeVisible();
+      await page.waitForTimeout(250); // ~6 fake frames while running
+      await page.getByTestId('dictation-add').click();
+      // Captured frames → several waveform bars; a suspended (unresumed) context
+      // would yield the single fallback bar, so >1 proves the take really recorded.
+      const bars = page.locator('[data-testid="dictation-segment-0"] .nx-miniwave-bar');
+      await expect.poll(async () => bars.count()).toBeGreaterThan(1);
+      await page.getByTestId('dictation-send').click();
+      await expect(page.getByTestId('composer-input')).toBeVisible(); // posted, panel closed
+    };
+
+    await recordAddSend();
+    const afterFirst = await page.locator('[data-testid^="voice-card-"]').count();
+    await recordAddSend(); // the regression: this used to sit silent and never record
+    await expect(page.locator('[data-testid^="voice-card-"]')).toHaveCount(afterFirst + 1);
   });
 
   test('cancel during recording and discard-all post nothing and never upload', async ({ page }) => {

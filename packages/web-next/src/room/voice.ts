@@ -45,6 +45,9 @@ export async function transcribeVoice(token: string, wav: Uint8Array): Promise<s
 
 export const VOICE_SAMPLE_RATE = 24_000;
 export const MAX_RECORDING_MS = 60_000;
+/** Bound the mic acquisition so a hung getUserMedia can't pin a take forever.
+ *  Generous — a first-time permission prompt must never falsely trip it. */
+export const ACQUIRE_TIMEOUT_MS = 15_000;
 
 /** Linear resample of mono Float32 PCM from one rate to another. */
 function resample(input: Float32Array, from: number, to: number): Float32Array {
@@ -138,10 +141,20 @@ export function downsampleLevels(levels: number[], max = VOICE_MAX_LEVELS): numb
   return out;
 }
 
+// The previous take's context.close() promise. A fresh startRecording awaits it
+// before opening the mic so an un-awaited close from the prior take cannot leave
+// the iOS microphone busy and stall (or reject) the next getUserMedia.
+let pendingRelease: Promise<void> | undefined;
+
 /** Open the mic and capture mono PCM until stop()/cancel(), emitting a live RMS
  *  level per buffer (~12–23 Hz) for the waveform. Prefers a 24 kHz context, else
  *  captures at the device rate and resamples on encode. */
 export const startRecording: StartRecording = async (onLevel) => {
+  // Let the prior context finish closing so the mic is actually freed first.
+  if (pendingRelease) {
+    await pendingRelease.catch(() => {});
+    pendingRelease = undefined;
+  }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const Ctor = window.AudioContext
     ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -150,6 +163,14 @@ export const startRecording: StartRecording = async (onLevel) => {
     context = new Ctor({ sampleRate: VOICE_SAMPLE_RATE });
   } catch {
     context = new Ctor();
+  }
+  // A context constructed after the getUserMedia await is outside the user
+  // gesture, so mobile WebKit births it suspended and onaudioprocess never fires;
+  // resume() starts it. Guarded — a reject must not abort the take.
+  try {
+    await context.resume?.();
+  } catch {
+    // Ignore: capture can still proceed once the live input drives the graph.
   }
   const source = context.createMediaStreamSource(stream);
   // A 2048-sample buffer keeps the level cadence lively (~12 Hz at 24 kHz).
@@ -168,7 +189,9 @@ export const startRecording: StartRecording = async (onLevel) => {
     source.disconnect();
     processor.onaudioprocess = null;
     stream.getTracks().forEach((track) => track.stop());
-    void context.close();
+    // Stay sync (cancel() is void) but expose the close so the next acquisition
+    // waits for it — an un-awaited close can keep the iOS mic busy.
+    pendingRelease = Promise.resolve(context.close()).catch(() => {});
   };
 
   return {
@@ -197,6 +220,13 @@ function captureErrorMessage(error: unknown): string {
   }
   if (name === 'NotFoundError') return 'No microphone was found.';
   return error instanceof Error ? error.message : 'Could not start recording.';
+}
+
+/** The acquisition-timeout error; its message is shown on the failed take chip. */
+function micTimeoutError(): Error {
+  const error = new Error('The microphone didn’t start — tap the mic to try again.');
+  error.name = 'TimeoutError';
+  return error;
 }
 
 export interface DictationTimers {
@@ -287,6 +317,37 @@ export class DictationSession {
     }
   }
 
+  /** Open the mic, but bound the wait: a getUserMedia that rejects surfaces its
+   *  error, and one that never resolves times out (mobile can hang here) instead
+   *  of pinning the take in 'recording'. A handle that arrives after the timeout
+   *  is cancelled so a late acquisition never leaks a live mic. */
+  private acquire(collect: LevelListener): Promise<RecordingHandle> {
+    const begun = this.begin(collect);
+    return new Promise<RecordingHandle>((resolve, reject) => {
+      let settled = false;
+      const timer = this.timers.set(() => {
+        if (settled) return;
+        settled = true;
+        void begun.then((handle) => { handle.cancel(); }).catch(() => {});
+        reject(micTimeoutError());
+      }, ACQUIRE_TIMEOUT_MS);
+      begun.then(
+        (handle) => {
+          if (settled) { handle.cancel(); return; }
+          settled = true;
+          this.timers.clear(timer);
+          resolve(handle);
+        },
+        (error) => {
+          if (settled) return;
+          settled = true;
+          this.timers.clear(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
   /** Begin a new take. No-op while one is already recording (earlier takes may
    *  still be transcribing). */
   async startTake(): Promise<void> {
@@ -302,7 +363,7 @@ export class DictationSession {
     };
     let handle: RecordingHandle;
     try {
-      handle = await this.begin(collect);
+      handle = await this.acquire(collect);
     } catch (error) {
       this.recordingId = undefined;
       this.update(id, { state: 'failed', error: captureErrorMessage(error) });
