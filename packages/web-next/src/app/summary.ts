@@ -31,6 +31,7 @@ export async function fetchSummaries(token: string): Promise<RoomSummary[]> {
  */
 export function useRoomSummaries(token: () => string): RoomSummary[] {
   const rooms = useClientStore((state) => state.rooms);
+  const managedCold = useClientStore((state) => state.roomSummaries);
   const [cold, setCold] = useState<RoomSummary[]>(primed ?? []);
 
   useEffect(() => {
@@ -63,7 +64,8 @@ export function useRoomSummaries(token: () => string): RoomSummary[] {
   }, [token]);
 
   return useMemo(() => {
-    const byId = new Map(cold.map((summary) => [summary.id, summary]));
+    const base = managedCold.length > 0 ? managedCold : cold;
+    const byId = new Map(base.map((summary) => [summary.id, summary]));
     for (const slice of Object.values(rooms)) {
       if (slice.support !== undefined) {
         byId.set(slice.support.room, slice.support.summary);
@@ -80,5 +82,5 @@ export function useRoomSummaries(token: () => string): RoomSummary[] {
       }
     }
     return [...byId.values()];
-  }, [cold, rooms]);
+  }, [cold, managedCold, rooms]);
 }

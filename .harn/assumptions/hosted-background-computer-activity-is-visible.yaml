@@ -1,0 +1,13 @@
+id: hosted-background-computer-activity-is-visible
+hash: a-a89e44f02035
+title: Inactive hosted computers continue producing honest activity summaries
+state: active
+statement: Each inactive hosted connector must consume its existing rooms and
+  room-support frames into its isolated store and expose only an aggregate
+  connection state, unread total, attention flag and working count to the
+  computer switcher, so activity elsewhere is visible without mixing full
+  channel state or adding a notification protocol.
+depends_on:
+  - hosted-app-keeps-all-paired-computers-live
+  - hosted-computer-sessions-keep-state-isolated
+created_by: relay-live-computers-p2-sessions

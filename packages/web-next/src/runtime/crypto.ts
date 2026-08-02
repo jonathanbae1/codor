@@ -18,7 +18,9 @@ import {
   hydrateActive,
   listComputers,
   migrateIfNeeded,
+  persistActiveComputerRoom,
   recordPairedComputer,
+  readComputerMaterial,
   renameComputer,
   switchToComputer,
 } from './relay-store.js';
@@ -46,7 +48,7 @@ export interface StoredBrowserAccess {
   token?: string;
 }
 
-interface BrowserPeer extends BrowserPublicIdentity {
+export interface BrowserPeer extends BrowserPublicIdentity {
   kind: 'device' | 'switchboard';
   label?: string;
 }
@@ -290,6 +292,12 @@ export interface StoredRelayRecord {
   dial_url?: string;
 }
 
+export interface HostedComputerMaterial {
+  computer: RelayComputer;
+  relay: StoredRelayRecord;
+  switchboard: BrowserPeer;
+}
+
 export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined> {
   return readState<StoredRelayRecord>('relay');
 }
@@ -309,6 +317,25 @@ export async function hydrateActiveRelay(): Promise<StoredRelayRecord | undefine
   });
   await hydrateActive(browserKv);
   return readState<StoredRelayRecord>('relay');
+}
+
+/** Load every indexed generation without copying any of them through the shared
+ *  active-cache slots. Each hosted session receives only its own material. */
+export async function loadHostedComputerMaterials(): Promise<HostedComputerMaterial[]> {
+  const legacyPeer = await readState<BrowserPeer>('peer:switchboard');
+  await migrateIfNeeded(browserKv, {
+    id: legacyPeer?.device_id ?? 'legacy',
+    label: 'Computer 1',
+    paired_at: new Date().toISOString(),
+  });
+  const index = await listComputers(browserKv);
+  const loaded = await Promise.all(index.computers.map((computer) => readComputerMaterial(browserKv, computer.id)));
+  return loaded.flatMap((material) => {
+    if (!material) return [];
+    const switchboard = material.peer as BrowserPeer;
+    if (switchboard.kind !== 'switchboard') return [];
+    return [{ computer: material.computer, relay: material.relay as StoredRelayRecord, switchboard }];
+  });
 }
 
 /** The paired computers + the active id, for the switcher UI. */
@@ -570,11 +597,21 @@ export function tryTrustedBrowserPairing(origin = window.location.origin): Promi
 
 // harn:assume paired-browser-challenge-session ref=browser-session-signin
 export async function openBrowserDeviceSession(origin = window.location.origin): Promise<string | undefined> {
-  await sodium.ready;
   const switchboard = await readState<BrowserPeer>('peer:switchboard');
   if (switchboard?.kind !== 'switchboard') return undefined;
+  return openBrowserDeviceSessionWith(switchboard, relayFetch, origin);
+}
+
+/** Authenticate one indexed computer over its own tunnel. The switchboard
+ *  identity and request function are session-owned, never active globals. */
+export async function openBrowserDeviceSessionWith(
+  switchboard: BrowserPeer,
+  request: (url: string, init?: RequestInit) => Promise<Response>,
+  origin: string,
+): Promise<string> {
+  await sodium.ready;
   const identity = await requiredIdentity();
-  const challengeResponse = await relayFetch(`${origin}/api/auth/challenge`, {
+  const challengeResponse = await request(`${origin}/api/auth/challenge`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ device_id: identity.device_id }),
@@ -609,7 +646,7 @@ export async function openBrowserDeviceSession(origin = window.location.origin):
     challengeBytes(challenge),
     decode(identity.sign_secret_key),
   ));
-  const sessionResponse = await relayFetch(`${origin}/api/auth/session`, {
+  const sessionResponse = await request(`${origin}/api/auth/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ challenge_id: challenge.challenge_id, signature }),
@@ -675,7 +712,10 @@ export async function persistBrowserRoomKey(
   }
   const current = await storedBrowserRoomKey(room);
   if (current && current.generation > generation) return;
-  await writeState(`room:${room}`, { room, generation, key: encode(key) } satisfies StoredBrowserRoomKey);
+  const value = { room, generation, key: encode(key) } satisfies StoredBrowserRoomKey;
+  if (!await persistActiveComputerRoom(browserKv, room, value)) {
+    await writeState(`room:${room}`, value);
+  }
 }
 
 export async function storeBrowserAccess(access: StoredBrowserAccess): Promise<void> {

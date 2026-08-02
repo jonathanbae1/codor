@@ -1,8 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 
 import { SESSION_COPY, SESSION_REPAIR_HINT, SESSION_TERMINAL_COPY, type SessionConnectionState } from '../app/connection-state.js';
 import { forgetRelayPairing } from '../runtime/crypto.js';
 import { relayActive } from '../runtime/relay-mode.js';
+import { computerSessions, type ComputerSessionsSnapshot } from '../app/computer-sessions.js';
 
 export type RecoveryState = Exclude<SessionConnectionState, 'online'>;
 
@@ -10,9 +11,22 @@ function retryNow(): void {
   window.location.reload();
 }
 
-async function repair(): Promise<void> {
+const EMPTY_COMPUTERS: ComputerSessionsSnapshot = { computers: [] };
+const noComputerSubscription = (): (() => void) => () => undefined;
+
+async function repair(onComputerSwitch?: () => void | Promise<void>): Promise<void> {
+  const manager = computerSessions();
+  const activeId = manager?.getSnapshot().activeId;
+  if (manager && activeId) {
+    await manager.forget(activeId);
+    if (manager.active()) {
+      await onComputerSwitch?.();
+      return;
+    }
+  } else {
+    await forgetRelayPairing();
+  }
   // Forget ONLY the relay record (not the nuclear unpair) → reload into code entry.
-  await forgetRelayPairing();
   window.location.assign('/');
 }
 
@@ -30,10 +44,18 @@ async function repair(): Promise<void> {
 export function RecoveryCard({
   state,
   presentation = 'overlay',
+  onComputerSwitch,
 }: {
   state: RecoveryState;
   presentation?: 'overlay' | 'fullscreen';
+  onComputerSwitch?: () => void | Promise<void>;
 }): ReactNode {
+  const manager = computerSessions();
+  const computers = useSyncExternalStore(
+    manager?.subscribe ?? noComputerSubscription,
+    manager?.getSnapshot ?? (() => EMPTY_COMPUTERS),
+    () => EMPTY_COMPUTERS,
+  );
   const overlay = presentation === 'overlay';
   // Overlay keeps the auto-retry framing (a live connector retries beneath it); the
   // boot card is terminal, so it points at the manual Retry instead.
@@ -94,12 +116,37 @@ export function RecoveryCard({
             type="button"
             className={state === 'pairing-dead' ? 'nx-btn is-primary' : 'nx-btn'}
             data-testid="recovery-repair"
-            onClick={() => { void repair(); }}
+            onClick={() => { void repair(onComputerSwitch); }}
           >
             Re-pair this browser
           </button>
         ) : null}
       </div>
+      {/* harn:assume hosted-offline-recovery-offers-other-computers ref=multi-computer-recovery-exit */}
+      {manager && computers.computers.length > 1 ? (
+        <div data-testid="recovery-computers">
+          <p>Or open another paired computer:</p>
+          {[...computers.computers]
+            .filter((computer) => !computer.active)
+            .sort((left, right) => Number(right.connected) - Number(left.connected))
+            .map((computer) => (
+              <button
+                key={computer.id}
+                type="button"
+                className="nx-btn"
+                data-testid={`recovery-computer-${computer.id}`}
+                onClick={() => {
+                  void manager.activate(computer.id).then(async (activated) => {
+                    if (activated) await onComputerSwitch?.();
+                  });
+                }}
+              >
+                {computer.label}{computer.connected ? ' · Connected' : ' · Reconnecting'}
+              </button>
+            ))}
+        </div>
+      ) : null}
+      {/* harn:end hosted-offline-recovery-offers-other-computers */}
     </section>
   );
 

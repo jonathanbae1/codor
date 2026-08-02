@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   HISTORY_PAGE_SIZE,
+  createClientStore,
   resetClientStoreForTest,
   roomSlice,
   useClientStore,
@@ -42,6 +43,30 @@ const frame = (value: unknown): ServerFrame => value as ServerFrame;
 afterEach(resetClientStoreForTest);
 
 describe('room-keyed client state', () => {
+  it('keeps same-named room hydration staging isolated across computer stores', () => {
+    const a = createClientStore();
+    const b = createClientStore();
+    a.getState().applyFrame(frame({ type: 'self', room: 'shared', member_id: 'human-a' }));
+    b.getState().applyFrame(frame({ type: 'self', room: 'shared', member_id: 'human-b' }));
+    a.getState().applyFrame(frame({ type: 'room', seq: 0, room: { ...room('shared'), name: 'Room A' } }));
+    b.getState().applyFrame(frame({ type: 'room', seq: 0, room: { ...room('shared'), name: 'Room B' } }));
+    a.getState().applyFrame(frame({ type: 'message', seq: 1, message: { ...message('shared', 1), body: 'A only' } }));
+    b.getState().applyFrame(frame({ type: 'message', seq: 1, message: { ...message('shared', 1), body: 'B only' } }));
+    a.getState().applyFrame(frame({ type: 'sync_complete', room: 'shared', seq: 1 }));
+    b.getState().applyFrame(frame({ type: 'sync_complete', room: 'shared', seq: 1 }));
+
+    expect(roomSlice(a.getState(), 'shared')).toMatchObject({
+      selfMemberId: 'human-a',
+      room: { name: 'Room A' },
+      messages: { 1: { body: 'A only' } },
+    });
+    expect(roomSlice(b.getState(), 'shared')).toMatchObject({
+      selfMemberId: 'human-b',
+      room: { name: 'Room B' },
+      messages: { 1: { body: 'B only' } },
+    });
+  });
+
   it('commits concurrent room snapshots independently and does not wait for support', () => {
     const store = useClientStore.getState();
     store.applyFrame(frame({ type: 'self', room: 'alpha', member_id: 'alpha-human' }));

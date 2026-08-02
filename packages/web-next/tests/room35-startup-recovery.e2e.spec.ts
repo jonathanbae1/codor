@@ -22,6 +22,44 @@ async function pasteCode(page: Page, code: string): Promise<void> {
 }
 
 test.describe('startup recovery (boot path)', () => {
+  test('an offline active host cannot hide a warm alternative after bounded boot', async ({ page }) => {
+    test.setTimeout(180_000);
+    await control('/relay-up');
+    await control('/relay-up-b');
+    const a = await control<{ code: string; relayUrl: string }>('/relay-pair');
+    await page.addInitScript((url) => {
+      (window as unknown as { __CODOR_RELAY_URL?: string }).__CODOR_RELAY_URL = url;
+    }, a.relayUrl);
+    await page.goto(`${SPA_ORIGIN}/`);
+    await pasteCode(page, a.code);
+    await page.getByTestId('pairing-code-submit').click();
+    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1', { timeout: 30_000 });
+
+    const b = await control<{ code: string }>('/relay-pair-b');
+    await page.getByTestId('computer-current').click();
+    await page.getByTestId('computer-add').click();
+    await pasteCode(page, b.code);
+    await page.getByTestId('pairing-code-submit').click();
+    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2', { timeout: 30_000 });
+
+    // Persist A as active, then boot with only A absent. Both session retry loops
+    // start, B becomes warm, and the first bounded A failure exposes B.
+    await page.getByTestId('computer-current').click();
+    await page.locator('.nx-computer-menu li', { hasText: 'Computer 1' }).getByRole('button').first().click();
+    await expect(page.getByTestId('computer-current')).toHaveText('Computer 1');
+    await control('/relay-down-a-only');
+    await page.reload();
+    await expect(page.getByTestId('recovery')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: /Computer 2 · Connected/ })).toBeVisible();
+
+    await page.evaluate(() => { (window as unknown as { __bootRecoveryDocument?: boolean }).__bootRecoveryDocument = true; });
+    await page.getByRole('button', { name: /Computer 2 · Connected/ }).click();
+    await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
+    await expect(page.getByTestId('computer-current')).toHaveText('Computer 2');
+    expect(await page.evaluate(() => (window as unknown as { __bootRecoveryDocument?: boolean }).__bootRecoveryDocument)).toBe(true);
+    await control('/relay-up');
+  });
+
   test('a paired relay browser booting against a down host shows the recovery card, not landing', async ({ page }) => {
     test.setTimeout(120_000);
     await control('/relay-up');

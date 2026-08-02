@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createConnector } from './connector.js';
-import { useClientStore } from './store.js';
+import { createClientStore, useClientStore } from './store.js';
 
 /**
  * A socket that stays OPEN unless something retires it — the shape a frozen tab
@@ -71,6 +71,25 @@ afterEach(() => {
 });
 
 describe('connector resume', () => {
+  it('writes only the injected computer store and token sink', () => {
+    const isolated = createClientStore();
+    const setToken = vi.fn((token: string) => token);
+    const connector = createConnector({
+      room: 'shared',
+      token: 'computer-token',
+      store: isolated,
+      setToken,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    latest().accept();
+    expect(isolated.getState().connected).toBe(true);
+    expect(useClientStore.getState().connected).toBe(false);
+    latest().drop(4403);
+    expect(isolated.getState().authRefused).toBe(true);
+    expect(setToken).toHaveBeenCalledWith('');
+    connector.dispose();
+  });
+
   it('replaces an apparently-open socket and retires the old generation', async () => {
     const connector = build();
     const first = latest();

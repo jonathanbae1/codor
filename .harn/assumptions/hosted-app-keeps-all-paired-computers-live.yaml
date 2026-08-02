@@ -1,0 +1,13 @@
+id: hosted-app-keeps-all-paired-computers-live
+hash: a-a9cf2d6bfa7a
+title: A hosted tab keeps every paired computer connected while it is open
+state: active
+statement: A codor.app tab with multiple paired computers must start one
+  existing relay tunnel, signed browser session, and app WebSocket for every
+  indexed computer concurrently and keep each reconnecting until forgotten or
+  page teardown, while a direct switchboard-served app keeps its single existing
+  connector, because an operator must not pay a fresh relay connection delay
+  whenever they change computers.
+depends_on:
+  - paired-browser-challenge-session
+created_by: relay-live-computers-p2-sessions

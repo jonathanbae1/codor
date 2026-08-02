@@ -1,0 +1,161 @@
+id: relay-live-computers-p2-sessions
+title: Relay live-computers phase 2 - keep every paired computer warm and isolated
+notes: >
+  Second approved phase of Richard's relay usability work, after reviewed phase
+  1. The hosted app currently hydrates one archive generation into global slots,
+  owns one TunnelClient, one relay transport and one Zustand store, then reloads
+  to switch computers. Replace only that hosted singleton composition with a
+  small per-tab ComputerSessionManager: one existing tunnel, signed device
+  session, injected client store and existing room connector per paired
+  computer. Start them concurrently, keep inactive sessions warm, swap the
+  active transport/token/store/connector in place, and surface enough background
+  summary state for recovery and the existing switcher. The immutable generation
+  index remains persistence truth; same-named rooms and credentials must never
+  cross stores. Direct/self-hosted mode remains today's one-connector path. No
+  protocol, relay-worker, account, cloud registry or push-backend change. Sol
+  implements; investigator reviews isolation and lifecycle before phase 3.
+assumptions:
+  create:
+    - id: hosted-app-keeps-all-paired-computers-live
+      title: A hosted tab keeps every paired computer connected while it is open
+      statement: A codor.app tab with multiple paired computers must start one
+        existing relay tunnel, signed browser session, and app WebSocket for
+        every indexed computer concurrently and keep each reconnecting until
+        forgotten or page teardown, while a direct switchboard-served app keeps
+        its single existing connector, because an operator must not pay a fresh
+        relay connection delay whenever they change computers.
+      reason: Concurrent warm sessions are the smallest way to make switching
+        immediate and to observe activity on inactive computers without adding a
+        server-side computer registry.
+      depends_on:
+        - paired-browser-challenge-session
+    - id: hosted-computer-sessions-keep-state-isolated
+      title: Concurrent computer sessions keep credentials and channel state isolated
+      statement: Each hosted computer session must read only its indexed archive
+        generation and own its token, tunnel, connector and client store, so
+        credentials, cursors, messages, room keys and even identical room ids
+        from one computer cannot enter another computer's state while sessions
+        run concurrently.
+      reason: The existing archive-generation isolation must remain true in memory
+        once more than one computer is connected at the same time.
+      depends_on:
+        - hosted-app-keeps-all-paired-computers-live
+    - id: hosted-computer-switching-reuses-warm-session
+      title: Hosted computer switching activates an existing warm session in place
+      statement: Selecting another paired computer must atomically persist and hydrate
+        that indexed generation, point active REST and UI state at its
+        already-running token, tunnel, connector and store, and restore its last
+        valid room without reloading the document or closing other computer
+        sessions, because switching should be immediate and reversible.
+      reason: A reload would discard the warm sessions and recreate the delay this
+        phase exists to remove.
+      depends_on:
+        - hosted-app-keeps-all-paired-computers-live
+        - hosted-computer-sessions-keep-state-isolated
+    - id: hosted-offline-recovery-offers-other-computers
+      title: An offline hosted computer cannot trap the operator in recovery
+      statement: When the active hosted computer fails its first bounded startup or
+        becomes unavailable mid-session, recovery must keep all computer
+        sessions running and offer every other paired computer, with connected
+        alternatives first, so choosing one returns to its warm app state
+        without retrying or repairing the offline computer.
+      reason: Retry and re-pair are not the only valid recovery actions when a
+        different paired computer is already reachable.
+      depends_on:
+        - hosted-computer-switching-reuses-warm-session
+    - id: hosted-background-computer-activity-is-visible
+      title: Inactive hosted computers continue producing honest activity summaries
+      statement: Each inactive hosted connector must consume its existing rooms and
+        room-support frames into its isolated store and expose only an aggregate
+        connection state, unread total, attention flag and working count to the
+        computer switcher, so activity elsewhere is visible without mixing full
+        channel state or adding a notification protocol.
+      reason: The existing socket summaries already carry the information needed for
+        in-app other-computer notifications while codor.app is open.
+      depends_on:
+        - hosted-app-keeps-all-paired-computers-live
+        - hosted-computer-sessions-keep-state-isolated
+  reviewed:
+    - id: paired-browser-challenge-session
+      outcome: unchanged
+      reason: Every computer still obtains only a bounded in-memory token by signing
+        its switchboard challenge; the same proof is parameterized by computer
+        material and tunnel rather than routed through active globals.
+    - id: pwa-cold-launch-restores-local-auth
+      outcome: unchanged
+      reason: Cold launch still restores persisted authorization without URL
+        credentials; hosted mode now restores one isolated device session per
+        indexed computer and selects the persisted active one for the UI.
+    - id: push-decrypts-on-device-only
+      outcome: unchanged
+      reason: Background activity uses existing live app-WebSocket summaries.
+        Service-worker decryption, push payloads and closed-app Web Push are not
+        changed by this phase.
+    - id: unpair-purges-all-browser-state
+      outcome: unchanged
+      reason: Full browser unpair remains the existing nuclear cleanup. Per-computer
+        forget disposes only that manager entry and its indexed generation.
+    - id: settings-navigation-reuses-live-session
+      outcome: unchanged
+      reason: Settings continues to receive the currently active mounted connector;
+        changing computers changes which warm connector is active without adding
+        Settings navigation bootstrap.
+files:
+  - packages/web-next/src/main.tsx
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/src/app/computer-sessions.spec.ts
+  - packages/web-next/src/app/connector.ts
+  - packages/web-next/src/app/connector.spec.ts
+  - packages/web-next/src/app/session.ts
+  - packages/web-next/src/app/startup.ts
+  - packages/web-next/src/app/startup-retry.spec.ts
+  - packages/web-next/src/app/store.ts
+  - packages/web-next/src/app/store.spec.ts
+  - packages/web-next/src/app/summary.ts
+  - packages/web-next/src/runtime/crypto.ts
+  - packages/web-next/src/runtime/relay-mode.ts
+  - packages/web-next/src/runtime/relay-transport.ts
+  - packages/web-next/src/runtime/relay-store.ts
+  - packages/web-next/src/runtime/relay-store.spec.ts
+  - packages/web-next/src/room/RoomPage.tsx
+  - packages/web-next/src/room/ComputerSwitcher.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.tsx
+  - packages/web-next/src/surfaces/RecoveryCard.spec.tsx
+  - packages/web-next/src/surfaces/RecoveryOverlay.tsx
+  - packages/web-next/tests/harness.mjs
+  - packages/web-next/tests/room33-recovery.e2e.spec.ts
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+  - packages/web-next/tests/room35-startup-recovery.e2e.spec.ts
+anchors:
+  hosted-app-keeps-all-paired-computers-live:
+    computer-session-lifecycle:
+      action: change
+      reason: Add the hosted-only manager that starts, retries and disposes one
+        existing session stack per indexed computer.
+  hosted-computer-sessions-keep-state-isolated:
+    per-computer-session-state:
+      action: change
+      reason: Parameterize archive reads, auth, connector stores and React store
+        selection so concurrent sessions cannot share credentials or room state.
+  hosted-computer-switching-reuses-warm-session:
+    warm-computer-activation:
+      action: change
+      reason: Activate the persisted generation and existing session in place,
+        preserving per-computer room selection and the other live sessions.
+  hosted-offline-recovery-offers-other-computers:
+    multi-computer-recovery-exit:
+      action: change
+      reason: Make both boot and overlay recovery expose warm alternatives without
+        stopping the offline computer's retry loop.
+  hosted-background-computer-activity-is-visible:
+    background-computer-summary:
+      action: change
+      reason: Derive the small per-computer connection/unread/attention/working
+        summary from each isolated live store for functional switcher coverage.
+  settings-navigation-reuses-live-session:
+    mounted-settings-route:
+      action: change
+      reason: RoomPage changes from one connector ref to the active managed connector,
+        while Settings must still reuse that mounted connection.
+applied:
+  applied_at: 2026-08-02T14:28:51.954Z
