@@ -62,6 +62,85 @@ body {
 .nx-upgrade-card h1 { margin: 0; font: var(--t-heading); letter-spacing: -0.025em; }
 .nx-upgrade-card > p { margin: 0; color: var(--c-secondary); line-height: 1.6; }
 
+/* Relay entry: the Codor mark travels through two offset orbits while bootstrap
+ * resolves the encrypted session. Only transforms and opacity animate so the
+ * first paint stays smooth on phones; the global reduced-motion rule freezes it. */
+.nx-relay-entry-card {
+  position: relative;
+  justify-items: center;
+  width: min(100%, 520px);
+  gap: 14px;
+  padding-block: clamp(42px, 8vw, 62px);
+  overflow: hidden;
+  text-align: center;
+}
+.nx-relay-entry-card::before {
+  content: '';
+  position: absolute;
+  inset: -45% 8% auto;
+  height: 260px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--c-agent) 14%, transparent);
+  filter: blur(48px);
+}
+.nx-relay-entry-card > * { position: relative; }
+.nx-relay-loader {
+  width: 142px;
+  height: 142px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+}
+.nx-relay-logo {
+  width: 54px;
+  height: 54px;
+  background: var(--c-ink);
+  mask: url('/codor-mark.svg') center / contain no-repeat;
+  animation: nx-relay-breathe 2.2s ease-in-out infinite;
+}
+.nx-relay-orbit {
+  position: absolute;
+  inset: 14px;
+  border: 1px solid color-mix(in srgb, var(--c-agent) 34%, var(--c-line));
+  border-radius: 50%;
+  animation: nx-relay-orbit 3.4s linear infinite;
+}
+.nx-relay-orbit.is-inner {
+  inset: 27px;
+  border-style: dashed;
+  opacity: 0.55;
+  animation-duration: 2.6s;
+  animation-direction: reverse;
+}
+.nx-relay-orbit i {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-agent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--c-agent) 72%, transparent);
+}
+.nx-relay-orbit.is-inner i { top: auto; right: 9px; bottom: 5px; left: auto; width: 6px; height: 6px; background: var(--c-live); }
+.nx-relay-entry-card h1 { font-size: clamp(30px, 7vw, 42px); text-wrap: balance; }
+.nx-relay-entry-card > p[role='status'] { max-width: 360px; text-wrap: balance; }
+.nx-relay-progress { display: flex; gap: 6px; min-height: 10px; margin-top: 4px; }
+.nx-relay-progress i { width: 6px; height: 6px; border-radius: 50%; background: var(--c-agent); animation: nx-relay-step 1.2s ease-in-out infinite; }
+.nx-relay-progress i:nth-child(2) { animation-delay: 150ms; }
+.nx-relay-progress i:nth-child(3) { animation-delay: 300ms; }
+
+@keyframes nx-relay-orbit { to { transform: rotate(360deg); } }
+@keyframes nx-relay-breathe {
+  0%, 100% { transform: scale(0.94); opacity: 0.76; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+@keyframes nx-relay-step {
+  0%, 100% { transform: translateY(0); opacity: 0.3; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
 /* The recovery card is a true overlay: it floats above the still-mounted app
  * (whose connector keeps reconnecting beneath it) rather than replacing it. */
 .nx-recovery-overlay {

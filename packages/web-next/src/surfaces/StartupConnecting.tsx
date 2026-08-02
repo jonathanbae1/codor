@@ -49,16 +49,22 @@ export function StartupConnecting() {
   const copy = escalated
     ? SESSION_COPY[state]
     : {
-        title: 'Reaching your channels…',
-        body: 'Restoring the secure connection to your Codor and loading your channels. This can take a moment if the host is reconnecting.',
+        title: 'Entering the relay…',
+        body: 'Finding your Codor and bringing your channels online.',
       };
 
   return (
     <main className="nx-upgrade" data-testid="startup-connecting" data-connecting-state={escalated ? state : 'connecting'}>
-      <section className="nx-upgrade-card" aria-labelledby="startup-connecting-title" aria-busy="true">
-        <p className="nx-eyebrow">{state === 'device-offline' ? 'Offline' : 'Connecting'}</p>
+      <section className="nx-upgrade-card nx-relay-entry-card" aria-labelledby="startup-connecting-title" aria-busy="true">
+        <div className="nx-relay-loader" aria-hidden="true">
+          <span className="nx-relay-orbit is-outer"><i /></span>
+          <span className="nx-relay-orbit is-inner"><i /></span>
+          <span className="nx-relay-logo" />
+        </div>
+        <p className="nx-eyebrow">{state === 'device-offline' ? 'Offline' : 'Secure handoff'}</p>
         <h1 id="startup-connecting-title">{copy.title}</h1>
         <p role="status">{copy.body}</p>
+        {!escalated && <span className="nx-relay-progress" aria-hidden="true"><i /><i /><i /></span>}
       </section>
     </main>
   );
