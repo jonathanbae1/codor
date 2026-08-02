@@ -1,0 +1,52 @@
+id: relay-live-computers-p1-settings
+title: Relay live-computers phase 1 - open Settings on the mounted room session
+notes: >
+  First phase of Richard's relay multi-computer usability request. Selecting
+  Settings currently hard-navigates to /settings, repeats hosted bootstrap and
+  relay/device authentication, and creates a second RoomConnector. Keep the
+  mounted RoomPage connector instead: present Settings as an in-app route,
+  update history without reloading, and let direct cold /settings still resolve
+  a real room and mount the same shell in its Settings state. This phase changes
+  no Settings controls, relay transport, pairing, or multi-computer persistence.
+  Luna implements after Richard approves; investigator reviews before phase 2.
+assumptions:
+  create:
+    - id: settings-navigation-reuses-live-session
+      title: Settings navigation reuses the mounted live room session
+      statement: Selecting Settings from a mounted room must show the Settings surface
+        and update browser history without reloading the document, repeating
+        relay bootstrap, or creating another room connector, while a direct cold
+        visit to /settings still resolves a real authorized room and Back or
+        Forward restores the matching surface, because operational settings
+        should be immediately reachable without disrupting the live computer
+        connection.
+      reason: Settings is local navigation within one connected app; redoing the relay
+        handshake makes a routine view change slow and disruptive.
+      depends_on:
+        - pwa-cold-launch-restores-local-auth
+        - web-settings-controls-preserve-product-truth
+  reviewed:
+    - id: pwa-cold-launch-restores-local-auth
+      outcome: unchanged
+      reason: Cold /settings still restores auth once; only navigation from an
+        already-mounted room stops repeating bootstrap.
+    - id: web-settings-controls-preserve-product-truth
+      outcome: unchanged
+      reason: Appearance, notifications, brakes, devices, privacy, and their
+        operational claims are not changed; Settings receives the existing live
+        connector rather than constructing a replacement.
+files:
+  - packages/web-next/src/main.tsx
+  - packages/web-next/src/room/RoomPage.tsx
+  - packages/web-next/src/surfaces/SettingsPage.tsx
+  - packages/web-next/tests/room2-interactions.e2e.spec.ts
+  - packages/web-next/tests/room26-pwa-start.e2e.spec.ts
+  - packages/web-next/tests/room6-settings.e2e.spec.ts
+anchors:
+  settings-navigation-reuses-live-session:
+    mounted-settings-route:
+      action: change
+      reason: Add the in-app Settings route, connector reuse, and History API behavior
+        together with its regression proof.
+applied:
+  applied_at: 2026-08-02T13:49:37.669Z

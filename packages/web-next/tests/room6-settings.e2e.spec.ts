@@ -7,6 +7,16 @@ async function openSettings(page: Page): Promise<void> {
   await expect(page.locator('.nx-settings-head h1')).toHaveText('Settings');
 }
 
+test('settings reached from a mounted room keeps its existing controls', async ({ page }) => {
+  await page.goto('/?room=eng&token=next-e2e-token');
+  await expect(page.getByTestId('timeline')).toBeVisible();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.locator('.nx-settings-head h1')).toHaveText('Settings');
+  await expect(page.getByTestId('brake-turn-toggle')).toBeVisible();
+  await expect(page.getByTestId('brake-spend-toggle')).toBeVisible();
+  await expect(page.getByTestId('device-list')).toBeVisible();
+});
+
 test.describe('appearance', () => {
   test('the theme choice applies immediately and persists', async ({ page }) => {
     await openSettings(page);

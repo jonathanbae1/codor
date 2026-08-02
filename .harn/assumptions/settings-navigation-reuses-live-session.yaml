@@ -1,0 +1,14 @@
+id: settings-navigation-reuses-live-session
+hash: a-595d296404a4
+title: Settings navigation reuses the mounted live room session
+state: active
+statement: Selecting Settings from a mounted room must show the Settings surface
+  and update browser history without reloading the document, repeating relay
+  bootstrap, or creating another room connector, while a direct cold visit to
+  /settings still resolves a real authorized room and Back or Forward restores
+  the matching surface, because operational settings should be immediately
+  reachable without disrupting the live computer connection.
+depends_on:
+  - pwa-cold-launch-restores-local-auth
+  - web-settings-controls-preserve-product-truth
+created_by: relay-live-computers-p1-settings

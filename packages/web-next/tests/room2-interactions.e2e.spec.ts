@@ -160,14 +160,77 @@ test.describe('desktop composer alignment', () => {
 // harn:end desktop-composer-groups-attach-and-send-bottom-right
 
 test.describe('channel header chrome', () => {
-  test('the desktop header drops the redundant Channel settings button; the rail Settings still opens', async ({ page }) => {
+  test('rail Settings reuses the mounted session and supports history navigation', async ({ page }) => {
+    const sockets: boolean[] = [];
+    page.on('websocket', () => sockets.push(true));
     await openRoom(page);
     // The duplicate header button (which routed to the same global settings page)
     // is gone.
     await expect(page.getByTestId('room-settings')).toHaveCount(0);
-    // The rail's single global Settings entry remains and navigates to settings.
+
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        __codor?: unknown;
+        __settingsConnector?: unknown;
+        __settingsDocument?: Document;
+        __settingsNavigationCount?: number;
+        __settingsStartupSeen?: number;
+        __settingsStartupObserver?: MutationObserver;
+      };
+      state.__settingsConnector = state.__codor;
+      state.__settingsDocument = document;
+      state.__settingsNavigationCount = performance.getEntriesByType('navigation').length;
+      state.__settingsStartupSeen = 0;
+      const observer = new MutationObserver(() => {
+        if (document.querySelector('[data-testid="startup-connecting"]')) {
+          state.__settingsStartupSeen = (state.__settingsStartupSeen ?? 0) + 1;
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      state.__settingsStartupObserver = observer;
+    });
+    const socketCount = sockets.length;
+
+    // The rail's single global Settings entry remains and now changes only the
+    // in-app surface, preserving the document and the connector identity.
     await page.getByRole('button', { name: 'Settings' }).click();
-    await expect(page).toHaveURL(/\/settings/);
+    await expect(page.locator('.nx-settings-head h1')).toHaveText('Settings');
+    await expect(page).toHaveURL(/\/settings\?room=eng$/);
+    await page.waitForTimeout(0);
+    const afterSettings = await page.evaluate(() => {
+      const state = window as unknown as {
+        __codor?: unknown;
+        __settingsConnector?: unknown;
+        __settingsDocument?: Document;
+        __settingsNavigationCount?: number;
+        __settingsStartupSeen?: number;
+      };
+      return {
+        sameDocument: document === state.__settingsDocument,
+        sameConnector: state.__codor === state.__settingsConnector,
+        navigationCount: performance.getEntriesByType('navigation').length,
+        initialNavigationCount: state.__settingsNavigationCount,
+        startupSeen: state.__settingsStartupSeen,
+      };
+    });
+    expect(afterSettings.sameDocument).toBe(true);
+    expect(afterSettings.sameConnector).toBe(true);
+    expect(afterSettings.navigationCount).toBe(afterSettings.initialNavigationCount);
+    expect(afterSettings.startupSeen).toBe(0);
+    expect(sockets).toHaveLength(socketCount);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/?room=eng$/);
+    await expect(page.getByTestId('timeline')).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(/\/settings\?room=eng$/);
+    await expect(page.locator('.nx-settings-head h1')).toHaveText('Settings');
+    expect(sockets).toHaveLength(socketCount);
+
+    await page.evaluate(() => {
+      const state = window as unknown as { __settingsStartupObserver?: MutationObserver };
+      state.__settingsStartupObserver?.disconnect();
+    });
   });
 });
 

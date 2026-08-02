@@ -127,6 +127,7 @@ test.describe('pwa startup room', () => {
     // late left it subscribing to the empty string.
     await launch(page, `/settings?token=${TOKEN}`);
     await expect(page.locator('.nx-settings')).toBeVisible();
+    await expect(page.getByTestId('startup-connecting')).toHaveCount(0);
 
     await expect(page).toHaveURL(/\/settings\?.*room=[a-z0-9-]+/i);
     const room = new URL(page.url()).searchParams.get('room');
