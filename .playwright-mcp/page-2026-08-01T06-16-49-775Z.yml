@@ -1,0 +1,33 @@
+- generic [ref=e3]:
+  - navigation "Channels" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - strong [ref=e7]: Codor
+    - searchbox "Search channels" [ref=e12]
+    - generic [ref=e13]:
+      - generic [ref=e14]: Channels
+      - button "Create channel" [ref=e15] [cursor=pointer]
+    - list [ref=e17]
+    - generic [ref=e18]:
+      - generic [ref=e19]: Yo
+      - generic [ref=e20]:
+        - strong [ref=e21]: —
+        - generic "connected" [ref=e22]: Connected
+      - button "Settings" [ref=e24] [cursor=pointer]
+  - main [ref=e28]:
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - heading "askmulti" [level=1] [ref=e32]
+          - generic [ref=e33]: Live
+        - paragraph [ref=e35]: 0 members · 0 turns · 0 tokens · $0.00 today
+      - generic [ref=e36]:
+        - button "Search messages" [ref=e37] [cursor=pointer]
+        - button "Inbox — 0 unread" [ref=e43] [cursor=pointer]
+        - button "Open ledger graph" [ref=e47] [cursor=pointer]
+        - button "Channel settings" [ref=e54] [cursor=pointer]
+    - paragraph [ref=e61]: No messages yet — say something.
+    - generic [ref=e63]:
+      - textbox "Message" [ref=e64]:
+        - /placeholder: Message askmulti…
+      - button "Send message" [disabled] [ref=e65]
