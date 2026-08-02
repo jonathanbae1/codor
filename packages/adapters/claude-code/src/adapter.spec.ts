@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CLAUDE_THINKING_LEVELS,
   ClaudeCodeAdapter,
+  cardFromSdkPermission,
   claudePermissionMode,
 } from './adapter.js';
 import type { ClaudeQueryFactory, ClaudeQueryInput } from './query.js';
@@ -587,3 +588,70 @@ describe('manual compaction', () => {
   });
 
 });
+
+// harn:assume askuserquestion-presents-every-question ref=askuser-multi-question-regression
+describe('AskUserQuestion with multiple questions', () => {
+  it('builds a card carrying every question, mirroring the first at top level', () => {
+    const card = cardFromSdkPermission('permission-multi', 'AskUserQuestion', {
+      questions: [
+        { question: 'Which DB?', options: [{ label: 'pg' }, { label: 'sqlite' }], multiSelect: false },
+        { question: 'Which regions?', header: 'Regions', options: [{ label: 'us' }, { label: 'eu' }], multiSelect: true },
+      ],
+    });
+    expect(card.kind).toBe('ask');
+    expect(card.prompt).toBe('Which DB?'); // top-level mirrors questions[0]
+    expect(card.questions).toHaveLength(2);
+    expect(card.questions?.[1]).toMatchObject({ question: 'Which regions?', header: 'Regions', multi: true });
+  });
+
+  it('resolves the pending permission with one answers key per question', async () => {
+    const records: MockQueryRecord[] = [];
+    const resolutions: PermissionResult[] = [];
+    const factory = queryFactory(async function* (queryInput) {
+      for await (const _user of queryInput.prompt) {
+        const canUseTool = queryInput.options.canUseTool!;
+        const signal = new AbortController().signal;
+        resolutions.push(await canUseTool('AskUserQuestion', {
+          questions: [
+            { question: 'Which DB?', options: [{ label: 'pg' }], multiSelect: false },
+            { question: 'Which regions?', options: [{ label: 'us' }, { label: 'eu' }], multiSelect: true },
+          ],
+        }, { signal, toolUseID: 'ask-multi' }));
+        yield result('answered');
+      }
+    }, records);
+    const adapter = new ClaudeCodeAdapter({ queryFactory: factory });
+    const session = tracked(adapter, adapter.spawn({ cwd: process.cwd() }));
+
+    const events: WireEvent[] = [];
+    for await (const event of adapter.deliver(session, 'ask')) {
+      events.push(event);
+      if (event.type === 'ask.raised') {
+        // The UI sends one key per question; multi-select answers arrive as arrays.
+        await adapter.respondInteraction(session, event.card.interaction_id, {
+          'Which DB?': 'pg',
+          'Which regions?': ['us', 'eu'],
+        });
+      }
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'ask.raised',
+      card: expect.objectContaining({
+        prompt: 'Which DB?',
+        questions: expect.arrayContaining([
+          expect.objectContaining({ question: 'Which regions?', multi: true }),
+        ]),
+      }),
+    }));
+    expect(resolutions).toEqual([
+      expect.objectContaining({
+        behavior: 'allow',
+        updatedInput: expect.objectContaining({
+          answers: { 'Which DB?': 'pg', 'Which regions?': 'us, eu' },
+        }),
+      }),
+    ]);
+  });
+});
+// harn:end askuserquestion-presents-every-question

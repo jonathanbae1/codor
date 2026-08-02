@@ -1,0 +1,17 @@
+id: askuserquestion-presents-every-question
+hash: a-f7a12f9c5283
+title: A single AskUserQuestion call is answered question-by-question, in full
+state: active
+statement: The Claude Agent SDK invokes canUseTool once per AskUserQuestion tool
+  call carrying an array of questions and expects a single resolution whose
+  updatedInput.answers maps every question's text to its answer. The adapter
+  must therefore surface EVERY question in that array on the ask card and
+  resolve the one pending permission with one answer per question, joining
+  multi-select values into the comma format the single-question path already
+  produces. Presenting only questions[0] and resolving with a single key leaves
+  the remaining questions unanswered and the SDK silently falls back to their
+  defaults. A single-question call, and every non-AskUserQuestion approval, must
+  render and resolve exactly as before.
+depends_on:
+  - claude-sdk-permissions-back-codor-interactions
+created_by: askuser-multi

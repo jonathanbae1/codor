@@ -334,6 +334,36 @@ test.describe('asks', () => {
     await expect(page.getByTestId('timeline')).toBeVisible();
     await expect(page.locator('.nx-ask')).toHaveCount(0); // resolution survived the reload
   });
+
+  test('a multi-question ask presents every question and returns one answer each', async ({ page }) => {
+    await openRoom(page, '/?room=askmulti&token=next-e2e-token');
+    const card = page.locator('.nx-ask');
+    await expect(card).toBeVisible();
+    // Both questions render as their own blocks.
+    await expect(card.locator('.nx-ask-question')).toHaveCount(2);
+    await expect(card).toContainText('Which database?');
+    await expect(card).toContainText('Which regions?');
+
+    const askId = (await card.getAttribute('data-testid'))!.replace('ask-', '');
+    const submit = page.getByTestId(`ask-${askId}-submit`);
+    // Submit stays disabled until every question has an answer.
+    await expect(submit).toBeDisabled();
+
+    // Single-select the database, multi-select two regions.
+    await page.getByTestId(`ask-${askId}-q0-SQLite`).click();
+    await expect(submit).toBeDisabled(); // second question still unanswered
+    await page.getByTestId(`ask-${askId}-q1-us`).click();
+    await page.getByTestId(`ask-${askId}-q1-eu`).click();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    // The agent received one combined object keyed by question text: the
+    // single-select answer as a string, the multi-select answer as its array.
+    // (The claude adapter joins arrays to "us, eu"; that join is unit-tested.)
+    await expect(page.locator('.nx-prose', { hasText: '"Which database?":"SQLite"' }).first()).toBeVisible();
+    await expect(page.locator('.nx-prose', { hasText: '"Which regions?":["us","eu"]' }).first()).toBeVisible();
+    await expect(card).toBeHidden();
+  });
 });
 
 test.describe('inbox', () => {

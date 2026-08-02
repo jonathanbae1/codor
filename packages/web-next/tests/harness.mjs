@@ -134,6 +134,7 @@ for (const [id, name] of [
   ['preview', 'Preview'],
   ['tasks', 'Tasks'],
   ['acp-providers', 'ACP Providers'],
+  ['askmulti', 'Ask Multi'],
 ]) {
   daemon.createRoom({ id, name, owner });
   crypto.roomKeys.ensureRoom(id);
@@ -1124,6 +1125,39 @@ fake.enqueue({
   reply: (answer) => `push ${String(answer)}`,
 });
 daemon.postHumanMessage('eng', '@muse ship the pricing page copy update');
+await new Promise((resolve) => setTimeout(resolve, 400));
+
+// ── Pending multi-question AskUserQuestion in an isolated room ───────────────
+// Proves one AskUserQuestion call carrying several questions surfaces EVERY
+// question and round-trips one combined answer per question back to the agent.
+const askMultiWork = join(dir, 'askmulti-work');
+mkdirSync(askMultiWork, { recursive: true });
+daemon.spawnMember('askmulti', { harness: 'fake', handle: 'planner', cwd: askMultiWork });
+fake.enqueue({
+  kind: 'ask',
+  card: {
+    kind: 'ask',
+    prompt: 'Which database?',
+    options: [{ label: 'Postgres' }, { label: 'SQLite' }],
+    multi: false,
+    questions: [
+      {
+        question: 'Which database?',
+        header: 'Storage',
+        options: [{ label: 'Postgres' }, { label: 'SQLite' }],
+        multi: false,
+      },
+      {
+        question: 'Which regions?',
+        header: 'Regions',
+        options: [{ label: 'us' }, { label: 'eu' }, { label: 'ap' }],
+        multi: true,
+      },
+    ],
+  },
+  reply: (answer) => `answers ${JSON.stringify(answer)}`,
+});
+daemon.postHumanMessage('askmulti', '@planner scaffold the service');
 await new Promise((resolve) => setTimeout(resolve, 400));
 
 // ── Live running run on @scout (items trickle, stays running) ────────────
