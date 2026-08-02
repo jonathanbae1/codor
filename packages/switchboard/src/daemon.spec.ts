@@ -6735,3 +6735,252 @@ describe('named ACP providers (detection and command-private launch)', () => {
   });
   // harn:end named-acp-provider-selection-resolves-to-private-structured-launch
 });
+
+// harn:assume compaction-reinjects-codor-briefing ref=compaction-reinject-regression
+describe('codor briefing re-injection after compaction', () => {
+  const owner = () => daemon.ownerOf('eng');
+  const compactionCompleted: WireEvent = {
+    type: 'timeline',
+    item: { type: 'compaction', status: 'completed', trigger: 'auto' },
+  };
+
+  // Run one delivery so the first-delivery briefing has already been sent and
+  // its gates are closed (conventions_sent=true, roster_stale=false).
+  const establishBriefing = async (handle: string) => {
+    const agent = spawnAgent(handle);
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', `@${handle} establish context`);
+    await daemon.settle();
+    const member = daemon.store.getMember('eng', agent.id)!;
+    expect(member.conventions_sent).toBe(true);
+    expect(member.roster_stale).toBe(false);
+    return agent;
+  };
+
+  it('re-arms and re-injects the briefing after an auto-compaction consumed by an active turn', async () => {
+    const agent = await establishBriefing('compact-alpha');
+
+    // The compaction boundary rides the live deliver() iterator of an active
+    // turn — exactly how auto-compaction surfaces for both runtimes.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>', items: [compactionCompleted] });
+    daemon.postHumanMessage('eng', '@compact-alpha do work');
+    await daemon.settle();
+
+    const rearmed = daemon.store.getMember('eng', agent.id)!;
+    expect(rearmed.conventions_sent).toBe(false);
+    expect(rearmed.roster_stale).toBe(true);
+
+    // The very next delivery carries the full briefing again.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@compact-alpha follow up');
+    await daemon.settle();
+    const followup = fake.deliveries.at(-1)!.payload;
+    expect(followup).toContain('[conventions:');
+    expect(followup).toContain('[roster:');
+
+    // Gates close again after the re-injected delivery.
+    const settled = daemon.store.getMember('eng', agent.id)!;
+    expect(settled.conventions_sent).toBe(true);
+    expect(settled.roster_stale).toBe(false);
+  });
+
+  it('leaves the briefing gates closed for a normal turn with no compaction', async () => {
+    const agent = await establishBriefing('compact-normal');
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@compact-normal ordinary work');
+    await daemon.settle();
+
+    const member = daemon.store.getMember('eng', agent.id)!;
+    expect(member.conventions_sent).toBe(true);
+    expect(member.roster_stale).toBe(false);
+    expect(fake.deliveries.at(-1)!.payload).not.toContain('[conventions:');
+  });
+
+  it('re-arms and re-injects after an operator manual compaction', async () => {
+    const agent = await establishBriefing('compact-beta');
+
+    await daemon.compactMember('eng', agent.id, owner().id);
+    const rearmed = daemon.store.getMember('eng', agent.id)!;
+    expect(rearmed.conventions_sent).toBe(false);
+    expect(rearmed.roster_stale).toBe(true);
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@compact-beta after compaction');
+    await daemon.settle();
+    expect(fake.deliveries.at(-1)!.payload).toContain('[conventions:');
+  });
+
+  it('preserves a concurrently raised misaddress flag through the re-arm', async () => {
+    const agent = await establishBriefing('compact-gamma');
+    // Simulate a misaddress raised concurrently with the compaction. The manual
+    // path re-arms without an intervening delivery, so nothing consumes the
+    // flag — proving the re-arm itself never clears misaddressed.
+    daemon.store.updateMember('eng', agent.id, { misaddressed: true });
+
+    await daemon.compactMember('eng', agent.id, owner().id);
+
+    const member = daemon.store.getMember('eng', agent.id)!;
+    expect(member.misaddressed).toBe(true);
+    expect(member.conventions_sent).toBe(false);
+    expect(member.roster_stale).toBe(true);
+  });
+
+  it('re-injects exactly once for repeated compactions before the next delivery', async () => {
+    const agent = await establishBriefing('compact-repeat');
+
+    // Two completed boundaries in one turn — the re-arm is idempotent.
+    fake.enqueue({
+      kind: 'complete',
+      final_text: '<ACK_OK>',
+      items: [compactionCompleted, compactionCompleted],
+    });
+    daemon.postHumanMessage('eng', '@compact-repeat churn');
+    await daemon.settle();
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(false);
+
+    // First delivery after the repeated compactions re-injects.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@compact-repeat first');
+    await daemon.settle();
+    expect(fake.deliveries.at(-1)!.payload).toContain('[conventions:');
+
+    // The delivery after that does not — the briefing was consumed once.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@compact-repeat second');
+    await daemon.settle();
+    expect(fake.deliveries.at(-1)!.payload).not.toContain('[conventions:');
+  });
+
+  it('does not re-arm when the manual compaction fails', async () => {
+    const agent = await establishBriefing('compact-fail');
+    fake.compactSession = async () => {
+      throw new Error('engine compaction failed');
+    };
+
+    await expect(daemon.compactMember('eng', agent.id, owner().id))
+      .rejects.toThrow(/engine compaction failed/);
+
+    const member = daemon.store.getMember('eng', agent.id)!;
+    expect(member.conventions_sent).toBe(true);
+    expect(member.roster_stale).toBe(false);
+  });
+
+  it('preserves the re-armed briefing flags across kill and revive', async () => {
+    const agent = await establishBriefing('compact-revive');
+    await daemon.compactMember('eng', agent.id, owner().id);
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(false);
+
+    expect(daemon.killMember('eng', agent.id).state).toBe('dead');
+    daemon.reviveMember('eng', agent.id);
+
+    const member = daemon.store.getMember('eng', agent.id)!;
+    expect(member.conventions_sent).toBe(false);
+    expect(member.roster_stale).toBe(true);
+  });
+});
+// harn:end compaction-reinjects-codor-briefing
+
+// harn:assume manual-compaction-leases-out-turn-admission ref=compaction-lease-regression
+describe('manual compaction leases out turn admission', () => {
+  const owner = () => daemon.ownerOf('eng');
+
+  // One delivery so the first-delivery briefing has been sent and its gates are
+  // closed (conventions_sent=true), matching a real member mid-conversation.
+  const establishBriefing = async (handle: string) => {
+    const agent = spawnAgent(handle);
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', `@${handle} establish context`);
+    await daemon.settle();
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(true);
+    return agent;
+  };
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  it('defers a delivery during a held compaction, then delivers it with the re-injected briefing', async () => {
+    const agent = await establishBriefing('lease-alpha');
+
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', agent.id, owner().id);
+
+    // A delivery landing while the compaction is held must be deferred: queued,
+    // no turn started, nothing handed to the engine.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-alpha work during compaction');
+    await tick();
+    expect(daemon.store.listDeliveries('eng', { recipient: agent.id, state: 'queued' })).toHaveLength(1);
+    expect(fake.deliveries.some((d) => d.payload.includes('work during compaction'))).toBe(false);
+    expect(daemon.store.getMember('eng', agent.id)!.state).not.toBe('running');
+
+    // Release: the compaction re-arms the briefing, then the finally admits the
+    // deferred delivery — which therefore carries the fresh briefing.
+    fake.releaseCompactions();
+    await compaction;
+    await daemon.settle();
+
+    const delivered = fake.deliveries.find((d) => d.payload.includes('work during compaction'));
+    expect(delivered).toBeDefined();
+    expect(delivered!.payload).toContain('[conventions:');
+    expect(delivered!.payload).toContain('[roster:');
+  });
+
+  it('does not start a turn while a compaction is held', async () => {
+    const agent = await establishBriefing('lease-beta');
+    const deliveriesBefore = fake.deliveries.length;
+
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', agent.id, owner().id);
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-beta racing turn');
+    await tick();
+    // No turn was admitted: the engine saw no new delivery and the member never
+    // went running.
+    expect(fake.deliveries).toHaveLength(deliveriesBefore);
+    expect(daemon.store.getMember('eng', agent.id)!.state).not.toBe('running');
+
+    fake.releaseCompactions();
+    await compaction;
+    await daemon.settle();
+    expect(fake.deliveries.length).toBeGreaterThan(deliveriesBefore);
+  });
+
+  it('releases the lease and admits deferred work without a briefing when the compaction fails', async () => {
+    const agent = await establishBriefing('lease-gamma');
+    let rejectCompaction: (reason: Error) => void = () => undefined;
+    fake.compactSession = () => new Promise((_, reject) => { rejectCompaction = reject; });
+
+    const compaction = daemon.compactMember('eng', agent.id, owner().id).catch((e: unknown) => e);
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@lease-gamma queued during failing compaction');
+    await tick();
+    expect(fake.deliveries.some((d) => d.payload.includes('queued during failing compaction'))).toBe(false);
+
+    rejectCompaction(new Error('engine compaction failed'));
+    const result = await compaction;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toMatch(/engine compaction failed/);
+    await daemon.settle();
+
+    // Lease released → the deferred delivery is admitted. No compaction happened,
+    // so conventions_sent stays true and the delivery carries no briefing.
+    const delivered = fake.deliveries.find((d) => d.payload.includes('queued during failing compaction'));
+    expect(delivered).toBeDefined();
+    expect(delivered!.payload).not.toContain('[conventions:');
+    expect(daemon.store.getMember('eng', agent.id)!.conventions_sent).toBe(true);
+  });
+
+  it('refuses a second compaction while one is already pending', async () => {
+    const agent = await establishBriefing('lease-delta');
+    fake.holdCompactions();
+    const first = daemon.compactMember('eng', agent.id, owner().id);
+
+    await expect(daemon.compactMember('eng', agent.id, owner().id))
+      .rejects.toThrow(/already compacting/);
+
+    fake.releaseCompactions();
+    await first;
+  });
+});
+// harn:end manual-compaction-leases-out-turn-admission

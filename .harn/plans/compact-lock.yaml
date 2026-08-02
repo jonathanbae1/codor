@@ -1,0 +1,89 @@
+id: compact-lock
+title: Lease out turn admission while a manual compaction is pending
+notes: >
+  compactMember checks idle only BEFORE awaiting compactSession(); a delivery
+  arriving during that await currently starts a new turn whose live iterator
+  consumes the compact_boundary compactSession was awaiting, so compactSession
+  times out (the pre-existing race opus3 flagged, approved by the operator in
+  #563 item 1). Fix: a daemon-side lease. While compactSession() is pending for
+  a member, the single live turn-admission gate (turnStartEligibility) refuses
+  to start a turn for that member, so a delivery arriving mid-compaction is
+  DEFERRED (stays queued), not rejected. The lease is added and removed in a
+  try/finally around the bounded compactSession() await (both adapters cap it at
+  180s via COMPACTION_TIMEOUT_MS, so the lease can never outlive the guard — no
+  separate timer needed), and the finally admits deferred work via
+  maybeStartTurn AFTER the success-path re-arm, so the deferred delivery carries
+  the re-injected briefing. Steering is inherently safe and is NOT gated: it
+  only fires for a member with a live turn (inflight + running/awaiting_input),
+  which an idle-only compaction never coexists with. Mirrors the existing
+  pendingAttach Set pattern. Stacked on fix/compaction-reinject (base 7ea94a9).
+  DRAFT — not locked, pending fable go.
+assumptions:
+  create:
+    - id: manual-compaction-leases-out-turn-admission
+      title: A pending manual compaction defers new turns for that member
+      statement: >
+        While an operator compactMember's compactSession() call is pending for a
+        member, the daemon must refuse to admit a new turn for that member at
+        the shared turn-admission gate, so a delivery arriving during the
+        compaction is deferred (left queued) rather than started as a turn that
+        would race the engine and consume the compaction boundary; the lease is
+        held only for the bounded compactSession() await and released in a
+        finally that then admits the deferred work via maybeStartTurn, so a hung
+        compaction cannot wedge the member (compactSession is capped at 180s)
+        and the admitted delivery carries the re-injected briefing.
+      reason: >
+        compactMember checks idle only before the await; without the lease a
+        concurrent delivery starts a turn whose live iterator steals the
+        compact_boundary and times the compaction out.
+      depends_on:
+        - manual-compaction-is-an-operator-act
+        - turn-start-requires-owned-custody
+        - one-inflight-turn-per-member
+        - compaction-reinjects-codor-briefing
+  reviewed:
+    - id: turn-start-requires-owned-custody
+      outcome: unchanged
+      reason: >
+        The custody gate keeps its existing refusals; it gains one more refusal
+        (member is mid-compaction), consistent with the sibling pendingAttach
+        refusal already there.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: >
+        compactMember stays operator-gated and idle-only and still delegates to
+        the harness; the compactSession await is now wrapped in a lease
+        try/finally that also admits deferred work, without changing the
+        operator contract.
+    - id: compaction-reinjects-codor-briefing
+      outcome: unchanged
+      reason: >
+        The success-path re-arm is unchanged; it now runs before the finally
+        admits the deferred delivery, so that delivery is the one that carries
+        the briefing.
+files:
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+anchors:
+  manual-compaction-leases-out-turn-admission:
+    compaction-lease-state:
+      action: change
+      reason: New `compacting` Set field tracking members with a pending manual
+        compaction.
+    compaction-lease-regression:
+      action: change
+      reason: >
+        Regression that a delivery arriving during a held manual compaction is
+        deferred and then delivered with the re-injected briefing, plus lease
+        release on compaction failure/timeout.
+  turn-start-requires-owned-custody:
+    shared-turn-start-custody-gate:
+      action: change
+      reason: Add the mid-compaction refusal to the shared turn-admission gate.
+  manual-compaction-is-an-operator-act:
+    compact-member-contract:
+      action: change
+      reason: Wrap the compactSession await in the lease try/finally and admit
+        deferred work.
+applied:
+  applied_at: 2026-08-01T09:12:36.447Z

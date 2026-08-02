@@ -490,6 +490,12 @@ export class Daemon {
   private readonly active = new Set<Promise<void>>();
   private readonly listeners: FrameListener[] = [];
   private readonly pendingAttach = new Set<string>();
+  // harn:assume manual-compaction-leases-out-turn-admission ref=compaction-lease-state
+  // Members whose operator compactSession() is pending. The turn-admission gate
+  // refuses to start a turn for them, so a delivery landing mid-compaction is
+  // deferred (queued) instead of racing the engine for the compaction boundary.
+  private readonly compacting = new Set<string>();
+  // harn:end manual-compaction-leases-out-turn-admission
   private readonly releasedDeliveries = new Set<string>();
   private readonly operatorInterrupts = new Set<string>();
   /** Members whose in-flight turn THIS daemon's lifecycle is interrupting, so
@@ -2052,14 +2058,35 @@ export class Daemon {
     if (member.state !== 'idle') {
       throw new Error(`@${member.handle} is ${member.state} — only an idle agent can be compacted`);
     }
+    // A second compaction while one is pending would race the first for the same
+    // boundary: refuse fast and clearly on an operator double-fire.
+    if (this.compacting.has(memberId)) {
+      throw new Error(`@${member.handle} is already compacting`);
+    }
     const session = this.sessions.get(memberId);
     if (session === undefined) throw new Error(`@${member.handle} has no live session to compact`);
     const adapter = this.requireAdapter(member.harness);
     if (adapter.compactSession === undefined) {
       throw new Error(`harness '${member.harness}' does not support compaction`);
     }
-    const usage = await adapter.compactSession(session);
-    this.landCompactedUsage(room, memberId, usage);
+    // Lease out turn admission for the bounded compactSession() call (both adapters
+    // cap it at 180s), so a delivery landing mid-compaction is deferred instead of
+    // starting a turn that steals the boundary. The finally releases the lease and
+    // admits the deferred work — AFTER the success-path re-arm below, so the
+    // admitted delivery carries the freshly re-injected briefing.
+    this.compacting.add(memberId);
+    try {
+      const usage = await adapter.compactSession(session);
+      this.landCompactedUsage(room, memberId, usage);
+      // A successful manual compaction summarizes the codor briefing out of the
+      // engine's context just like an auto-compaction, but it never surfaces the
+      // timeline WireEvent outward (the adapter observes it internally), so the
+      // event-loop hook never fires here — re-arm the briefing explicitly.
+      this.markBriefingForReinjection(room, memberId);
+    } finally {
+      this.compacting.delete(memberId);
+      this.track(this.maybeStartTurn(room, memberId));
+    }
   }
 
   /**
@@ -2077,6 +2104,24 @@ export class Daemon {
     if (current !== undefined) this.emitMember(room, current);
   }
   // harn:end manual-compaction-is-an-operator-act
+
+  // harn:assume compaction-reinjects-codor-briefing ref=daemon-briefing-reinjection-helper
+  /**
+   * Re-arm the codor briefing so the member's next new-turn / batched delivery
+   * carries the full roster + conventions again. Compaction summarizes the
+   * original briefing (injected on the first delivery) out of the engine's
+   * context; clearing conventions_sent re-opens the conventions gate and marking
+   * roster_stale re-opens the roster gate in composeBatchPayload. misaddressed is
+   * deliberately left untouched: a concurrently raised misaddress must survive,
+   * and conventions_sent=false already guarantees re-injection on its own.
+   */
+  private markBriefingForReinjection(room: string, memberId: string): void {
+    this.store.updateMember(room, memberId, {
+      conventions_sent: false,
+      roster_stale: true,
+    });
+  }
+  // harn:end compaction-reinjects-codor-briefing
 
   // harn:assume rename-preserves-mention-resolution ref=member-rename-stable-mentions
   renameMember(room: string, memberId: string, handle: string, displayName?: string): Member {
@@ -2957,6 +3002,9 @@ export class Daemon {
     if (this.closing) return { refusal: 'the daemon is closing' };
     if (this.inflight.has(memberId)) return { refusal: `member @${member.handle} already has a turn in flight` };
     if (this.pendingAttach.has(memberId)) return { refusal: `member @${member.handle} has an attach acquisition pending` };
+    // A pending operator compaction leases out turn admission: defer the delivery
+    // (it stays queued) so its turn never starts and steals the compaction boundary.
+    if (this.compacting.has(memberId)) return { refusal: `member @${member.handle} is compacting` };
     if (member.custody !== 'owned') return { refusal: `member @${member.handle} is not switchboard-owned` };
     if (this.isRemoteMember(member) && !this.residency?.isReachable(member.host)) {
       return { refusal: `member @${member.handle} resident switchboard is unreachable` };
@@ -3273,6 +3321,20 @@ export class Daemon {
           };
           // harn:end failed-run-details-never-route-as-replies
         }
+        // harn:assume compaction-reinjects-codor-briefing ref=daemon-compaction-reinjects-briefing-auto
+        // An auto-compaction (both runtimes) surfaces a completed compaction
+        // timeline item through this live iterator, even mid-turn. It has
+        // summarized the codor briefing out of context, so re-arm it for the
+        // member's next delivery. Idempotent: repeated completed items (or a
+        // manual compaction that a racing turn consumed) just re-set the flags.
+        if (
+          journalEvent.type === 'timeline' &&
+          journalEvent.item.type === 'compaction' &&
+          journalEvent.item.status === 'completed'
+        ) {
+          this.markBriefingForReinjection(room, member.id);
+        }
+        // harn:end compaction-reinjects-codor-briefing
       }
     } catch (error) {
       if (error instanceof RemoteAttemptAmbiguousError) {

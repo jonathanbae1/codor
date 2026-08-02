@@ -1,0 +1,18 @@
+id: compaction-reinjects-codor-briefing
+hash: a-97dd8d0aba04
+title: A completed compaction re-arms the codor briefing for the next delivery
+state: active
+statement: >
+  When a member's native session reports a completed compaction - either an
+  auto-compaction observed as a timeline compaction item with status completed
+  in the daemon turn event loop, or a successful operator compactMember - the
+  daemon must re-arm that member's briefing flags by setting conventions_sent to
+  false and roster_stale to true (and leaving misaddressed untouched), so the
+  existing composeBatchPayload gate re-attaches the full roster and conventions
+  briefing on the member's next new-turn or batched delivery, because compaction
+  summarizes the original briefing out of context and the agent otherwise stops
+  using codor correctly.
+depends_on:
+  - compaction-timeline-items-are-durable-run-evidence
+  - manual-compaction-is-an-operator-act
+created_by: compaction-reinject
