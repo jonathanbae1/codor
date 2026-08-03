@@ -1,0 +1,13 @@
+id: cli-tests-run-package-bins-portably-without-shell
+hash: a-7d47151ea1e0
+title: CLI test wrappers run package bins portably without a shell
+state: active
+statement: scripts/test-env.mjs must resolve a bare npm package bin to its
+  JavaScript entrypoint and execute that entrypoint through the current Node
+  runtime without a platform shell, while retaining direct spawning for
+  non-package executables and path-like commands, so CLI tests work on POSIX and
+  Windows without shell-dependent .bin shims.
+depends_on:
+  - cli-tests-delete-inherited-codor-environment
+  - cli-tests-isolate-operator-home
+created_by: integrate-pr11-shell-free-package-bin

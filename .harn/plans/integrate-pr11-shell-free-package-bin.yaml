@@ -1,0 +1,139 @@
+id: integrate-pr11-shell-free-package-bin
+title: Integrate PR 11 shell-free test wrapper with portable package-bin execution
+notes: >
+  Integrate the exact PR 11 head ee7f6a6fa039dd2b34f0bda5a2a0d032da514734 into
+  origin/main with a real no-ff merge commit. The contribution makes the CLI
+  test wrapper resolve a bare npm package bin to its real JavaScript entry
+  point, falls back to spawning bare system executables directly, and carries
+  the focused Windows path and timeout regressions from the PR. Resolve the sole
+  scripts/test-env.mjs conflict by retaining main's throwaway HOME while
+  retaining the PR's bin resolution and fallback behavior. Preserve inherited
+  CODOR_ deletion, child exit propagation, and all unrelated anchored tests.
+  Anchor the new resolver, shell-free execution selection, and its package-bin
+  and direct-fallback regression tests under the new compatibility assumption.
+  The merge must keep the exact PR head as its second parent; no cherry-pick,
+  squash, GitHub merge, push, or deployment is in scope.
+assumptions:
+  reviewed:
+    - id: cli-tests-delete-inherited-codor-environment
+      outcome: unchanged
+      reason: The wrapper still deletes every inherited CODOR_ key, never prints its
+        value, and preserves child exit status while adding shell-free command
+        resolution.
+    - id: cli-tests-isolate-operator-home
+      outcome: unchanged
+      reason: Main's fresh throwaway HOME remains in the merged wrapper so CLI tests
+        cannot read the operator's service credentials.
+    - id: public-package-bundles-complete-codor-runtime
+      outcome: unchanged
+      reason: The artifact test only adds portable execution coverage and a
+        Windows-safe permission assertion; artifact closure and packaged runtime
+        contents remain unchanged.
+    - id: artifact-build-runs-from-clean-source
+      outcome: unchanged
+      reason: The clean artifact build command is not changed by the PR; only adjacent
+        artifact portability coverage is retained.
+    - id: source-cli-installers-remain-idempotent-fallback
+      outcome: unchanged
+      reason: The installer regression remains unchanged while neighboring CLI tests
+        receive Windows path coverage.
+    - id: setup-installs-durable-per-user-runtime-atomically
+      outcome: unchanged
+      reason: The runtime-install fixture now constructs a platform-normalized path,
+        without changing durable install behavior or the anchored runtime
+        regression.
+    - id: setup-resolves-and-capability-probes-tailscale-serve
+      outcome: unchanged
+      reason: The Tailscale fixture now uses the implementation's platform-normalized
+        path shape without changing resolution or Serve behavior.
+    - id: empty-database-desk-uses-service-home
+      outcome: unchanged
+      reason: The bootstrap test only receives a Windows-safe timeout; service-home
+        selection and its regression remain the same.
+    - id: empty-database-desk-seeds-tutorial-atomically
+      outcome: unchanged
+      reason: The bootstrap test only receives a Windows-safe timeout; atomic Tutorial
+        seeding and its regression remain the same.
+  create:
+    - id: cli-tests-run-package-bins-portably-without-shell
+      title: CLI test wrappers run package bins portably without a shell
+      statement: scripts/test-env.mjs must resolve a bare npm package bin to its
+        JavaScript entrypoint and execute that entrypoint through the current
+        Node runtime without a platform shell, while retaining direct spawning
+        for non-package executables and path-like commands, so CLI tests work on
+        POSIX and Windows without shell-dependent .bin shims.
+      reason: The merged PR introduces a shell-free package-bin compatibility contract
+        that is independent of inherited environment and HOME isolation.
+      depends_on:
+        - cli-tests-delete-inherited-codor-environment
+        - cli-tests-isolate-operator-home
+files:
+  - packages/cli/src/artifact.spec.ts
+  - packages/cli/src/index.spec.ts
+  - packages/cli/src/runtime-install.spec.ts
+  - packages/cli/src/setup-tailscale.spec.ts
+  - scripts/test-env.mjs
+anchors:
+  cli-tests-delete-inherited-codor-environment:
+    cli-test-environment-wrapper:
+      action: change
+      reason: Add shell-free npm-bin resolution and direct bare-executable fallback
+        while retaining CODOR_ scrubbing and exit propagation.
+  cli-tests-isolate-operator-home:
+    cli-test-home-isolation:
+      action: keep
+      reason: The merged conflict resolution must retain main's throwaway HOME block
+        exactly.
+  cli-tests-run-package-bins-portably-without-shell:
+    cli-test-package-bin-resolution:
+      action: change
+      reason: Anchor the resolver that maps a bare package bin to its JavaScript
+        entrypoint without invoking a platform shell.
+    cli-test-package-bin-execution:
+      action: change
+      reason: Anchor command selection through the actual shell-free spawn call,
+        retaining direct spawning for path-like and non-package commands.
+    cli-test-package-bin-regressions:
+      action: change
+      reason: Anchor the two regressions proving npm-bin resolution and direct
+        fallback for a non-package executable.
+  public-package-bundles-complete-codor-runtime:
+    artifact-runtime-regression:
+      action: change
+      reason: Retain the PR's Windows-safe executable-bit assertion and add wrapper
+        portability regressions without changing artifact contents.
+  artifact-build-runs-from-clean-source:
+    artifact-build-command:
+      action: keep
+      reason: The documented clean artifact build command must remain unchanged.
+  public-package-readme-renders-on-npm:
+    artifact-readme-regression:
+      action: keep
+      reason: The npm README rendering regression is outside this PR's scope.
+  source-cli-installers-remain-idempotent-fallback:
+    cli-install-regression:
+      action: keep
+      reason: The source installer behavior and regression are outside this PR's scope.
+  empty-database-desk-uses-service-home:
+    bootstrap-service-home-regression:
+      action: change
+      reason: Extend the existing bootstrap regression timeout for slower Windows
+        process and filesystem startup without changing its assertions.
+  empty-database-desk-seeds-tutorial-atomically:
+    bootstrap-tutorial-regression:
+      action: change
+      reason: Extend the existing bootstrap regression timeout for slower Windows
+        process and filesystem startup without changing its assertions.
+  setup-installs-durable-per-user-runtime-atomically:
+    durable-runtime-install-regression:
+      action: keep
+      reason: The anchored durable-runtime regression must remain unchanged while its
+        unanchored path fixture is normalized.
+verification: >
+  After merge, run the full workspace build and full workspace test suite, the
+  complete CLI test suite, focused wrapper and Windows-portability regressions,
+  Harn plan/check/apply/staged validation, and git diff --check. Confirm a clean
+  worktree, a real merge commit whose first parent is current origin/main and
+  whose second parent is exactly ee7f6a6fa039dd2b34f0bda5a2a0d032da514734.
+applied:
+  applied_at: 2026-08-03T08:59:17.871Z

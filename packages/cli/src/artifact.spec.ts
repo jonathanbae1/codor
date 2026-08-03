@@ -156,7 +156,12 @@ describe('built public artifact', () => {
     expect(readFileSync(join(cliRoot, 'runtime', 'web', 'index.html'), 'utf8')).toContain('<!doctype html>');
     expect(readFileSync(join(cliRoot, 'packaging', 'systemd', 'codor.service'), 'utf8'))
       .toContain('ExecStart=');
-    expect(statSync(join(outDir, 'bin', 'codor.mjs')).mode & 0o111).not.toBe(0);
+    // Windows has no POSIX executable permission bit — writeFileSync's `mode`
+    // option cannot set one there, so this property only exists to check on
+    // platforms where the filesystem tracks it.
+    if (process.platform !== 'win32') {
+      expect(statSync(join(outDir, 'bin', 'codor.mjs')).mode & 0o111).not.toBe(0);
+    }
   });
 
   it('contains no source, specs, fixtures, symlinks, or workspace protocols', () => {
@@ -212,4 +217,23 @@ describe('CLI test environment isolation', () => {
       expect(String(failure.stderr)).not.toContain('never-print-this-value');
     }
   });
+
+  // harn:assume cli-tests-run-package-bins-portably-without-shell ref=cli-test-package-bin-regressions
+  it('spawns a bare npm bin name by resolving its real entrypoint', () => {
+    // vitest in node_modules/.bin is a .CMD shim on Windows; this proves the
+    // wrapper resolves and runs it rather than spawning the bare name as-is.
+    const output = execFileSync(process.execPath, [wrapper, 'vitest', '--version'], { encoding: 'utf8' });
+    expect(output).toMatch(/^vitest\//);
+  });
+
+  it('falls back to spawning a bare non-package executable directly', () => {
+    // `node` names no npm package in this workspace; the wrapper must still
+    // spawn it directly rather than requiring a package.json bin entry.
+    const output = execFileSync(process.execPath, [wrapper, 'node', '-e', 'process.stdout.write("ok")'], {
+      encoding: 'utf8',
+      env: poisoned,
+    });
+    expect(output).toBe('ok');
+  });
+  // harn:end cli-tests-run-package-bins-portably-without-shell
 });

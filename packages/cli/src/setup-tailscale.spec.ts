@@ -1,3 +1,5 @@
+import { resolve, sep } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { configureTailscaleServe, resolveTailscale, tailscaleServeSupported } from './setup.js';
@@ -6,7 +8,10 @@ const APP_CLI = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
 
 describe('resolveTailscale', () => {
   it('returns the PATH hit when present', () => {
-    expect(resolveTailscale(() => '/usr/bin/tailscale', 'darwin', () => true)).toBe('/usr/bin/tailscale');
+    // resolveTailscale normalizes the PATH hit through resolve(); build the
+    // fixture the same way so the expectation matches on every platform.
+    const pathHit = resolve(sep, 'usr', 'bin', 'tailscale');
+    expect(resolveTailscale(() => pathHit, 'darwin', () => true)).toBe(pathHit);
   });
 
   it('falls back to the macOS app location when PATH misses but the app exists', () => {
