@@ -17,6 +17,7 @@ import {
   forgetComputer,
   selectActiveComputer,
   setActive,
+  relayComputerLabelSource,
 } from './relay-records.js';
 
 export interface Kv {
@@ -180,7 +181,11 @@ export async function recordPairedComputer(
     const index = await readIndex(kv);
     const gen = (index.computers.find((c) => c.id === computer.id)?.gen ?? 0) + 1;
     await writeGeneration(kv, computer.id, gen, material);
-    await kv.put(INDEX_KEY, addComputer(index, { ...computer, gen }));
+    const complete = { ...computer, gen };
+    await kv.put(INDEX_KEY, addComputer(index, {
+      ...complete,
+      label_source: relayComputerLabelSource(complete),
+    }));
     await pruneOldGenerations(kv, computer.id, gen);
   });
 }
@@ -258,7 +263,32 @@ export async function hasRelayComputerIndex(kv: Kv): Promise<boolean> {
 export async function renameComputer(kv: Kv, id: string, label: string): Promise<void> {
   return serialize(kv, async () => {
     const index = await readIndex(kv);
-    await kv.put(INDEX_KEY, { ...index, computers: index.computers.map((c) => (c.id === id ? { ...c, label } : c)) });
+    await kv.put(INDEX_KEY, {
+      ...index,
+      computers: index.computers.map((c) => (c.id === id ? { ...c, label, label_source: 'custom' as const } : c)),
+    });
+  });
+}
+
+/** Adopt an authenticated hostname only while this exact computer's label is
+ * still generated. The serialized re-read makes an operator rename win even
+ * when it races an in-flight session authentication. */
+export async function adoptComputerHostname(
+  kv: Kv,
+  id: string,
+  hostname: string,
+): Promise<RelayComputer | undefined> {
+  return serialize(kv, async () => {
+    const index = await readIndex(kv);
+    const current = index.computers.find((computer) => computer.id === id);
+    if (!current) return undefined;
+    if (relayComputerLabelSource(current) === 'custom') return current;
+    const adopted = { ...current, label: hostname, label_source: 'hostname' as const };
+    await kv.put(INDEX_KEY, {
+      ...index,
+      computers: index.computers.map((computer) => computer.id === id ? adopted : computer),
+    });
+    return adopted;
   });
 }
 
@@ -291,7 +321,12 @@ export async function migrateIfNeeded(kv: Kv, legacy: Omit<RelayComputer, 'gen'>
     if ((await kv.get(INDEX_KEY)) !== undefined) return;
     if ((await kv.get('relay')) === undefined) return;
     await archiveGeneration(kv, legacy.id, 1);
-    await kv.put(INDEX_KEY, { version: 2, computers: [{ ...legacy, gen: 1 }], active_id: legacy.id } satisfies RelayIndex);
+    const complete = { ...legacy, gen: 1 };
+    await kv.put(INDEX_KEY, {
+      version: 2,
+      computers: [{ ...complete, label_source: relayComputerLabelSource(complete) }],
+      active_id: legacy.id,
+    } satisfies RelayIndex);
   });
 }
 

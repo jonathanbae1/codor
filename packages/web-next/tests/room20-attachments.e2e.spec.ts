@@ -21,15 +21,16 @@ test.describe('message attachments', () => {
     const attachments = page.getByTestId('message-attachments').first();
     await expect(attachments).toBeVisible();
 
-    // Image renders inline, its src pointing at the served endpoint.
+    // Authenticated bytes render through a short-lived object URL.
     const image = attachments.locator('.nx-attach-image img');
     await expect(image).toBeVisible();
-    await expect(image).toHaveAttribute('src', /\/api\/rooms\/files\/attachments\/.+/);
+    await expect(image).toHaveAttribute('src', /^blob:/);
 
     // The non-image renders as a download chip naming the file.
     const download = attachments.locator('.nx-attach-download', { hasText: 'notes.txt' });
     await expect(download).toBeVisible();
     await expect(download).toHaveAttribute('download', 'notes.txt');
+    await expect(download).toHaveAttribute('href', /^blob:/);
   });
 
   test('attaching files in the composer and sending renders them in the transcript', async ({ page }) => {

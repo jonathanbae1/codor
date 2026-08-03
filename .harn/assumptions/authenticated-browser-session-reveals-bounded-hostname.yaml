@@ -1,0 +1,13 @@
+id: authenticated-browser-session-reveals-bounded-hostname
+hash: a-f34daee14e11
+title: A signed browser session may reveal only a bounded switchboard hostname
+state: active
+statement: A switchboard may include its sanitized bounded operating-system
+  hostname in the successful browser device-session response only after a paired
+  device proves its Ed25519 identity against a fresh challenge; the
+  unauthenticated challenge, pairing code, blind relay, and failed session
+  responses must not expose it, and an older switchboard may omit the additive
+  field without breaking browser authentication.
+depends_on:
+  - paired-browser-challenge-session
+created_by: relay-ux-followups-p1-data

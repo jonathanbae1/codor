@@ -49,10 +49,13 @@ test.describe('preview gallery', () => {
     await expect(thumbs).toHaveCount(2);
     // The durable artifact sorts first and its <img> resolves the served endpoint.
     await expect(thumbs.first().locator('img')).toHaveAttribute('src', /\/api\/rooms\/files\/artifacts\/a+\?token=/);
+    await expect(thumbs.locator('img[src^="blob:"]')).toHaveCount(1);
 
     // Documents: the pdf artifact and the seeded notes.txt attachment render as cards.
     await expect(gallery.getByTestId('preview-doc').filter({ hasText: 'report.pdf' })).toBeVisible();
-    await expect(gallery.getByTestId('preview-doc').filter({ hasText: 'notes.txt' })).toBeVisible();
+    const attachmentDocument = gallery.getByTestId('preview-doc').filter({ hasText: 'notes.txt' });
+    await expect(attachmentDocument).toBeVisible();
+    await expect(attachmentDocument.getByRole('link', { name: 'Download' })).toHaveAttribute('href', /^blob:/);
 
     // svg is active content: it is NEVER an inline image — only an inert download.
     const inert = gallery.getByTestId('preview-inert').filter({ hasText: 'diagram.svg' });

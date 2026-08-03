@@ -1621,6 +1621,7 @@ await startServer({
   token: TOKEN,
   port: API_PORT_B,
   crypto: cryptoB,
+  systemHostname: 'codor-host-b',
   relay: {
     status: () => ({ enabled: relayStoreB.enabled, relay_url: relayStoreB.relayUrl, session_id: relayStoreB.sessionId, devices: relayStoreB.listDevices().length }),
     enable: (u) => { relayStoreB.enable(u); relayLinkB.restart(); },
@@ -1655,6 +1656,7 @@ await startServer({
   port: API_PORT,
   staticRoot,
   crypto,
+  systemHostname: 'codor-host-a',
   relay: {
     status: () => ({ enabled: relayStore.enabled, relay_url: relayStore.relayUrl, session_id: relayStore.sessionId, devices: relayStore.listDevices().length }),
     enable: (url) => { relayStore.enable(url); relayLink.restart(); },

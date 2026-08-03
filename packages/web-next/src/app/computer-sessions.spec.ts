@@ -19,7 +19,7 @@ import {
 import type { ConnectorOptions, RoomConnector } from './connector.js';
 
 const material = (id: string, gen = 1): HostedComputerMaterial => ({
-  computer: { id, gen, label: `Computer ${id}`, paired_at: `2026-08-0${gen}` },
+  computer: { id, gen, label: `Computer ${id}`, label_source: 'fallback', paired_at: `2026-08-0${gen}` },
   relay: {
     relay_url: 'wss://relay.test',
     session_id: id.repeat(64).slice(0, 64),
@@ -68,7 +68,7 @@ function harness() {
       };
       return tunnel;
     },
-    authenticate: async (loaded) => `token-${loaded.computer.id}`,
+    authenticate: async (loaded) => ({ token: `token-${loaded.computer.id}` }),
     loadRooms: async (token) => [summary(token.slice(-1), token.endsWith('B') ? 7 : 1)],
     makeConnector: (options: ConnectorOptions): RoomConnector => {
       const id = options.token.slice(-1);
@@ -98,8 +98,23 @@ function harness() {
     },
     rename: async (id, label) => {
       materials = materials.map((entry) => entry.computer.id === id
-        ? { ...entry, computer: { ...entry.computer, label } }
+        ? { ...entry, computer: { ...entry.computer, label, label_source: 'custom' } }
         : entry);
+    },
+    adoptHostname: async (id, hostname) => {
+      let adopted: HostedComputerMaterial['computer'] | undefined;
+      materials = materials.map((entry) => {
+        if (entry.computer.id !== id) return entry;
+        const source = entry.computer.label_source
+          ?? (/^Computer [1-9][0-9]*$/.test(entry.computer.label) ? 'fallback' : 'custom');
+        if (source === 'custom') {
+          adopted = entry.computer;
+          return entry;
+        }
+        adopted = { ...entry.computer, label: hostname, label_source: 'hostname' };
+        return { ...entry, computer: adopted };
+      });
+      return adopted;
     },
     sleep: () => new Promise(() => undefined),
   };
@@ -167,6 +182,35 @@ describe('ComputerSessionManager', () => {
     expect(h.connectorDisposals).toEqual(['B']);
     expect(manager.getSnapshot().computers.map((computer) => computer.id).sort()).toEqual(['A', 'C']);
     expect(manager.active()?.id).toBe('C');
+    manager.dispose();
+  });
+
+  it('adopts each signed session hostname only for its generated computer label', async () => {
+    const h = harness();
+    h.deps.authenticate = async (loaded) => ({
+      token: `token-${loaded.computer.id}`,
+      hostname: `host-${loaded.computer.id.toLowerCase()}`,
+    });
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+
+    expect(manager.getSnapshot().computers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'A', label: 'host-a' }),
+      expect.objectContaining({ id: 'B', label: 'host-b' }),
+    ]));
+
+    await manager.rename('A', 'Operator desk');
+    await h.connectorOptions.get('A')?.refreshToken?.();
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'A')?.label).toBe('Operator desk');
+    expect(manager.getSnapshot().computers.find((computer) => computer.id === 'B')?.label).toBe('host-b');
+    manager.dispose();
+  });
+
+  it('keeps generated labels when an older signed session omits hostname', async () => {
+    const h = harness();
+    const manager = new ComputerSessionManager(h.deps);
+    await manager.start();
+    expect(manager.getSnapshot().computers.map((computer) => computer.label).sort()).toEqual(['Computer A', 'Computer B']);
     manager.dispose();
   });
 

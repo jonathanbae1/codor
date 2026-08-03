@@ -1,0 +1,16 @@
+id: hosted-attachments-follow-active-computer-tunnel
+hash: a-8746b8e390e6
+title: Hosted attachment bytes follow the active computer's authenticated tunnel
+state: active
+statement: Web attachment upload and retrieval must use relayFetch so hosted
+  mode sends the exact file bytes and bearer authorization through the active
+  computer's tunnel while direct mode retains native fetch behavior; rendered
+  and downloaded attachment responses must become short-lived object URLs that
+  are revoked on replacement or unmount, and failed or non-raster responses must
+  remain inert without weakening the server's room, count, size, mime,
+  disposition, or nosniff contract.
+depends_on:
+  - attachments-are-capped-files-served-inert
+  - hosted-computer-sessions-keep-state-isolated
+  - hosted-computer-switching-reuses-warm-session
+created_by: relay-ux-followups-p1-data

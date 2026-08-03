@@ -3,7 +3,7 @@ import { Bot, ChevronRight, FileText, LoaderCircle, Minimize2, MoreVertical, Plu
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactUrl, fetchArtifacts, fetchRunEvents, refreshUsage, type AdapterRegistration, type ArtifactFeed, type MemberDetail } from '@runtime/api.js';
-import { attachmentUrl, formatAttachmentSize, isImageAttachment } from './attachments.js';
+import { formatAttachmentSize, isImageAttachment, useAttachmentObjectUrl } from './attachments.js';
 import { AgentControls, AgentIdentityControls, RolePresetControls, Section } from './AgentControls.js';
 import { FolderPicker } from './FolderPicker.js';
 import {
@@ -1317,6 +1317,8 @@ interface PreviewItem {
   sourceMsgId: number;
   /** Served, inert URL for attachments/artifacts; absent for embedded run images. */
   href?: string;
+  /** Attachment retrieval inputs; bearer auth never enters a presentable URL. */
+  attachment?: { room: string; id: string; mime: string };
   /** data: URI for an embedded run image; absent otherwise. */
   dataUri?: string;
   size?: number;
@@ -1359,7 +1361,7 @@ function PreviewTab(props: { room: string; token: () => string }) {
   const { images } = useRunImages(props.room, props.token);
   const { artifacts, errors } = useArtifacts(props.room, props.token);
   const messages = useClientStore((state) => roomSlice(state, props.room).messages);
-  const [active, setActive] = useState<PreviewItem | null>(null);
+  const [active, setActive] = useState<string | null>(null);
   const { room, token } = props;
 
   const items = useMemo(() => {
@@ -1378,7 +1380,7 @@ function PreviewTab(props: { room: string; token: () => string }) {
         out.push({
           key: `attachment:${att.id}`, kind: previewKind(att.mime), name: att.name,
           mediaType: att.mime, sourceMsgId: message.id,
-          href: attachmentUrl(room, att.id, token()), size: att.size,
+          attachment: { room, id: att.id, mime: att.mime }, size: att.size,
         });
       }
     }
@@ -1412,31 +1414,57 @@ function PreviewTab(props: { room: string; token: () => string }) {
         <ul className="nx-preview-grid">
           {items.map((item) => (
             <li key={item.key}>
-              {item.kind === 'raster'
-                ? <PreviewThumb item={item} onOpen={() => setActive(item)} />
-                : <PreviewCard item={item} />}
+              <PreviewEntry
+                item={item}
+                token={token}
+                active={active === item.key}
+                onOpen={() => setActive(item.key)}
+                onClose={() => setActive(null)}
+              />
             </li>
           ))}
         </ul>
       )}
-      {active !== null && <PreviewLightbox item={active} onClose={() => setActive(null)} />}
     </div>
   );
 }
 
-function PreviewThumb(props: { item: PreviewItem; onOpen: () => void }) {
-  const src = props.item.href ?? props.item.dataUri ?? '';
+function PreviewEntry(props: {
+  item: PreviewItem;
+  token: () => string;
+  active: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const attachment = props.item.attachment;
+  const loaded = useAttachmentObjectUrl(
+    attachment?.room ?? '',
+    attachment?.id ?? '',
+    attachment?.mime ?? '',
+    attachment === undefined ? '' : props.token(),
+  );
+  const href = attachment === undefined ? props.item.href ?? props.item.dataUri : loaded;
+  return (
+    <>
+      {props.item.kind === 'raster'
+        ? href !== undefined && <PreviewThumb item={props.item} src={href} onOpen={props.onOpen} />
+        : <PreviewCard item={props.item} href={href} />}
+      {props.active && href !== undefined && <PreviewLightbox item={props.item} src={href} onClose={props.onClose} />}
+    </>
+  );
+}
+
+function PreviewThumb(props: { item: PreviewItem; src: string; onOpen: () => void }) {
   return (
     <button type="button" className="nx-preview-thumb" data-testid="preview-thumb" onClick={props.onOpen}>
-      <img src={src} alt={props.item.name} loading="lazy" />
+      <img src={props.src} alt={props.item.name} loading="lazy" />
       <span className="nx-preview-thumb-source">#{props.item.sourceMsgId}</span>
     </button>
   );
 }
 
-function PreviewCard(props: { item: PreviewItem }) {
+function PreviewCard(props: { item: PreviewItem; href: string | undefined }) {
   const inert = props.item.kind === 'inert';
-  const href = props.item.href ?? props.item.dataUri ?? '';
   return (
     <div className="nx-preview-card" data-testid={inert ? 'preview-inert' : 'preview-doc'}>
       <FileText className="nx-preview-card-icon" aria-hidden="true" size={18} strokeWidth={1.75} />
@@ -1445,13 +1473,14 @@ function PreviewCard(props: { item: PreviewItem }) {
         {inert ? 'Download' : 'Document'} · #{props.item.sourceMsgId}
         {props.item.size !== undefined ? ` · ${formatAttachmentSize(props.item.size)}` : ''}
       </span>
-      <a className="nx-btn is-quiet nx-preview-card-action" href={href} download={props.item.name}>Download</a>
+      {props.href === undefined
+        ? <span className="nx-btn is-quiet nx-preview-card-action" aria-disabled="true">Download</span>
+        : <a className="nx-btn is-quiet nx-preview-card-action" href={props.href} download={props.item.name}>Download</a>}
     </div>
   );
 }
 
-function PreviewLightbox(props: { item: PreviewItem; onClose: () => void }) {
-  const src = props.item.href ?? props.item.dataUri ?? '';
+function PreviewLightbox(props: { item: PreviewItem; src: string; onClose: () => void }) {
   return (
     <Modal label={`Preview: ${props.item.name}`} onClose={props.onClose} testid="preview-lightbox" wide>
       <div className="nx-lightbox">
@@ -1461,11 +1490,11 @@ function PreviewLightbox(props: { item: PreviewItem; onClose: () => void }) {
           <IconButton icon={X} label="Close preview" size="sm" variant="quiet" data-testid="preview-lightbox-close" onClick={props.onClose} />
         </div>
         <div className="nx-lightbox-stage">
-          <img src={src} alt={props.item.name} />
+          <img src={props.src} alt={props.item.name} />
         </div>
         <div className="nx-lightbox-actions">
-          <a className="nx-btn is-secondary" href={src} target="_blank" rel="noreferrer">Open</a>
-          <a className="nx-btn is-primary" href={src} download={props.item.name}>Download</a>
+          <a className="nx-btn is-secondary" href={props.src} target="_blank" rel="noreferrer">Open</a>
+          <a className="nx-btn is-primary" href={props.src} download={props.item.name}>Download</a>
         </div>
       </div>
     </Modal>

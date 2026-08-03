@@ -4,6 +4,7 @@ import { forgetComputer } from './relay-records.js';
 import {
   type Kv,
   type RelayMaterial,
+  adoptComputerHostname,
   forgetComputerStore,
   hydrateActive,
   listComputers,
@@ -55,7 +56,9 @@ describe('relay-store (generation-swapped)', () => {
     await kv.put('relay', { relay_url: 'legacy' });
     await kv.put('peer:switchboard', { device_id: 'sw1' });
     await migrateIfNeeded(kv, { id: 'sw1', label: 'Computer 1', paired_at: '2026-01-01' });
-    expect((await listComputers(kv)).computers).toEqual([{ id: 'sw1', label: 'Computer 1', paired_at: '2026-01-01', gen: 1 }]);
+    expect((await listComputers(kv)).computers).toEqual([{
+      id: 'sw1', label: 'Computer 1', label_source: 'fallback', paired_at: '2026-01-01', gen: 1,
+    }]);
     expect(await kv.get('computer:sw1:1:relay')).toEqual({ relay_url: 'legacy' });
     await migrateIfNeeded(kv, { id: 'other', label: 'x', paired_at: '2026-02-02' });
     expect((await listComputers(kv)).computers.map((c) => c.id)).toEqual(['sw1']);
@@ -168,8 +171,28 @@ describe('relay-store (generation-swapped)', () => {
     const kv = mapKv();
     await pair(kv, 'A', '2026-01-01');
     await renameComputer(kv, 'A', 'My laptop');
-    expect((await listComputers(kv)).computers[0]?.label).toBe('My laptop');
+    expect((await listComputers(kv)).computers[0]).toMatchObject({ label: 'My laptop', label_source: 'custom' });
     expect(activeRelay(kv)).toBe('A');
+  });
+
+  it('adopts authenticated hostnames only for the addressed generated label', async () => {
+    const kv = mapKv();
+    await recordPairedComputer(
+      kv,
+      { id: 'A', label: 'Computer 1', paired_at: '1' },
+      material('A'),
+    );
+    await recordPairedComputer(
+      kv,
+      { id: 'B', label: 'Desk', paired_at: '2' },
+      material('B'),
+    );
+    expect(await adoptComputerHostname(kv, 'A', 'host-a')).toMatchObject({ label: 'host-a', label_source: 'hostname' });
+    expect(await adoptComputerHostname(kv, 'B', 'host-b')).toMatchObject({ label: 'Desk', label_source: 'custom' });
+    expect((await listComputers(kv)).computers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'A', label: 'host-a', label_source: 'hostname' }),
+      expect.objectContaining({ id: 'B', label: 'Desk', label_source: 'custom' }),
+    ]));
   });
 
   it('rejects a computer id containing the key-path separator', async () => {

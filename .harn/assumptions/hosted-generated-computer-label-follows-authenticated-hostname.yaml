@@ -1,0 +1,14 @@
+id: hosted-generated-computer-label-follows-authenticated-hostname
+hash: a-348dbf57c19b
+title: Hosted generated computer labels adopt their authenticated hostnames
+state: active
+statement: Each hosted computer session must apply a valid hostname returned by
+  its own signed session only to that indexed computer when its label is still
+  fallback- or hostname-managed, persist the label source with the index, and
+  never replace an explicit operator rename; legacy Computer N entries are
+  treated as fallback-managed, other legacy labels are treated as custom, and an
+  absent or invalid hostname leaves the current label unchanged.
+depends_on:
+  - authenticated-browser-session-reveals-bounded-hostname
+  - hosted-computer-sessions-keep-state-isolated
+created_by: relay-ux-followups-p1-data

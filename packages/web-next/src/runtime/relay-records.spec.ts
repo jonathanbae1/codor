@@ -7,6 +7,8 @@ import {
   emptyIndex,
   forgetComputer,
   migrateFromV1,
+  isBoundedRelayHostname,
+  relayComputerLabelSource,
   selectActiveComputer,
   setActive,
 } from './relay-records.js';
@@ -97,5 +99,28 @@ describe('migrateFromV1', () => {
   });
   it('an install with no legacy record migrates to empty', () => {
     expect(migrateFromV1(undefined).computers).toHaveLength(0);
+  });
+});
+
+describe('relayComputerLabelSource', () => {
+  it('treats only legacy generated labels as fallback-managed', () => {
+    expect(relayComputerLabelSource({ ...pc('a', '1'), label: 'Computer 12' })).toBe('fallback');
+    expect(relayComputerLabelSource({ ...pc('a', '1'), label: 'My workstation' })).toBe('custom');
+  });
+
+  it('honors persisted provenance over the label shape', () => {
+    expect(relayComputerLabelSource({ ...pc('a', '1'), label: 'Computer 1', label_source: 'custom' })).toBe('custom');
+    expect(relayComputerLabelSource({ ...pc('a', '1'), label: 'host-a', label_source: 'hostname' })).toBe('hostname');
+  });
+});
+
+describe('isBoundedRelayHostname', () => {
+  it('accepts only the bounded sanitized session shape', () => {
+    expect(isBoundedRelayHostname('workstation-7.local')).toBe(true);
+    expect(isBoundedRelayHostname('x'.repeat(63))).toBe(true);
+    expect(isBoundedRelayHostname('x'.repeat(64))).toBe(false);
+    expect(isBoundedRelayHostname('host name')).toBe(false);
+    expect(isBoundedRelayHostname('<script>')).toBe(false);
+    expect(isBoundedRelayHostname('')).toBe(false);
   });
 });
