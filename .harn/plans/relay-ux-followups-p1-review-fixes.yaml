@@ -63,3 +63,5 @@ anchors:
       action: change
       reason: Persist inferred custom provenance during the existing serialized
         hostname-adoption operation while preserving the operator's label.
+applied:
+  applied_at: 2026-08-03T02:45:42.247Z

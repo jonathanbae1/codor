@@ -195,6 +195,28 @@ describe('relay-store (generation-swapped)', () => {
     ]));
   });
 
+  it('persists inferred custom provenance for a legacy custom label', async () => {
+    const kv = mapKv();
+    await pair(kv, 'A', '2026-01-01');
+    const index = await listComputers(kv);
+    await kv.put('relay-index', {
+      ...index,
+      computers: index.computers.map(({ label_source: _source, ...computer }) => ({
+        ...computer,
+        label: 'Legacy desk',
+      })),
+    });
+
+    expect(await adoptComputerHostname(kv, 'A', 'host-a')).toMatchObject({
+      label: 'Legacy desk',
+      label_source: 'custom',
+    });
+    expect((await listComputers(kv)).computers[0]).toMatchObject({
+      label: 'Legacy desk',
+      label_source: 'custom',
+    });
+  });
+
   it('rejects a computer id containing the key-path separator', async () => {
     const kv = mapKv();
     await expect(recordPairedComputer(kv, { id: 'a:b', label: 'x', paired_at: '1' }, material('a:b'))).rejects.toThrow(/must not contain/);

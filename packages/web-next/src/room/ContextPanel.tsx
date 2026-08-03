@@ -3,7 +3,7 @@ import { Bot, ChevronRight, FileText, LoaderCircle, Minimize2, MoreVertical, Plu
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactUrl, fetchArtifacts, fetchRunEvents, refreshUsage, type AdapterRegistration, type ArtifactFeed, type MemberDetail } from '@runtime/api.js';
-import { formatAttachmentSize, isImageAttachment, useAttachmentObjectUrl } from './attachments.js';
+import { formatAttachmentSize, isImageAttachment, useAttachmentDownload, useAttachmentObjectUrl } from './attachments.js';
 import { AgentControls, AgentIdentityControls, RolePresetControls, Section } from './AgentControls.js';
 import { FolderPicker } from './FolderPicker.js';
 import {
@@ -1437,19 +1437,48 @@ function PreviewEntry(props: {
   onClose: () => void;
 }) {
   const attachment = props.item.attachment;
-  const loaded = useAttachmentObjectUrl(
-    attachment?.room ?? '',
-    attachment?.id ?? '',
-    attachment?.mime ?? '',
-    attachment === undefined ? '' : props.token(),
-  );
-  const href = attachment === undefined ? props.item.href ?? props.item.dataUri : loaded;
+  if (attachment !== undefined) return <AttachmentPreviewEntry {...props} attachment={attachment} />;
+  const href = props.item.href ?? props.item.dataUri;
   return (
     <>
       {props.item.kind === 'raster'
         ? href !== undefined && <PreviewThumb item={props.item} src={href} onOpen={props.onOpen} />
         : <PreviewCard item={props.item} href={href} />}
       {props.active && href !== undefined && <PreviewLightbox item={props.item} src={href} onClose={props.onClose} />}
+    </>
+  );
+}
+
+function AttachmentPreviewEntry(props: {
+  item: PreviewItem;
+  attachment: NonNullable<PreviewItem['attachment']>;
+  token: () => string;
+  active: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const { attachment, item } = props;
+  const token = props.token();
+  const loaded = useAttachmentObjectUrl(
+    attachment.room,
+    attachment.id,
+    attachment.mime,
+    token,
+    item.kind === 'raster',
+  );
+  const download = useAttachmentDownload(
+    attachment.room,
+    attachment.id,
+    attachment.mime,
+    token,
+    item.name,
+  );
+  return (
+    <>
+      {item.kind === 'raster'
+        ? loaded !== undefined && <PreviewThumb item={item} src={loaded} onOpen={props.onOpen} />
+        : <PreviewCard item={item} busy={download.busy} onDownload={() => { void download.download(); }} />}
+      {props.active && loaded !== undefined && <PreviewLightbox item={item} src={loaded} onClose={props.onClose} />}
     </>
   );
 }
@@ -1463,7 +1492,12 @@ function PreviewThumb(props: { item: PreviewItem; src: string; onOpen: () => voi
   );
 }
 
-function PreviewCard(props: { item: PreviewItem; href: string | undefined }) {
+function PreviewCard(props: {
+  item: PreviewItem;
+  href?: string;
+  busy?: boolean;
+  onDownload?: () => void;
+}) {
   const inert = props.item.kind === 'inert';
   return (
     <div className="nx-preview-card" data-testid={inert ? 'preview-inert' : 'preview-doc'}>
@@ -1473,9 +1507,13 @@ function PreviewCard(props: { item: PreviewItem; href: string | undefined }) {
         {inert ? 'Download' : 'Document'} · #{props.item.sourceMsgId}
         {props.item.size !== undefined ? ` · ${formatAttachmentSize(props.item.size)}` : ''}
       </span>
-      {props.href === undefined
-        ? <span className="nx-btn is-quiet nx-preview-card-action" aria-disabled="true">Download</span>
-        : <a className="nx-btn is-quiet nx-preview-card-action" href={props.href} download={props.item.name}>Download</a>}
+      {props.onDownload !== undefined
+        ? <button type="button" className="nx-btn is-quiet nx-preview-card-action" disabled={props.busy} onClick={props.onDownload}>
+            {props.busy ? 'Preparing…' : 'Download'}
+          </button>
+        : props.href === undefined
+          ? <span className="nx-btn is-quiet nx-preview-card-action" aria-disabled="true">Download</span>
+          : <a className="nx-btn is-quiet nx-preview-card-action" href={props.href} download={props.item.name}>Download</a>}
     </div>
   );
 }

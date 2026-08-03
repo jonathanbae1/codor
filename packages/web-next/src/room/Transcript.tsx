@@ -30,7 +30,13 @@ import {
   requestRunJournal,
   useRunJournalVersion,
 } from './run-journals.js';
-import { formatAttachmentSize, isImageAttachment, useAttachmentObjectUrl } from './attachments.js';
+import {
+  formatAttachmentSize,
+  isImageAttachment,
+  useAttachmentDownload,
+  useAttachmentObjectUrl,
+  useNearViewport,
+} from './attachments.js';
 import { MiniWaveform } from './MiniWaveform.js';
 import { formatElapsed } from './voice.js';
 import { presentRunTimeline, type CompactionRunTimelineItem } from './run-timeline.js';
@@ -856,16 +862,40 @@ function MessageAttachments(props: { room: string; token: () => string; attachme
 }
 
 function MessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
+  return isImageAttachment(props.attachment.mime)
+    ? <RasterMessageAttachment {...props} />
+    : <DownloadMessageAttachment {...props} />;
+}
+
+function RasterMessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
   const { attachment } = props;
-  const url = useAttachmentObjectUrl(props.room, attachment.id, attachment.mime, props.token);
-  if (isImageAttachment(attachment.mime)) {
-    if (url === undefined) return null;
-    return (
-      <a className="nx-attach-image" href={url} target="_blank" rel="noreferrer" data-testid={`attachment-${attachment.id}`}>
-        <img src={url} alt={attachment.name} loading="lazy" />
-      </a>
-    );
-  }
+  const [nearRef, near] = useNearViewport();
+  const url = useAttachmentObjectUrl(props.room, attachment.id, attachment.mime, props.token, near);
+  if (url === undefined) return (
+    <span
+      ref={nearRef}
+      className="nx-attach-image is-loading"
+      role="img"
+      aria-label={`${attachment.name} image loading`}
+      data-testid={`attachment-${attachment.id}`}
+    />
+  );
+  return (
+    <a ref={nearRef} className="nx-attach-image" href={url} target="_blank" rel="noreferrer" data-testid={`attachment-${attachment.id}`}>
+      <img src={url} alt={attachment.name} loading="lazy" />
+    </a>
+  );
+}
+
+function DownloadMessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
+  const { attachment } = props;
+  const download = useAttachmentDownload(
+    props.room,
+    attachment.id,
+    attachment.mime,
+    props.token,
+    attachment.name,
+  );
   const contents = (
     <>
       <Paperclip size={14} aria-hidden="true" />
@@ -873,12 +903,16 @@ function MessageAttachment(props: { room: string; token: string; attachment: Att
       <span className="nx-attach-size">{formatAttachmentSize(attachment.size)}</span>
     </>
   );
-  return url === undefined ? (
-    <span className="nx-attach-download" data-testid={`attachment-${attachment.id}`}>{contents}</span>
-  ) : (
-    <a className="nx-attach-download" href={url} download={attachment.name} data-testid={`attachment-${attachment.id}`}>
+  return (
+    <button
+      type="button"
+      className="nx-attach-download"
+      disabled={download.busy}
+      data-testid={`attachment-${attachment.id}`}
+      onClick={() => { void download.download(); }}
+    >
       {contents}
-    </a>
+    </button>
   );
 }
 

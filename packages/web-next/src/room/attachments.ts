@@ -2,7 +2,7 @@
 // authenticated endpoint before it rides the post frame, and build served URLs for
 // rendering. Kept in web-next (not @runtime/api) so the whole feature is one batch.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { relayFetch } from '@runtime/relay-transport.js';
 
@@ -83,13 +83,14 @@ export function useAttachmentObjectUrl(
   id: string,
   mime: string,
   token: string,
+  enabled = true,
 ): string | undefined {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     let cancelled = false;
     let resource: AttachmentObjectUrl | undefined;
     setUrl(undefined);
-    if (room === '' || id === '' || token === '') return undefined;
+    if (!enabled || room === '' || id === '' || token === '') return undefined;
     void loadAttachmentObjectUrl(room, id, mime, token)
       .then((loaded) => {
         resource = loaded;
@@ -101,8 +102,106 @@ export function useAttachmentObjectUrl(
       cancelled = true;
       resource?.revoke();
     };
-  }, [id, mime, room, token]);
+  }, [enabled, id, mime, room, token]);
   return url;
+}
+
+/** Transcript raster placeholders begin loading only when they enter a bounded
+ * margin around the viewport. Old browsers without IntersectionObserver retain
+ * a safe eager fallback instead of leaving images permanently blank. */
+export function useNearViewport(): [(node: HTMLElement | null) => void, boolean] {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  const ref = useCallback((next: HTMLElement | null) => setNode(next), []);
+  useEffect(() => {
+    if (near || node === null) return undefined;
+    if (typeof IntersectionObserver === 'undefined') {
+      setNear(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setNear(true);
+      observer.disconnect();
+    }, { rootMargin: '800px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [near, node]);
+  return [ref, near];
+}
+
+export interface AttachmentDownload {
+  download(): Promise<void>;
+  busy: boolean;
+}
+
+/** Fetch a non-renderable attachment only in response to an explicit operator
+ * click, invoke a transient browser download, then revoke the URL. A pending
+ * request is single-flight and late completions after replacement/unmount are
+ * revoked without navigating. */
+export function useAttachmentDownload(
+  room: string,
+  id: string,
+  mime: string,
+  token: string,
+  name: string,
+): AttachmentDownload {
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
+  const pending = useRef<Promise<void>>();
+  const resource = useRef<AttachmentObjectUrl>();
+  const revokeTimer = useRef<number>();
+
+  useEffect(() => {
+    generation.current += 1;
+    pending.current = undefined;
+    setBusy(false);
+    return () => {
+      generation.current += 1;
+      if (revokeTimer.current !== undefined) window.clearTimeout(revokeTimer.current);
+      resource.current?.revoke();
+      resource.current = undefined;
+    };
+  }, [id, mime, name, room, token]);
+
+  const download = useCallback((): Promise<void> => {
+    if (pending.current) return pending.current;
+    if (resource.current) return Promise.resolve();
+    const started = generation.current;
+    setBusy(true);
+    const run = loadAttachmentObjectUrl(room, id, mime, token)
+      .then((loaded) => {
+        if (loaded === undefined) return;
+        if (generation.current !== started) {
+          loaded.revoke();
+          return;
+        }
+        resource.current = loaded;
+        const anchor = document.createElement('a');
+        anchor.href = loaded.url;
+        anchor.download = name;
+        anchor.style.display = 'none';
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        revokeTimer.current = window.setTimeout(() => {
+          if (resource.current === loaded) resource.current = undefined;
+          loaded.revoke();
+          revokeTimer.current = undefined;
+          if (generation.current === started) setBusy(false);
+        }, 0);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (generation.current !== started) return;
+        pending.current = undefined;
+        if (resource.current === undefined && revokeTimer.current === undefined) setBusy(false);
+      });
+    pending.current = run;
+    return run;
+  }, [id, mime, name, room, token]);
+
+  return { download, busy };
 }
 // harn:end hosted-attachments-follow-active-computer-tunnel
 

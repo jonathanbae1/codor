@@ -282,7 +282,15 @@ export async function adoptComputerHostname(
     const index = await readIndex(kv);
     const current = index.computers.find((computer) => computer.id === id);
     if (!current) return undefined;
-    if (relayComputerLabelSource(current) === 'custom') return current;
+    if (relayComputerLabelSource(current) === 'custom') {
+      if (current.label_source === 'custom') return current;
+      const normalized = { ...current, label_source: 'custom' as const };
+      await kv.put(INDEX_KEY, {
+        ...index,
+        computers: index.computers.map((computer) => computer.id === id ? normalized : computer),
+      });
+      return normalized;
+    }
     const adopted = { ...current, label: hostname, label_source: 'hostname' as const };
     await kv.put(INDEX_KEY, {
       ...index,

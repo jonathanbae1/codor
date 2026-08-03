@@ -9,7 +9,9 @@ vi.mock('@runtime/relay-transport.js', () => ({ relayFetch: transport.fetch }));
 import {
   loadAttachmentObjectUrl,
   uploadAttachment,
+  useAttachmentDownload,
   useAttachmentObjectUrl,
+  useNearViewport,
 } from './attachments.js';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -104,5 +106,92 @@ describe('hosted attachment transport', () => {
     expect(host.textContent).toBe('blob:second');
     await act(async () => { root.unmount(); });
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:second');
+  });
+
+  it('does not fetch a raster until its viewport gate opens', async () => {
+    let intersect: IntersectionObserverCallback | undefined;
+    class FakeIntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '800px 0px';
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) { intersect = callback; }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+    }
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    transport.fetch.mockResolvedValue(bytes([1], 'image/png'));
+    createObjectURL.mockReturnValue('blob:near');
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    const Consumer = () => {
+      const [nearRef, near] = useNearViewport();
+      const url = useAttachmentObjectUrl('room', 'image', 'image/png', 'token', near);
+      return createElement('span', { ref: nearRef }, url);
+    };
+
+    await act(async () => { root.render(createElement(Consumer)); });
+    expect(transport.fetch).not.toHaveBeenCalled();
+    await act(async () => {
+      intersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toBe('blob:near');
+    await act(async () => { root.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to eager raster loading without IntersectionObserver', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    transport.fetch.mockResolvedValue(bytes([1], 'image/png'));
+    createObjectURL.mockReturnValue('blob:fallback');
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    const Consumer = () => {
+      const [nearRef, near] = useNearViewport();
+      const url = useAttachmentObjectUrl('room', 'image', 'image/png', 'token', near);
+      return createElement('span', { ref: nearRef }, url);
+    };
+
+    await act(async () => {
+      root.render(createElement(Consumer));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toBe('blob:fallback');
+    await act(async () => { root.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches a document only on click, coalesces duplicate clicks, and revokes after download', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    transport.fetch.mockReturnValue(new Promise<Response>((resolve) => { resolveFetch = resolve; }));
+    createObjectURL.mockReturnValue('blob:document');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    const Consumer = () => {
+      const resource = useAttachmentDownload('room', 'document', 'text/plain', 'token', 'notes.txt');
+      return createElement('button', { onClick: () => { void resource.download(); } }, 'Download');
+    };
+
+    await act(async () => { root.render(createElement(Consumer)); });
+    expect(transport.fetch).not.toHaveBeenCalled();
+    await act(async () => {
+      host.querySelector('button')?.click();
+      host.querySelector('button')?.click();
+    });
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveFetch?.(bytes([1, 2, 3], 'application/octet-stream'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:document');
+    await act(async () => { root.unmount(); });
+    click.mockRestore();
   });
 });

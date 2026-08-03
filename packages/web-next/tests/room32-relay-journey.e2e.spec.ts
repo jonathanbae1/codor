@@ -142,6 +142,10 @@ test.describe('relay tunnel journey', () => {
     // Restart the host → the reconnect layering re-opens on the new session.
     await control('/relay-up');
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 40_000 });
+    // The connection pill flips on the app-socket open edge; allow its resumed
+    // subscription to settle before testing the first post on the new session.
+    await page.waitForTimeout(1_000);
+    await expect(page.getByTestId('connection')).toHaveClass(/is-live/);
 
     // Still functional after recovery — a fresh app-WS stream on the NEW session.
     await input.fill('@viewer back after recovery');

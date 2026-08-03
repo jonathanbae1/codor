@@ -38,6 +38,10 @@ async function openPreview(page: Page, url: string): Promise<void> {
 
 test.describe('preview gallery', () => {
   test('combines durable artifacts, message attachments, and classifies by type', async ({ page }) => {
+    const attachmentRetrievals: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'GET' && request.url().includes('/attachments/')) attachmentRetrievals.push(request.url());
+    });
     await stubArtifacts(page, 'files', ARTIFACTS);
     await openPreview(page, FILES);
 
@@ -55,7 +59,12 @@ test.describe('preview gallery', () => {
     await expect(gallery.getByTestId('preview-doc').filter({ hasText: 'report.pdf' })).toBeVisible();
     const attachmentDocument = gallery.getByTestId('preview-doc').filter({ hasText: 'notes.txt' });
     await expect(attachmentDocument).toBeVisible();
-    await expect(attachmentDocument.getByRole('link', { name: 'Download' })).toHaveAttribute('href', /^blob:/);
+    const documentRetrievals = () => attachmentRetrievals.filter((url) => url.endsWith(`${'0'.repeat(31)}2`));
+    expect(documentRetrievals()).toHaveLength(0); // raster only; document bytes remain untouched
+    const downloadEvent = page.waitForEvent('download');
+    await attachmentDocument.getByRole('button', { name: 'Download' }).click();
+    expect((await downloadEvent).suggestedFilename()).toBe('notes.txt');
+    expect(documentRetrievals()).toHaveLength(1);
 
     // svg is active content: it is NEVER an inline image — only an inert download.
     const inert = gallery.getByTestId('preview-inert').filter({ hasText: 'diagram.svg' });
