@@ -507,6 +507,10 @@ export class Daemon {
   // deferred (queued) instead of racing the engine for the compaction boundary.
   private readonly compacting = new Set<string>();
   // harn:end manual-compaction-leases-out-turn-admission
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-runtime-lease
+  /** Members whose native runtime is being retired before its durable context is cleared. */
+  private readonly resettingContext = new Set<string>();
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   private readonly releasedDeliveries = new Set<string>();
   private readonly operatorInterrupts = new Set<string>();
   /** Members whose in-flight turn THIS daemon's lifecycle is interrupting, so
@@ -827,9 +831,17 @@ export class Daemon {
     const existing = this.lastUsage.get(member.id);
     if (existing !== undefined && existing.estimated !== true) return;
     const ref = member.session_ref;
+    const model = member.model;
     this.track((async () => {
       const peeked = await adapter.peekContextUsage!(ref);
       if (peeked === undefined) return;
+      const fresh = this.store.getMember(room, member.id);
+      if (
+        fresh?.kind !== 'agent' ||
+        fresh.removed_ts !== undefined ||
+        fresh.session_ref !== ref ||
+        fresh.model !== model
+      ) return;
       // The artifact scan cannot see settings-applied windows (e.g. the 1m
       // beta), so an engine-reported window persisted on the member outranks
       // the peek's curated guess; the used-tokens estimate stays the peek's.
@@ -839,8 +851,7 @@ export class Daemon {
       if (current !== undefined && current.estimated !== true) return; // live won meanwhile
       if (isDeepStrictEqual(current, seeded)) return;
       this.lastUsage.set(member.id, { ...seeded });
-      const fresh = this.store.getMember(room, member.id);
-      if (fresh !== undefined && fresh.removed_ts === undefined) this.emitMember(room, fresh);
+      this.emitMember(room, fresh);
     })().catch(() => undefined));
   }
   // harn:end last-agent-usage-is-transient-and-seeded
@@ -851,7 +862,7 @@ export class Daemon {
   }
   // harn:end last-agent-usage-is-transient-and-seeded
 
-  // harn:assume engine-reported-window-outlives-restarts ref=persisted-window-seed
+  // harn:assume current-context-window-truth-outlives-restarts ref=persisted-window-seed
   /** Persist the engine's reported window (a stable engine fact, unlike usage)
    *  so estimated seeds after a restart present the true ceiling. */
   private landContextWindow(room: string, memberId: string, usage: AgentUsage | undefined): void {
@@ -860,7 +871,7 @@ export class Daemon {
     if (this.store.getMemberContextWindow(room, memberId) === window) return;
     this.store.setMemberContextWindow(room, memberId, window);
   }
-  // harn:end engine-reported-window-outlives-restarts
+  // harn:end current-context-window-truth-outlives-restarts
 
   private emitMember(room: string, member: Member): void {
     // harn:assume live-agent-waits-are-transient ref=wait-member-projection
@@ -1731,6 +1742,9 @@ export class Daemon {
     const existing = this.store.getMember(room, memberId);
     if (!existing || existing.kind !== 'agent') throw new Error(`no such agent member: ${memberId}`);
     if (existing.custody !== 'owned') throw new Error(`member @${existing.handle} is not switchboard-owned`);
+    if (this.resettingContext.has(memberId)) {
+      throw new Error(`member @${existing.handle} context is being cleared`);
+    }
     // harn:assume cli-member-recovery-is-actionable ref=attach-error-remediation
     if (existing.state === 'dead') {
       throw new Error(
@@ -1945,6 +1959,12 @@ export class Daemon {
     // The next turn rebuilds from the row we just wrote. A turn already in flight keeps
     // the session it started with — including for the ask cards it has already raised.
     this.staleSessions.add(memberId);
+    // A model change is a denominator boundary. Do not display or seed the next
+    // model from context-window evidence reported by the previous one.
+    if (member.model !== updated.model) {
+      this.store.setMemberContextWindow(room, memberId, undefined);
+      this.lastUsage.delete(memberId);
+    }
 
     // harn:assume a-permission-change-is-never-silent ref=configure-audit-message
     // Raising what an agent may do to the operator's machine is a consequential act. A
@@ -2074,6 +2094,9 @@ export class Daemon {
     if (this.compacting.has(memberId)) {
       throw new Error(`@${member.handle} is already compacting`);
     }
+    if (this.resettingContext.has(memberId)) {
+      throw new Error(`@${member.handle} context is being cleared`);
+    }
     const session = this.sessions.get(memberId);
     if (session === undefined) throw new Error(`@${member.handle} has no live session to compact`);
     const adapter = this.requireAdapter(member.harness);
@@ -2088,7 +2111,10 @@ export class Daemon {
     this.compacting.add(memberId);
     try {
       const usage = await adapter.compactSession(session);
-      this.landCompactedUsage(room, memberId, usage);
+      this.landCompactedUsage(room, memberId, usage, {
+        model: member.model,
+        sessionRef: member.session_ref,
+      });
       // A successful manual compaction summarizes the codor briefing out of the
       // engine's context just like an auto-compaction, but it never surfaces the
       // timeline WireEvent outward (the adapter observes it internally), so the
@@ -2100,18 +2126,100 @@ export class Daemon {
     }
   }
 
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-runtime-lease
+  /**
+   * Retire one idle agent's native runtime, then commit a fresh-context boundary.
+   * The reset lease is acquired synchronously before the first await so a later
+   * delivery stays queued and becomes the first delivery through sessionFor.
+   */
+  async clearMemberContext(room: string, memberId: string, byMemberId: string): Promise<void> {
+    const actor = this.store.getMember(room, byMemberId);
+    if (actor?.kind !== 'human' || (actor.role !== 'owner' && actor.role !== 'admin')) {
+      throw new Error('forbidden: only owners and admins can clear an agent context');
+    }
+    const member = this.store.getMember(room, memberId);
+    if (member?.kind !== 'agent' || member.removed_ts !== undefined) {
+      throw new Error(`no such agent member: ${memberId}`);
+    }
+    if (member.host !== undefined && member.host !== this.hostId) {
+      throw new Error(`@${member.handle} is not local to this switchboard`);
+    }
+    if (member.custody !== 'owned') {
+      throw new Error(`@${member.handle} is not switchboard-owned`);
+    }
+    if (member.session_ref === undefined) {
+      throw new Error(`@${member.handle} already has a fresh context`);
+    }
+    if (member.state === 'running' || this.inflight.has(memberId)) {
+      throw new Error(`@${member.handle} is running — stop the turn before clearing context`);
+    }
+    if (member.state !== 'idle') {
+      throw new Error(`@${member.handle} is ${member.state} — only an idle agent context can be cleared`);
+    }
+    if (this.pendingAttach.has(memberId) || this.store.getAttachLeaseForMember(memberId)) {
+      throw new Error(`@${member.handle} has an active interactive attach lease`);
+    }
+    if (this.compacting.has(memberId)) {
+      throw new Error(`@${member.handle} is compacting`);
+    }
+    if (this.resettingContext.has(memberId)) {
+      throw new Error(`@${member.handle} context is already being cleared`);
+    }
+    const pending = this.store.listDeliveries(room, { recipient: memberId })
+      .some((delivery) => delivery.state !== 'consumed');
+    if (pending) {
+      throw new Error(`@${member.handle} has pending delivery — let it finish before clearing context`);
+    }
+    if (member.harness === undefined) throw new Error(`@${member.handle} has no harness`);
+    const adapter = this.requireAdapter(member.harness);
+    if (adapter.resetSession === undefined) {
+      throw new Error(`harness '${member.harness}' does not support clearing context`);
+    }
+
+    this.resettingContext.add(memberId);
+    try {
+      await adapter.resetSession(this.sessions.get(memberId));
+      const cleared = this.store.clearAgentContext(room, memberId);
+      this.sessions.delete(memberId);
+      this.staleSessions.delete(memberId);
+      this.lastUsage.delete(memberId);
+      this.memberWaits.delete(memberId);
+      this.groupWaits.delete(memberId);
+      this.emitMember(room, cleared);
+      this.postSystemMessage(
+        room,
+        `@${actor.handle} cleared @${member.handle}'s native context; channel history and configuration were preserved`,
+      );
+    } finally {
+      this.resettingContext.delete(memberId);
+      this.track(this.maybeStartTurn(room, memberId));
+    }
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   /**
    * The re-baseline takes the same transient path live turn telemetry does.
    * A member frame goes out on EVERY successful compaction, even when the
    * engine reported no usage: the UI needs a completion edge to stop showing
    * the operator a spinner, and silence is indistinguishable from still-working.
    */
-  private landCompactedUsage(room: string, memberId: string, usage?: AgentUsage): void {
-    if (usage !== undefined) {
+  private landCompactedUsage(
+    room: string,
+    memberId: string,
+    usage: AgentUsage | undefined,
+    expected: { model: string | undefined; sessionRef: string | undefined },
+  ): void {
+    const current = this.store.getMember(room, memberId);
+    if (
+      usage !== undefined &&
+      current?.kind === 'agent' &&
+      current.removed_ts === undefined &&
+      current.model === expected.model &&
+      current.session_ref === expected.sessionRef
+    ) {
       this.lastUsage.set(memberId, { ...usage });
       this.landContextWindow(room, memberId, usage);
     }
-    const current = this.store.getMember(room, memberId);
     if (current !== undefined) this.emitMember(room, current);
   }
   // harn:end manual-compaction-is-an-operator-act
@@ -3016,6 +3124,7 @@ export class Daemon {
     // A pending operator compaction leases out turn admission: defer the delivery
     // (it stays queued) so its turn never starts and steals the compaction boundary.
     if (this.compacting.has(memberId)) return { refusal: `member @${member.handle} is compacting` };
+    if (this.resettingContext.has(memberId)) return { refusal: `member @${member.handle} context is being cleared` };
     if (member.custody !== 'owned') return { refusal: `member @${member.handle} is not switchboard-owned` };
     if (this.isRemoteMember(member) && !this.residency?.isReachable(member.host)) {
       return { refusal: `member @${member.handle} resident switchboard is unreachable` };
@@ -3237,6 +3346,8 @@ export class Daemon {
         // Live usage is member runtime state: broadcast it, but do not append it
         // to the durable run journal or change log.
         if (event.type === 'usage_updated') {
+          const current = this.store.getMember(room, member.id);
+          if (current === undefined || current.model !== member.model || current.removed_ts !== undefined) continue;
           this.landContextWindow(room, member.id, event.usage);
           // Keyed by bare member id like every sibling per-member map (ULIDs
           // never repeat, so no cross-room collision). Skip the re-broadcast
@@ -3318,8 +3429,11 @@ export class Daemon {
         } else if (journalEvent.type === 'run.completed') {
           // harn:assume last-agent-usage-is-transient-and-seeded ref=last-usage-runtime-registry
           if (journalEvent.agent_usage !== undefined) {
-            this.lastUsage.set(member.id, { ...journalEvent.agent_usage });
-            this.landContextWindow(room, member.id, journalEvent.agent_usage);
+            const current = this.store.getMember(room, member.id);
+            if (current !== undefined && current.model === member.model && current.removed_ts === undefined) {
+              this.lastUsage.set(member.id, { ...journalEvent.agent_usage });
+              this.landContextWindow(room, member.id, journalEvent.agent_usage);
+            }
           }
           // harn:end last-agent-usage-is-transient-and-seeded
           // harn:assume failed-run-details-never-route-as-replies ref=failed-run-finalization

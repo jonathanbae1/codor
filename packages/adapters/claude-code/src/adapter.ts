@@ -955,6 +955,22 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     void this.retireQuery(runtime, true);
   }
 
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=claude-session-reset
+  async resetSession(session: Session | undefined): Promise<void> {
+    if (session === undefined) return; // restart: no retained query exists
+    const runtime = this.liveRuntime(session);
+    if (runtime === undefined) return;
+    if (runtime.active !== null && !runtime.active.terminal) {
+      throw new Error('cannot clear Claude context while a turn is in flight');
+    }
+    if (runtime.pendingCompaction !== null) {
+      throw new Error('cannot clear Claude context while compaction is in flight');
+    }
+    await this.retireQuery(runtime, true);
+    this.runtimes.delete(session);
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   /** Session ids from the transcript store (~/.claude/projects/<cwd-slug>/). */
   discoverSessions(): SessionRef[] {
     const refs: SessionRef[] = [];

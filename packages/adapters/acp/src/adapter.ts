@@ -49,6 +49,22 @@ interface AcpRuntime {
   retiring: boolean;
 }
 
+function waitForRuntimeExit(child: ChildProcess, label: string): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      reject(new Error(`${label} did not exit after retirement`));
+    }, 10_000);
+    timer.unref?.();
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once('exit', onExit);
+  });
+}
+
 const safeFailure = (message: string): Error => new Error(`ACP agent ${message}`);
 
 function executableCandidates(executable: string, env: NodeJS.ProcessEnv): string[] {
@@ -360,6 +376,20 @@ export class AcpAdapter implements HarnessAdapter {
     }
     void runtime.connection.cancel({ sessionId: runtime.sessionId }).catch(() => this.terminate(runtime));
   }
+
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=acp-session-reset
+  async resetSession(session: Session | undefined): Promise<void> {
+    if (session === undefined) return; // restart: no retained ACP process exists
+    const runtime = this.runtimes.get(session);
+    if (runtime === undefined) return;
+    if (runtime.active !== null) throw new Error('cannot clear ACP context while a turn is in flight');
+    const child = runtime.child;
+    const exited = waitForRuntimeExit(child, 'ACP agent process');
+    this.terminate(runtime);
+    await exited;
+    this.runtimes.delete(session);
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
 
   private terminate(runtime: AcpRuntime): void {
     if (runtime.child.exitCode !== null || runtime.child.signalCode !== null) return;

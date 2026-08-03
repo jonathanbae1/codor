@@ -1,0 +1,28 @@
+id: member-context-reset-is-authorized-atomic-and-lazy
+hash: a-1038b14261c4
+title: Clear context retires one idle agent's native session and lazily starts fresh
+state: active
+statement: clear_member_context must be an owner/admin-only act for a
+  non-removed switchboard-local idle agent with a persisted native session
+  reference and no in-flight turn, pre-existing non-consumed delivery, attach
+  acquisition or lease, compaction, or concurrent reset. The daemon must lease
+  turn admission, await the adapter's complete session retirement, then
+  atomically clear native session reference and lifecycle/baseline metadata,
+  persisted and transient context usage, member credential, transient waits, and
+  session-scoped tasks while re-arming the full briefing and preserving
+  misaddress, member identity/configuration, ACP launch identity, channel
+  history/run evidence, provider limits, and spend. Retirement failure changes
+  no durable session state. Success emits one actor/target audit message but
+  creates no native session or paid turn; the next addressed delivery, including
+  one queued after the reset lease began, creates a new native id and credential
+  through the ordinary sessionFor path. A first-party adapter must retire any
+  retained idle runtime; an adapter without reset support refuses rather than
+  pretending the reset worked.
+depends_on:
+  - roles-gate-human-acts-not-agents
+  - one-inflight-turn-per-member
+  - durable-agent-runtime-configuration
+  - member-task-projection-is-durable-and-session-scoped
+  - compaction-reinjects-codor-briefing
+  - current-context-window-truth-outlives-restarts
+created_by: relay-ux-followups-p3-context

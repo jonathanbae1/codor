@@ -43,6 +43,21 @@ const frame = (value: unknown): ServerFrame => value as ServerFrame;
 afterEach(resetClientStoreForTest);
 
 describe('room-keyed client state', () => {
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-client-error-correlation
+  it('counts action errors by ref without changing the human-visible error list', () => {
+    const store = useClientStore.getState();
+    store.applyFrame(frame({ type: 'error', message: 'compact failed', ref: 'compact_member' }), 'eng');
+    store.applyFrame(frame({ type: 'error', message: 'reset failed', ref: 'clear_member_context' }), 'eng');
+    store.applyFrame(frame({ type: 'error', message: 'another reset failure', ref: 'clear_member_context' }), 'eng');
+    store.applyFrame(frame({ type: 'error', message: 'uncorrelated' }), 'eng');
+
+    expect(roomSlice(useClientStore.getState(), 'eng')).toMatchObject({
+      errors: ['compact failed', 'reset failed', 'another reset failure', 'uncorrelated'],
+      errorRefs: { compact_member: 1, clear_member_context: 2 },
+    });
+  });
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   it('keeps same-named room hydration staging isolated across computer stores', () => {
     const a = createClientStore();
     const b = createClientStore();

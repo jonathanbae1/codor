@@ -144,6 +144,11 @@ export const ActSchema = z.discriminatedUnion('act', [
   z.object({ act: z.literal('interrupt'), member_id: MemberIdSchema }),
   // Manual engine compaction: the daemon gates it (idle agent, owner/admin).
   z.object({ act: z.literal('compact_member'), member_id: MemberIdSchema }),
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-act-schema
+  // Destructive native-memory reset: the daemon applies the full idle/runtime
+  // retirement boundary; the browser supplies only the target member.
+  z.object({ act: z.literal('clear_member_context'), member_id: MemberIdSchema }),
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // harn:assume live-delivery-consumption-is-idempotent ref=consume-act-contract
   z.object({ act: z.literal('consume_delivery'), delivery_id: z.string().uuid() }),
   // harn:end live-delivery-consumption-is-idempotent

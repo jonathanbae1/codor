@@ -37,6 +37,8 @@ const actSamples = {
   pause: { act: 'pause', member_id: '01J00000000000000000000000' },
   unpause: { act: 'unpause', member_id: '01J00000000000000000000000' },
   interrupt: { act: 'interrupt', member_id: '01J00000000000000000000000' },
+  compact_member: { act: 'compact_member', member_id: '01J00000000000000000000000' },
+  clear_member_context: { act: 'clear_member_context', member_id: '01J00000000000000000000000' },
   consume_delivery: { act: 'consume_delivery', delivery_id: '018f47b4-7f9f-7d3b-a064-52f004c2b782' },
   wait_begin: {
     act: 'wait_begin',

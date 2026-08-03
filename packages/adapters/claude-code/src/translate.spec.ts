@@ -121,6 +121,65 @@ describe('usage telemetry fixture replay', () => {
     });
   });
 
+  // harn:assume claude-context-ceiling-preserves-engine-provenance ref=claude-context-provenance-regression
+  it('preserves engine truth across same-model events and accepts smaller authoritative reports', () => {
+    const context = {};
+    const first = createTurnTranslator(context);
+    first.push({ type: 'system', subtype: 'init', model: 'claude-opus-4-8' });
+    first.push({
+      type: 'assistant',
+      message: {
+        model: 'claude-opus-4-8', content: [],
+        usage: { input_tokens: 20, cache_read_input_tokens: 30 },
+      },
+    });
+    const firstDone = first.push({
+      type: 'result', subtype: 'success', result: 'done',
+      modelUsage: { 'claude-opus-4-8': { contextWindow: 1_000_000 } },
+    }).find((event) => event.type === 'run.completed');
+    expect(firstDone).toMatchObject({
+      agent_usage: { contextWindowMaxTokens: 1_000_000, contextWindowUsedTokens: 50 },
+    });
+
+    const second = createTurnTranslator(context);
+    second.push({ type: 'system', subtype: 'init', model: 'claude-opus-4-8' });
+    const sameModel = second.push({
+      type: 'assistant',
+      message: { model: 'claude-opus-4-8', content: [], usage: { input_tokens: 60 } },
+    });
+    expect(sameModel).toContainEqual({
+      type: 'usage_updated',
+      usage: { contextWindowMaxTokens: 1_000_000, contextWindowUsedTokens: 60 },
+    });
+    const smaller = second.push({
+      type: 'result', subtype: 'success', result: 'smaller',
+      modelUsage: { 'claude-opus-4-8': { contextWindow: 180_000 } },
+    }).find((event) => event.type === 'run.completed');
+    expect(smaller).toMatchObject({
+      agent_usage: { contextWindowMaxTokens: 180_000, contextWindowUsedTokens: 60 },
+    });
+
+    const changed = createTurnTranslator(context);
+    const changedDone = changed.push({
+      type: 'result', subtype: 'success', result: 'new model', usage: { output_tokens: 1 },
+      modelUsage: { 'claude-sonnet-5': { contextWindow: 250_000 } },
+    }).find((event) => event.type === 'run.completed');
+    expect(changedDone).toMatchObject({ agent_usage: { outputTokens: 1 } });
+    expect(changedDone).not.toHaveProperty('agent_usage.contextWindowMaxTokens');
+    expect(changedDone).not.toHaveProperty('agent_usage.contextWindowUsedTokens');
+
+    const sameNewModel = createTurnTranslator(context);
+    sameNewModel.push({ type: 'system', subtype: 'init', model: 'claude-sonnet-5' });
+    expect(sameNewModel.push({
+      type: 'assistant',
+      message: { model: 'claude-sonnet-5', content: [], usage: { input_tokens: 70 } },
+    })).toContainEqual({
+      type: 'usage_updated',
+      usage: { contextWindowMaxTokens: 250_000, contextWindowUsedTokens: 70 },
+    });
+  });
+  // harn:end claude-context-ceiling-preserves-engine-provenance
+
   it('keeps the seeded window when multiple aux models report and none match the session', () => {
     const translator = createTurnTranslator();
     translator.push({

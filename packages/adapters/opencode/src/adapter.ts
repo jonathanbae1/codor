@@ -224,6 +224,17 @@ export class OpenCodeAdapter implements HarnessAdapter {
     if (child) this.signal(child, 'SIGINT');
   }
 
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=first-party-cli-session-reset
+  resetSession(session: Session | undefined): Promise<void> {
+    const child = session === undefined ? undefined : this.children.get(session);
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+      return Promise.reject(new Error('cannot clear OpenCode context while a turn process exists'));
+    }
+    if (session !== undefined) this.children.delete(session);
+    return Promise.resolve();
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   private signal(child: ChildProcess, signal: NodeJS.Signals): void {
     if (child.pid === undefined) return;
     try {

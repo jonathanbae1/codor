@@ -53,6 +53,9 @@ export const CAPABILITY_MINIMUM_ROLE: Record<HumanCapability, Role> = {
   // behalf; owner/admin only, and AGENT_CAPABILITIES omits it so an agent can
   // never compact itself or a peer.
   compact_member: 'admin',
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-role-gate
+  clear_member_context: 'admin',
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // Changing what an agent may do to the machine is an admin act, like creating one.
   // NOTE for codor-live-collab: when members gain credentials, `configure` must be
   // EXCLUDED from what an agent may do — an agent must never raise its own permission.

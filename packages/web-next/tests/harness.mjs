@@ -135,10 +135,26 @@ for (const [id, name] of [
   ['tasks', 'Tasks'],
   ['acp-providers', 'ACP Providers'],
   ['askmulti', 'Ask Multi'],
+  ['context-reset', 'Context Reset'],
 ]) {
   daemon.createRoom({ id, name, owner });
   crypto.roomKeys.ensureRoom(id);
 }
+
+// harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-browser-regression
+// A retained-but-not-mounted native session exercises the daemon-restart reset
+// path: Clear must not create a process, and the next addressed delivery creates
+// the first fresh fake session through the ordinary turn path.
+const contextResetAgent = daemon.store.addMember('context-reset', {
+  kind: 'agent', handle: 'eraser', display_name: 'Eraser', purpose: 'reset fixture',
+  harness: 'fake', session_ref: 'seeded-context-session', cwd: dir,
+  model: 'kept-model', policy: 'workspace-write', state: 'idle', custody: 'owned',
+  conventions_sent: true, roster_stale: false,
+});
+daemon.store.applyMemberTaskUpdate('context-reset', contextResetAgent.id, {
+  op: 'replace', items: [{ id: 'old', content: 'Old native-session task', status: 'pending' }],
+});
+// harn:end member-context-reset-is-authorized-atomic-and-lazy
 
 // An existing NAMED ACP member so Configure can prove the named tile (with its ACP pill)
 // stays stable and locked from persisted provider identity, even if the binary later
@@ -1234,6 +1250,16 @@ createServer((req, res) => {
         else fake.holdCompactions();
         if (body.usage !== undefined) fake.compactUsage = body.usage;
         payload = { held: body.held !== false };
+      }
+      if (url.pathname === '/hold-resets') {
+        const body = raw === '' ? {} : JSON.parse(raw);
+        if (body.held === false) fake.releaseResets();
+        else fake.holdResets();
+        payload = { held: body.held !== false };
+      }
+      if (url.pathname === '/fail-reset') {
+        fake.failNextReset('fixture native retirement failed');
+        payload = { ok: true };
       }
       if (url.pathname === '/tasks-reset') {
         // Restore the full seeded checklist + session so each browser test is isolated.

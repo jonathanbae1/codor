@@ -2,7 +2,7 @@ id: engine-reported-window-outlives-restarts
 hash: a-dc0388c600e5
 title: An engine-reported context window persists on the member and outranks the
   curated table in estimates
-state: active
+state: retired
 statement: When a live usage event reports the model's context window, the
   daemon persists it on the member row and every later estimated seed (boot,
   revive, join) presents that window instead of the curated per-model guess,
@@ -12,3 +12,4 @@ statement: When a live usage event reports the model's context window, the
   updates only when the engine reports a different one.
 depends_on: []
 created_by: peek-window-last-engine-truth
+retired_by: relay-ux-followups-p3-context

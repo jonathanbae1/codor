@@ -29,6 +29,39 @@ async function collectTurn(adapter: AcpAdapter, session: Session): Promise<WireE
 
 // harn:assume acp-v1-events-and-capabilities-are-negotiated ref=acp-adapter-regression
 describe('ACP adapter', () => {
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=acp-session-reset
+  it('terminates and forgets the retained provider before a fresh session', async () => {
+    const adapter = new AcpAdapter();
+    const session = adapter.spawn({ cwd: process.cwd(), acp_launch: launch() });
+    await collectTurn(adapter, session);
+    expect(session.session_ref).toBe('fake-acp-session');
+
+    await adapter.resetSession(session);
+    session.session_ref = undefined;
+    session.lifecycle = undefined;
+    session.acp_usage_baseline = undefined;
+
+    const runtimes: unknown[] = [];
+    const events: WireEvent[] = [];
+    for await (const event of adapter.deliver(session, 'fresh', {
+      onSessionRuntime: (runtime) => runtimes.push(runtime),
+    })) {
+      events.push(event);
+      if (event.type === 'approval.raised') {
+        await adapter.respondInteraction(session, event.card.interaction_id, 'Allow once');
+      }
+    }
+    expect(runtimes).toEqual([{
+      session_ref: 'fake-acp-session', lifecycle: { load: true, resume: true },
+    }]);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'run.completed', status: 'completed',
+    }));
+    await adapter.resetSession(session);
+    await expect(adapter.resetSession(undefined)).resolves.toBeUndefined();
+  });
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   it('resolves executable files and symlinks but rejects executable-named directories', () => {
     const dir = mkdtempSync(join(tmpdir(), 'codor-acp-path-'));
     const executable = join(dir, 'agent');

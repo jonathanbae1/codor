@@ -239,6 +239,17 @@ describe('messages', () => {
     expect(ActSchema.safeParse({ act: 'compact_member' }).success).toBe(false);
   });
 
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-act-schema
+  it('accepts only a targeted clear_member_context act', () => {
+    const memberId = '01J00000000000000000000000';
+    expect(ActSchema.parse({ act: 'clear_member_context', member_id: memberId }))
+      .toEqual({ act: 'clear_member_context', member_id: memberId });
+    expect(ActSchema.safeParse({ act: 'clear_member_context' }).success).toBe(false);
+    expect(ActSchema.safeParse({ act: 'clear_member_context', member_id: 'fable' }).success)
+      .toBe(false);
+  });
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   it('treats deleted as an additive optional marker', () => {
     expect(MessageSchema.parse(chatMessage).deleted).toBeUndefined();
     expect(MessageSchema.parse({ ...chatMessage, deleted: true }).deleted).toBe(true);

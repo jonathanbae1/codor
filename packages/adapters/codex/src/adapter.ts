@@ -138,6 +138,8 @@ interface CodexRuntime {
   identity?: RuntimeIdentity;
   client: CodexAppServerClient | null;
   child: ChildProcessWithoutNullStreams | null;
+  /** Disposed child retained for supervision until its exit is confirmed. */
+  retiringChild: ChildProcessWithoutNullStreams | null;
   connecting: Promise<void> | null;
   active: TurnState | null;
   /** Native server requests parked by native id awaiting a Codor answer. */
@@ -150,6 +152,22 @@ interface CodexRuntime {
   context: CodexTranslatorContext;
   /** An operator-requested compaction awaiting its native compact turn. */
   pendingCompaction: PendingCompaction | null;
+}
+
+function waitForRuntimeExit(child: ChildProcessWithoutNullStreams, label: string): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      reject(new Error(`${label} did not exit after retirement`));
+    }, 10_000);
+    timer.unref?.();
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once('exit', onExit);
+  });
 }
 
 interface PendingCompaction {
@@ -556,6 +574,7 @@ export class CodexAdapter implements HarnessAdapter {
       ...(memberKey !== undefined && { memberKey }),
       client: null,
       child: null,
+      retiringChild: null,
       connecting: null,
       active: null,
       ...(session.session_ref !== undefined && { threadId: session.session_ref }),
@@ -580,6 +599,12 @@ export class CodexAdapter implements HarnessAdapter {
 
   private async ensureClient(runtime: CodexRuntime): Promise<void> {
     if (runtime.client !== null) return;
+    if (runtime.retiringChild !== null) {
+      if (runtime.retiringChild.exitCode === null && runtime.retiringChild.signalCode === null) {
+        throw new Error('previous Codex app-server retirement is still pending');
+      }
+      runtime.retiringChild = null;
+    }
     if (runtime.connecting !== null) return await runtime.connecting;
     const connecting = this.connect(runtime);
     runtime.connecting = connecting;
@@ -997,6 +1022,29 @@ export class CodexAdapter implements HarnessAdapter {
       turnId: turn.turnId,
     }, 5_000).catch(() => undefined).finally(() => this.retireRuntime(runtime, true));
   }
+
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=codex-session-reset
+  async resetSession(session: Session | undefined): Promise<void> {
+    if (session === undefined) return; // restart: no retained app-server exists
+    const runtime = this.liveRuntime(session);
+    if (runtime === undefined) return;
+    if (runtime.active !== null && !runtime.active.terminal) {
+      throw new Error('cannot clear Codex context while a turn is in flight');
+    }
+    if (runtime.pendingCompaction !== null) {
+      throw new Error('cannot clear Codex context while compaction is in flight');
+    }
+    const child = runtime.child ?? runtime.retiringChild;
+    const exited = child === null ? Promise.resolve() : waitForRuntimeExit(child, 'Codex app-server');
+    runtime.retiringChild = child;
+    this.retireRuntime(runtime);
+    await exited;
+    runtime.retiringChild = null;
+    this.runtimes.delete(runtime.session);
+    this.runtimes.delete(session);
+    if (runtime.memberKey !== undefined) this.memberRuntimes.delete(runtime.memberKey);
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // harn:end codex-app-server-is-the-member-runtime
 
   // harn:assume codex-bridges-command-and-file-approvals ref=codex-cmdfile-bridge

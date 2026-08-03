@@ -2567,6 +2567,64 @@ describe('member task projection', () => {
 });
 // harn:end member-task-projection-is-durable-and-session-scoped
 
+// harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-store-transaction
+describe('agent context reset transaction', () => {
+  it('clears only session-scoped state in one member change', () => {
+    const { owner } = openRoom(store);
+    const agent = store.addMember('eng', {
+      kind: 'agent', handle: 'resettable', display_name: 'Resettable', purpose: 'keep purpose',
+      harness: 'acp', session_ref: 'native-old', cwd: '/work', policy: 'workspace-write',
+      model: 'kept-model', thinking: 'high', state: 'idle', custody: 'owned',
+      roster_stale: false,
+    }, {
+      acp_launch: { executable: 'agent', argv: ['acp', '--profile=keep'] },
+      lifecycle: { load: true, resume: true },
+      usage_baseline: { totalTokens: 30, inputTokens: 20, outputTokens: 10 },
+    });
+    store.updateMember('eng', agent.id, {
+      misaddressed: true,
+      conventions_sent: true,
+      limits: [{ window: 'weekly', status: 'allowed', used_percent: 20 }],
+    });
+    store.applyMemberTaskUpdate('eng', agent.id, {
+      op: 'replace', items: [{ id: 't', content: 'Old session task', status: 'pending' }],
+    });
+    store.setMemberContextWindow('eng', agent.id, 1_000_000);
+    store.setAgentCredentialHash('eng', agent.id, 'a'.repeat(64));
+    store.stageAgentUsageBaseline('eng', agent.id, 7, {
+      totalTokens: 40, inputTokens: 25, outputTokens: 15,
+    });
+    const history = store.postMessage('eng', { author: owner.id, kind: 'chat', body: 'keep history' });
+    const changesBefore = (store.db.prepare('SELECT COUNT(*) AS count FROM changes WHERE room_id = ?')
+      .get('eng') as { count: number }).count;
+
+    const cleared = store.clearAgentContext('eng', agent.id);
+
+    expect(cleared).toMatchObject({
+      id: agent.id, handle: 'resettable', purpose: 'keep purpose', harness: 'acp', cwd: '/work',
+      policy: 'workspace-write', model: 'kept-model', thinking: 'high', state: 'idle',
+      custody: 'owned', misaddressed: true, conventions_sent: false, roster_stale: true,
+      limits: [{ window: 'weekly', status: 'allowed', used_percent: 20 }],
+    });
+    expect(cleared.session_ref).toBeUndefined();
+    expect(cleared.tasks).toBeUndefined();
+    expect(store.getMemberContextWindow('eng', agent.id)).toBeUndefined();
+    expect(store.findAgentByCredentialHash('a'.repeat(64))).toBeUndefined();
+    expect(store.getAgentRuntimeConfig('eng', agent.id)).toEqual({
+      acp_launch: { executable: 'agent', argv: ['acp', '--profile=keep'] },
+    });
+    expect(store.getMessage('eng', history.id)?.body).toBe('keep history');
+    const raw = store.db.prepare(
+      'SELECT session_ref, session_lifecycle, acp_usage_baseline, acp_usage_pending, context_window, credential_hash, tasks FROM members WHERE id = ?',
+    ).get(agent.id) as Record<string, unknown>;
+    expect(Object.values(raw)).toEqual([null, null, null, null, null, null, null]);
+    const changesAfter = (store.db.prepare('SELECT COUNT(*) AS count FROM changes WHERE room_id = ?')
+      .get('eng') as { count: number }).count;
+    expect(changesAfter - changesBefore).toBe(1);
+  });
+});
+// harn:end member-context-reset-is-authorized-atomic-and-lazy
+
 // harn:assume named-acp-provider-selection-resolves-to-private-structured-launch ref=acp-provider-store-regression
 describe('a named ACP provider persists a public id while its launch stays private', () => {
   it('projects acp_provider publicly, keeps acp_launch private, and survives reopen', () => {
