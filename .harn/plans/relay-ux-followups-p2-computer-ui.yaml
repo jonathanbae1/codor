@@ -1,0 +1,86 @@
+id: relay-ux-followups-p2-computer-ui
+title: Relay UX follow-ups phase 2 - unclipped computer picker and one-screen Add
+notes: >
+  Second approved phase of Richard's relay UX follow-ups, after reviewed Phase 1
+  supplied authenticated hostname labels. Fix the hosted computer picker being
+  clipped by the channel rail: render its dialog through a document-body portal,
+  position it against the existing trigger with fixed viewport coordinates, and
+  keep it bounded and scrollable on desktop, phone, and short viewports. Desktop
+  opens above the trigger when space permits; phone uses a safe-area-aware inset
+  bottom sheet. Preserve full-row switching, status and background activity,
+  rename, Forget, Add, Escape/outside-close, focus entry and restoration, and
+  the already-warm activation path. Portaling must treat both trigger and dialog
+  as inside-click regions and clean up resize/scroll listeners. Prove the popup
+  is visible, hit-testable, scrollable, keyboard-safe, and Axe-clean rather than
+  checking only a theoretical width. Replace the Add Computer two-screen wizard
+  with one modal containing two simultaneously visible numbered sections: copy
+  `codor pair`, then enter its eight-character code using PairingCodeInput.
+  Remove Next and Back while preserving copy feedback, expiry/private-relay
+  guidance, validation, busy/error behavior, focus trapping, close behavior, and
+  failed-add rollback. Render Phase 1's stored hostname/custom label unchanged
+  everywhere; do not add another hostname source. Luna implements; Investigator
+  reviews before Phase 3. No session manager, recovery policy, connector,
+  tunnel, authentication, switchboard, pairing protocol, context/task card,
+  usage, or deployment change.
+assumptions:
+  reviewed:
+    - id: hosted-computer-switcher-is-discoverable-and-accessible
+      outcome: unchanged
+      reason: The portal and viewport positioning make the existing responsive,
+        keyboard-operable switcher contract hold without changing switching or
+        activity semantics.
+    - id: hosted-add-computer-explains-pairing-code-source
+      outcome: unchanged
+      reason: Both already-required pairing steps remain in order and use the same
+        code input; this phase shows them together instead of behind Next and
+        Back.
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: Choices continue to call the existing manager activation path and do not
+        redial or reload.
+    - id: hosted-background-computer-activity-is-visible
+      outcome: unchanged
+      reason: The popup continues to render the existing isolated status and activity
+        aggregates; only its containing surface moves.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: Recovery choices and fallback behavior are outside this phase.
+    - id: hosted-generated-computer-label-follows-authenticated-hostname
+      outcome: unchanged
+      reason: The switcher consumes the Phase 1 stored label without changing its
+        authenticated hostname or explicit-rename provenance rules.
+    - id: pairing-codes-redacted-from-content
+      outcome: unchanged
+      reason: The dialog still copies only the static command and never exposes a
+        generated pairing code outside the operator-entered input.
+files:
+  - packages/web-next/src/room/ComputerSwitcher.tsx
+  - packages/web-next/src/room/ComputerSwitcher.spec.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+  - packages/web-next/tests/room35-startup-recovery.e2e.spec.ts
+  - packages/web-next/tests/room36-computer-ui.e2e.spec.ts
+  - docs/SELF-HOST.md
+anchors:
+  hosted-computer-switcher-is-discoverable-and-accessible:
+    discoverable-computer-control:
+      action: change
+      reason: Portal and position the popup outside clipping ancestors, preserve its
+        focus/close contract, and add real viewport and hit-testing regressions.
+  hosted-add-computer-explains-pairing-code-source:
+    guided-add-computer:
+      action: change
+      reason: Present the existing command and code-entry steps together in one
+        dialog, update documentation, and remove wizard-only controls and tests.
+  hosted-computer-switching-reuses-warm-session:
+    warm-computer-switch:
+      action: change
+      reason: Keep multi-computer browser coverage proving portaled choices still use
+        the warm in-place activation path.
+  hosted-generated-computer-label-follows-authenticated-hostname:
+    authenticated-computer-label:
+      action: change
+      reason: Keep the Phase 1 hostname labels visible in the relocated picker and
+        multi-computer browser regressions without changing provenance.
+applied:
+  applied_at: 2026-08-03T03:09:14.257Z

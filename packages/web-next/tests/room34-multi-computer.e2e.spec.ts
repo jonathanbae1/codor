@@ -112,7 +112,6 @@ test.describe('multi-computer pairing', () => {
     const b = await control<{ code: string }>('/relay-pair-b');
     await page.getByTestId('computer-current').click();
     await page.getByTestId('computer-add').click();
-    await page.getByTestId('computer-add-next').click();
     await pasteCode(page, b.code);
     await page.getByTestId('pairing-code-submit').click();
 
@@ -120,7 +119,30 @@ test.describe('multi-computer pairing', () => {
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
     await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-b/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
+
+    // A short desktop viewport must still expose the portaled menu as a bounded,
+    // genuinely scrollable surface rather than clipping it in the room footer.
+    await page.setViewportSize({ width: 1440, height: 240 });
     await page.getByTestId('computer-current').click();
+    const shortMenu = page.locator('.nx-computer-menu');
+    await expect(shortMenu).toBeVisible();
+    expect(await shortMenu.evaluate((node) => node.parentElement === document.body)).toBe(true);
+    const shortMenuBox = await shortMenu.boundingBox();
+    expect(shortMenuBox).not.toBeNull();
+    expect(shortMenuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(shortMenuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(shortMenuBox!.x + shortMenuBox!.width).toBeLessThanOrEqual(1440);
+    expect(shortMenuBox!.y + shortMenuBox!.height).toBeLessThanOrEqual(240);
+    const shortMenuScroll = await shortMenu.evaluate((node) => ({
+      overflow: getComputedStyle(node).overflowY,
+      scrollable: node.scrollHeight > node.clientHeight,
+    }));
+    expect(shortMenuScroll.overflow).toBe('auto');
+    expect(shortMenuScroll.scrollable).toBe(true);
+    await page.getByTestId('computer-current').click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByTestId('computer-current').click();
+
     await expect(menuItem(page, 'codor-host-a').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
     await expect(menuItem(page, 'codor-host-b').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
     const popupA11y = await new AxeBuilder({ page }).include('.nx-computer-menu').analyze();

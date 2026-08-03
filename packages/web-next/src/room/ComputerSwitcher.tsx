@@ -1,5 +1,6 @@
 import { ChevronDown, Monitor } from 'lucide-react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 
 import { PAIRING_TIME_COPY, SESSION_COPY } from '../app/connection-state.js';
 import {
@@ -16,6 +17,21 @@ const noSubscription = (): (() => void) => () => undefined;
 const PAIR_COMMAND = 'codor pair';
 const SWITCHER_DIALOG_ID = 'computer-switcher-dialog';
 const SWITCHER_TRIGGER_ID = 'computer-switcher-trigger';
+const PHONE_BREAKPOINT = 719;
+const POPUP_GAP = 6;
+const POPUP_MARGIN = 12;
+
+interface PopupPosition {
+  left: number;
+  top: number;
+  maxHeight: number;
+}
+
+type PopupStyle = CSSProperties & {
+  '--nx-computer-menu-left'?: string;
+  '--nx-computer-menu-top'?: string;
+  '--nx-computer-menu-max-height'?: string;
+};
 
 function aggregateLabel(count: number): string {
   return `${count} actionable update${count === 1 ? '' : 's'} on inactive computers`;
@@ -51,26 +67,68 @@ export function ComputerSwitcher(): React.ReactNode {
   );
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [addStep, setAddStep] = useState<1 | 2>(1);
   const [copied, setCopied] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState<string>();
   const [renaming, setRenaming] = useState<string>();
-  const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
   const wasAdding = useRef(false);
   const skipFocusRestore = useRef(false);
+  const [popupPosition, setPopupPosition] = useState<PopupPosition>();
 
   const closePopup = (): void => {
     setOpen(false);
     setRenaming(undefined);
+    setPopupPosition(undefined);
   };
 
   useEffect(() => {
     if (!open) return undefined;
     wasOpen.current = true;
+
+    const updatePopupPosition = (): void => {
+      const trigger = triggerRef.current;
+      const popup = popupRef.current;
+      if (!trigger || !popup) return;
+
+      const viewport = window.visualViewport;
+      const viewportWidth = Math.max(1, viewport?.width ?? window.innerWidth);
+      const viewportHeight = Math.max(1, viewport?.height ?? window.innerHeight);
+      if (viewportWidth <= PHONE_BREAKPOINT) {
+        setPopupPosition({
+          left: POPUP_MARGIN,
+          top: POPUP_MARGIN,
+          maxHeight: Math.max(1, viewportHeight - POPUP_MARGIN * 2),
+        });
+        return;
+      }
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const popupRect = popup.getBoundingClientRect();
+      const popupWidth = popupRect.width || Math.min(340, viewportWidth - POPUP_MARGIN * 2);
+      const popupHeight = popupRect.height || 1;
+      const above = Math.max(1, triggerRect.top - POPUP_MARGIN - POPUP_GAP);
+      const below = Math.max(1, viewportHeight - triggerRect.bottom - POPUP_MARGIN - POPUP_GAP);
+      const opensAbove = popupHeight <= above || above >= below;
+      const available = opensAbove ? above : below;
+      const visibleHeight = Math.min(popupHeight, available);
+      const left = Math.min(
+        Math.max(POPUP_MARGIN, triggerRect.left),
+        Math.max(POPUP_MARGIN, viewportWidth - popupWidth - POPUP_MARGIN),
+      );
+      const unclampedTop = opensAbove
+        ? triggerRect.top - POPUP_GAP - visibleHeight
+        : triggerRect.bottom + POPUP_GAP;
+      const top = Math.min(
+        Math.max(POPUP_MARGIN, unclampedTop),
+        Math.max(POPUP_MARGIN, viewportHeight - POPUP_MARGIN - visibleHeight),
+      );
+      setPopupPosition({ left, top, maxHeight: available });
+    };
+
+    updatePopupPosition();
     popupRef.current?.querySelector<HTMLElement>('[data-computer-choice="true"]:not([disabled])')?.focus();
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
@@ -79,13 +137,26 @@ export function ComputerSwitcher(): React.ReactNode {
       closePopup();
     };
     const onPointerDown = (event: PointerEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) closePopup();
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (triggerRef.current?.contains(target) || popupRef.current?.contains(target)) return;
+      closePopup();
     };
+    const onResize = (): void => updatePopupPosition();
+    const onScroll = (): void => updatePopupPosition();
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
+    window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onScroll);
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('scroll', onScroll);
     };
   }, [open]);
 
@@ -142,7 +213,6 @@ export function ComputerSwitcher(): React.ReactNode {
     skipFocusRestore.current = true;
     closePopup();
     setAdding(true);
-    setAddStep(1);
     setCopied(false);
     setPairing(false);
     setError(undefined);
@@ -150,7 +220,6 @@ export function ComputerSwitcher(): React.ReactNode {
 
   const closeAdd = (): void => {
     setAdding(false);
-    setAddStep(1);
     setCopied(false);
     setPairing(false);
     setError(undefined);
@@ -172,8 +241,14 @@ export function ComputerSwitcher(): React.ReactNode {
     );
   };
 
+  const popupStyle: PopupStyle | undefined = popupPosition ? {
+    '--nx-computer-menu-left': `${popupPosition.left}px`,
+    '--nx-computer-menu-top': `${popupPosition.top}px`,
+    '--nx-computer-menu-max-height': `${popupPosition.maxHeight}px`,
+  } : undefined;
+
   return (
-    <div className="nx-computer-switcher" data-testid="computer-switcher" ref={rootRef}>
+    <div className="nx-computer-switcher" data-testid="computer-switcher">
       <button
         ref={triggerRef}
         type="button"
@@ -202,13 +277,15 @@ export function ComputerSwitcher(): React.ReactNode {
         ) : null}
         <ChevronDown className="nx-computer-current-chevron" size={15} strokeWidth={1.8} aria-hidden="true" />
       </button>
-      {open ? (
+      {open && typeof document !== 'undefined' ? createPortal(
         <div
           ref={popupRef}
           id={SWITCHER_DIALOG_ID}
           className="nx-computer-menu"
           role="dialog"
           aria-labelledby={SWITCHER_TRIGGER_ID}
+          data-positioned={popupPosition ? 'true' : 'false'}
+          style={popupStyle}
         >
           <div className="nx-computer-menu-heading">Paired computers</div>
           <ul>
@@ -261,13 +338,14 @@ export function ComputerSwitcher(): React.ReactNode {
           <Button variant="quiet" data-testid="computer-add" onClick={openAdd}>
             Add a computer
           </Button>
-        </div>
+        </div>,
+        document.body,
       ) : null}
       {adding ? (
         <Modal label="Add a computer" onClose={closeAdd} testid="computer-add-modal">
           <h2 className="nx-dialog-title">Add a computer</h2>
           <p className="nx-dialog-body">Pair another computer through your existing private relay.</p>
-          {addStep === 1 ? (
+          <div className="nx-computer-add-grid">
             <section className="nx-computer-add-step" data-testid="computer-add-step-1">
               <h3>1. Run codor pair</h3>
               <p>On the other computer, run this command and keep the terminal open:</p>
@@ -278,23 +356,13 @@ export function ComputerSwitcher(): React.ReactNode {
                 </Button>
               </div>
               <p className="nx-field-note">The code is single-use, expires after ten minutes, and stays inside the existing private relay.</p>
-              {error ? <p className="nx-code-error" role="alert">{error}</p> : null}
-              <div className="nx-computer-add-actions">
-                <Button type="button" variant="primary" data-testid="computer-add-next" onClick={() => { setError(undefined); setAddStep(2); }}>
-                  Next: enter code
-                </Button>
-              </div>
             </section>
-          ) : (
             <section className="nx-computer-add-step" data-testid="computer-add-step-2">
               <h3>2. Enter the eight-character code</h3>
               <p>Enter the single-use code printed by <Code>{PAIR_COMMAND}</Code> on the other computer.</p>
               <PairingCodeInput busy={pairing} error={error} submitLabel="Add this computer" onSubmit={add} />
-              <Button type="button" variant="quiet" data-testid="computer-add-back" onClick={() => { setError(undefined); setAddStep(1); }}>
-                Back
-              </Button>
             </section>
-          )}
+          </div>
         </Modal>
       ) : null}
     </div>

@@ -43,11 +43,21 @@ test.describe('computer switcher UI', () => {
     await page.getByTestId('mobile-back').click();
     await expect(page.getByTestId('computer-current')).toBeVisible();
     await page.getByTestId('computer-current').click();
+    const popup = page.locator('.nx-computer-menu');
     await expect(page.getByRole('dialog', { name: /Active computer/ })).toBeVisible();
-    const popupBox = await page.locator('.nx-computer-menu').boundingBox();
+    expect(await popup.evaluate((node) => node.parentElement === document.body)).toBe(true);
+    const popupBox = await popup.boundingBox();
     expect(popupBox).not.toBeNull();
     expect(popupBox!.x).toBeGreaterThanOrEqual(0);
     expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(390);
+    expect(popupBox!.y).toBeGreaterThanOrEqual(0);
+    expect(popupBox!.y + popupBox!.height).toBeLessThanOrEqual(844);
+    const hit = await popup.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const target = document.elementFromPoint(box.left + 8, box.top + 8);
+      return target !== null && node.contains(target);
+    });
+    expect(hit).toBe(true);
     const popupA11y = await new AxeBuilder({ page }).include('.nx-computer-menu').analyze();
     expect(popupA11y.violations).toEqual([]);
 
@@ -55,17 +65,18 @@ test.describe('computer switcher UI', () => {
     const modal = page.getByTestId('computer-add-modal');
     await expect(modal).toBeVisible();
     await expect(modal).toContainText('1. Run codor pair');
+    await expect(modal).toContainText('2. Enter the eight-character code');
     await expect(modal).toContainText('single-use');
     await expect(modal).toContainText('ten minutes');
     await expect(modal).toContainText('existing private relay');
-    await expect(modal.getByTestId('pairing-code-0')).toHaveCount(0);
+    await expect(modal.getByTestId('pairing-code-0')).toBeVisible();
+    await expect(modal.getByTestId('computer-add-next')).toHaveCount(0);
+    await expect(modal.getByTestId('computer-add-back')).toHaveCount(0);
     const modalA11y = await new AxeBuilder({ page }).include('[data-testid="computer-add-modal"]').analyze();
     expect(modalA11y.violations).toEqual([]);
 
     await modal.getByTestId('computer-add-copy').click();
     await expect(modal.getByTestId('computer-add-copy')).toHaveText('Copied');
-    await modal.getByTestId('computer-add-next').click();
-    await expect(modal.getByTestId('pairing-code-0')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(modal).toHaveCount(0);
   });

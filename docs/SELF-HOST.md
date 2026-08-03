@@ -470,7 +470,7 @@ warm, and shows a switcher in the channel rail:
 
 <!-- harn:assume hosted-add-computer-explains-pairing-code-source ref=guided-add-computer -->
 - **Add a computer** — start with `codor pair` on the other machine. Copy the command
-  from the first step in "Add a computer", then enter the printed eight-character code.
+  from "Add a computer", then enter the printed eight-character code in the same dialog.
   It is single-use, expires after ten minutes, and travels through the existing private
   relay. The newly paired computer becomes active in place.
 - **Switch** — pick a computer from the switcher to activate its already-warm session
