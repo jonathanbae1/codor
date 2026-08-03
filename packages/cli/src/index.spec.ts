@@ -676,6 +676,7 @@ describe('@codor/cli', () => {
   });
   // harn:end wsl-setup-keeps-private-windows-loopback
 
+  // harn:assume setup-readiness-wait-is-wall-clock-bounded ref=readiness-wall-clock-regression
   // harn:assume setup-verifies-codor-before-creating-pairing-code ref=setup-readiness-and-pairing-regression
   it('rejects an arbitrary HTTP listener and bounds Codor readiness retries', async () => {
     let body: unknown = { ok: true };
@@ -697,14 +698,113 @@ describe('@codor/cli', () => {
       await once(listener, 'close');
     }
 
+    let elapsedMs = 0;
+    const observedTimeouts: number[] = [];
+    const sleeps: number[] = [];
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      observedTimeouts.push(milliseconds);
+      return new AbortController().signal;
+    });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const timeoutMs = observedTimeouts[observedTimeouts.length - 1];
+      if (timeoutMs === undefined) throw new Error('expected a pairing-status timeout');
+      // The fake fetch consumes the timeout supplied by production. It does
+      // not independently clip its duration to the readiness deadline.
+      elapsedMs += timeoutMs;
+      return new Response(null, { status: 503 });
+    });
+    try {
+      const failure = await waitForCodor(
+        'http://127.0.0.1:65535',
+        probeCodorStatus,
+        async (milliseconds) => {
+          sleeps.push(milliseconds);
+          // Include work around the first sleep so the final probe has less
+          // than the ordinary 1-second maximum left.
+          elapsedMs += milliseconds + (sleeps.length === 1 ? 300 : 0);
+        },
+        () => elapsedMs,
+      ).then(
+        () => undefined,
+        (error: unknown) => error instanceof Error ? error.message : String(error),
+      );
+      if (failure === undefined) throw new Error('expected readiness to time out');
+      expect(failure).toContain('Codor did not answer its pairing-status check within the 60-second readiness budget');
+      expect(failure).toContain('codor channels');
+      expect(failure).toContain('user-service logs');
+      expect(failure).not.toContain('port is listening');
+      expect(observedTimeouts.length).toBeGreaterThan(19);
+      expect(observedTimeouts.slice(0, 3)).toEqual([1_000, 1_000, 1_000]);
+      const finalTimeout = observedTimeouts[observedTimeouts.length - 1];
+      if (finalTimeout === undefined) throw new Error('expected a final probe timeout');
+      expect(finalTimeout).toBeGreaterThan(0);
+      expect(finalTimeout).toBeLessThan(1_000);
+      expect(sleeps.slice(0, 3)).toEqual([250, 500, 1_000]);
+      expect(sleeps.slice(2).every((milliseconds) => milliseconds === 1_000)).toBe(true);
+      expect(elapsedMs).toBe(60_000);
+    } finally {
+      fetch.mockRestore();
+      timeout.mockRestore();
+    }
+  });
+  // harn:end setup-verifies-codor-before-creating-pairing-code
+
+  it('backs off progressively and resolves past the old 20-attempt limit', async () => {
+    let elapsedMs = 0;
+    let attempts = 0;
+    await expect(waitForCodor(
+      'http://127.0.0.1:65535',
+      async () => {
+        attempts += 1;
+        elapsedMs += 10;
+        return attempts >= 25;
+      },
+      async (milliseconds) => { elapsedMs += milliseconds; },
+      () => elapsedMs,
+    )).resolves.toBeUndefined();
+    expect(attempts).toBe(25);
+    expect(elapsedMs).toBeLessThan(60_000);
+  });
+
+  it('caps readiness backoff at 1s after doubling from 250ms', async () => {
+    let elapsedMs = 0;
     const sleeps: number[] = [];
     await expect(waitForCodor(
       'http://127.0.0.1:65535',
-      async () => false,
-      async (milliseconds) => { sleeps.push(milliseconds); },
-    )).rejects.toThrow('did not become ready');
-    expect(sleeps).toEqual(Array.from({ length: 19 }, () => 250));
+      async () => {
+        elapsedMs += 100;
+        return false;
+      },
+      async (milliseconds) => {
+        sleeps.push(milliseconds);
+        elapsedMs += milliseconds;
+      },
+      () => elapsedMs,
+    )).rejects.toThrow('pairing-status check within the 60-second readiness budget');
+    expect(sleeps.slice(0, 3)).toEqual([250, 500, 1_000]);
+    expect(sleeps.slice(2, -1).every((ms) => ms === 1_000)).toBe(true);
   });
+
+  it('floors fractional remaining probe time before creating an AbortSignal timeout', async () => {
+    const observedTimeouts: number[] = [];
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      observedTimeouts.push(milliseconds);
+      return new AbortController().signal;
+    });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 503 }));
+    try {
+      await expect(probeCodorStatus('http://127.0.0.1:65535', 276.483)).resolves.toBe(false);
+      const timeoutMs = observedTimeouts[0];
+      if (timeoutMs === undefined) throw new Error('expected an AbortSignal timeout');
+      expect(Number.isInteger(timeoutMs)).toBe(true);
+      expect(timeoutMs).toBe(276);
+      expect(timeoutMs).toBeLessThanOrEqual(276.483);
+    } finally {
+      fetch.mockRestore();
+      timeout.mockRestore();
+    }
+  });
+  // harn:end setup-readiness-wait-is-wall-clock-bounded
 
   // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-systemd-regression
   posixHostIt('writes private setup files, runs confirmed host steps, and pairs against the Serve origin', async () => {

@@ -657,10 +657,15 @@ export function renderWindowsScheduledTask(options: {
 }
 // harn:end windows-setup-installs-private-task-service
 
-export async function probeCodorStatus(endpoint: string): Promise<boolean> {
+// harn:assume setup-readiness-wait-is-wall-clock-bounded ref=readiness-probe-budget
+export async function probeCodorStatus(
+  endpoint: string,
+  remainingMs = 1_000,
+): Promise<boolean> {
   try {
+    const timeoutMs = Math.floor(Math.max(0, Math.min(1_000, remainingMs)));
     const response = await fetch(new URL('/api/pairing/status', endpoint), {
-      signal: AbortSignal.timeout(1_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return false;
     const body = await response.json() as { trusted_enrollment?: unknown };
@@ -669,23 +674,46 @@ export async function probeCodorStatus(endpoint: string): Promise<boolean> {
     return false;
   }
 }
+// harn:end setup-readiness-wait-is-wall-clock-bounded
 
 const defaultSleep = async (milliseconds: number): Promise<void> =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
 
+// harn:assume setup-readiness-wait-is-wall-clock-bounded ref=readiness-wall-clock-deadline
+const defaultMonotonicNow = (): number => performance.now();
+const READINESS_BUDGET_MS = 60_000;
+const READINESS_INITIAL_DELAY_MS = 250;
+const READINESS_MAX_DELAY_MS = 1_000;
+
 // harn:assume setup-verifies-codor-before-creating-pairing-code ref=setup-readiness-and-pairing
 export async function waitForCodor(
   endpoint: string,
-  probe: (value: string) => Promise<boolean>,
+  probe: (value: string, remainingMs?: number) => Promise<boolean>,
   sleep: (milliseconds: number) => Promise<void>,
+  monotonicNow: () => number = defaultMonotonicNow,
 ): Promise<void> {
-  for (let attempt = 1; attempt <= 20; attempt += 1) {
-    if (await probe(endpoint)) return;
-    if (attempt < 20) await sleep(250);
+  const startedAt = monotonicNow();
+  let delayMs = READINESS_INITIAL_DELAY_MS;
+  for (;;) {
+    const remainingMs = READINESS_BUDGET_MS - (monotonicNow() - startedAt);
+    if (remainingMs <= 0) break;
+    const ready = await probe(endpoint, remainingMs);
+    const elapsedMs = monotonicNow() - startedAt;
+    if (ready && elapsedMs <= READINESS_BUDGET_MS) return;
+    const remainingAfterProbeMs = READINESS_BUDGET_MS - elapsedMs;
+    if (remainingAfterProbeMs <= 0) break;
+    const wait = Math.min(delayMs, remainingAfterProbeMs);
+    await sleep(wait);
+    delayMs = Math.min(delayMs * 2, READINESS_MAX_DELAY_MS);
   }
-  throw new Error(`Codor did not become ready at ${endpoint}; inspect the user-service logs`);
+  // harn:assume setup-readiness-wait-is-wall-clock-bounded ref=readiness-timeout-diagnostic
+  throw new Error(
+    `Codor did not answer its pairing-status check within the 60-second readiness budget at ${endpoint}; run \`codor channels\` and inspect the user-service logs`,
+  );
+  // harn:end setup-readiness-wait-is-wall-clock-bounded
 }
 // harn:end setup-verifies-codor-before-creating-pairing-code
+// harn:end setup-readiness-wait-is-wall-clock-bounded
 
 function runtimeVersion(runtime: RuntimePaths): string {
   const manifestPath = runtime.layout === 'installed-package'

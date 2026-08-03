@@ -1,0 +1,19 @@
+id: setup-readiness-wait-is-wall-clock-bounded
+hash: a-799cc596555d
+title: Setup readiness waits are bounded by monotonic wall-clock time
+state: active
+statement: >
+  The setup Start readiness wait must use an injectable monotonic clock to
+  enforce a 60-second wall-clock budget that includes every exact pairing-status
+  probe and every progressive sleep, passing the remaining budget into each
+  probe so probeCodorStatus floors a non-negative AbortSignal timeout to an
+  integer no greater than that remaining time while retaining its 1-second
+  maximum; use 250 ms then 500 ms then a 1 s sleep cap and truncate the final
+  sleep to the remaining budget, keep one-argument probe overrides
+  source-compatible, allow a successful exact response after the old 20-attempt
+  limit but not after the budget, and say Codor did not answer its
+  pairing-status check within the budget while directing operators to codor
+  channels and service logs without treating an open port as proof of startup.
+depends_on:
+  - setup-verifies-codor-before-creating-pairing-code
+created_by: integrate-pr14-readiness

@@ -1,0 +1,108 @@
+id: integrate-pr14-readiness
+title: Integrate PR 14 wall-clock-bounded Codor readiness
+notes: >
+  Integrate the exact PR 14 head efd7fd96016942561b1a81099af2e5523a589b45 into
+  origin/main at 9f7071cff741fe8ba690e94ccc9a04bebea976c7 with a real no-ff
+  merge commit. Preserve progressive readiness backoff while making the complete
+  wait, including pairing-status probe time and sleep time, obey a wall-clock
+  budget through an injectable monotonic clock and a remaining-time probe
+  timeout. Keep the exact PR head as the merge commit's second parent; no push,
+  deploy, or PR #15 work is in scope.
+assumptions:
+  reviewed:
+    - id: setup-verifies-codor-before-creating-pairing-code
+      outcome: unchanged
+      reason: >
+        Setup still requires the exact local pairing-status response containing
+        a boolean trusted_enrollment value before reporting readiness or
+        creating the pairing offer; this integration only makes that wait's
+        deadline, probe timeout, and diagnostic explicit.
+    - id: setup-preserves-private-platform-service
+      outcome: unchanged
+      reason: >
+        The Linux service still uses the same private runtime, environment,
+        token, and service files; the readiness regressions are inserted before
+        its anchored test region and do not alter the platform-service contract.
+  create:
+    - id: setup-readiness-wait-is-wall-clock-bounded
+      title: Setup readiness waits are bounded by monotonic wall-clock time
+      statement: >
+        The setup Start readiness wait must use an injectable monotonic clock to
+        enforce a 60-second wall-clock budget that includes every exact
+        pairing-status probe and every progressive sleep, passing the remaining
+        budget into each probe so probeCodorStatus floors a non-negative
+        AbortSignal timeout to an integer no greater than that remaining time
+        while retaining its 1-second maximum; use 250 ms then 500 ms then a 1 s
+        sleep cap and truncate the final sleep to the remaining budget, keep
+        one-argument probe overrides source-compatible, allow a successful exact
+        response after the old 20-attempt limit but not after the budget, and
+        say Codor did not answer its pairing-status check within the budget
+        while directing operators to codor channels and service logs without
+        treating an open port as proof of startup.
+      reason: >
+        Readiness is about the daemon's exact pairing-status response, not a
+        socket or service-manager event. A probe can consume its full timeout
+        after the last preflight check, and fractional monotonic values are
+        invalid AbortSignal delays, so the wait must pass a floored remaining
+        budget into the real probe; the monotonic seam keeps this contract
+        deterministic in tests.
+      depends_on:
+        - setup-verifies-codor-before-creating-pairing-code
+files:
+  - packages/cli/src/setup.ts
+  - packages/cli/src/index.spec.ts
+anchors:
+  setup-verifies-codor-before-creating-pairing-code:
+    setup-readiness-and-pairing:
+      action: change
+      reason: >
+        The shared readiness wait gains the injectable monotonic clock,
+        remaining-time probe budget, capped backoff, and exact-response timeout
+        diagnostic while retaining its existing pairing-status contract.
+    setup-readiness-and-pairing-regression:
+      action: change
+      reason: >
+        The existing readiness regression is updated for the bounded backoff and
+        diagnostic, and remains the anchored home for the existing probe
+        contract.
+  setup-preserves-private-platform-service:
+    setup-platform-service-regression:
+      action: change
+      reason: >
+        The readiness regressions are inserted before this existing Linux
+        service regression, so Harn re-accounts its shifted anchored region; the
+        service assertions themselves remain unchanged.
+  setup-readiness-wait-is-wall-clock-bounded:
+    readiness-probe-budget:
+      action: change
+      reason: >
+        Anchor the source-compatible probe seam, integer normalization, and
+        probeCodorStatus timeout cap that turns the wait's remaining deadline
+        into an AbortSignal limit without changing direct one-argument callers.
+    readiness-wall-clock-deadline:
+      action: change
+      reason: >
+        Anchor the monotonic clock seam, 60-second budget, progressive delay,
+        remaining-time handoff, and final-sleep calculation in the wait loop.
+    readiness-timeout-diagnostic:
+      action: change
+      reason: >
+        Anchor the timeout message that identifies the pairing-status check and
+        directs operators to codor channels and service logs without claiming a
+        listening port proves startup.
+    readiness-wall-clock-regression:
+      action: change
+      reason: >
+        Anchor deterministic regressions that exercise the real probe timeout
+        cap at the final probe, reject fractional AbortSignal delays, advance
+        both probe and sleep time to exactly the deadline, preserve progressive
+        backoff, support one-argument overrides, and allow success after twenty
+        attempts.
+verification: >
+  After merge, run the full workspace build, serialized full workspace tests,
+  complete CLI tests, focused readiness tests, Harn plan/check/apply/staged
+  validation, and git diff --check. Confirm a clean worktree and a real merge
+  commit whose first parent is 9f7071cff741fe8ba690e94ccc9a04bebea976c7 and
+  whose second parent is exactly efd7fd96016942561b1a81099af2e5523a589b45.
+applied:
+  applied_at: 2026-08-03T10:26:16.422Z
