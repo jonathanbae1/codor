@@ -1,0 +1,65 @@
+id: relay-ux-followups-p1-review-fixes
+title: Relay UX follow-ups phase 1 review fixes - lazy attachment resources and
+  durable label provenance
+notes: >
+  Investigator review of 9163310 found two contained closure issues before Phase
+  1 can merge. First, every mounted transcript and Preview attachment now starts
+  an authenticated byte fetch immediately. History begins at twenty messages and
+  grows as older pages load, attachments may be 25 MB each, and document
+  downloads need no bytes until clicked; this can multiply into large
+  unnecessary tunnel traffic and blob memory. Retain the routed authenticated
+  loader, but fetch raster transcript resources only when their placeholder is
+  near the viewport (with a safe eager fallback where IntersectionObserver is
+  unavailable), and fetch document/inert attachments only on explicit Download.
+  Preview raster thumbnails may load when the operator opens Preview, while its
+  document cards also remain click-to-fetch. Every successful transient object
+  URL must still be revoked, and pending/failure UI must be inert and
+  duplicate-click-safe. Second, adopting a hostname for an inferred legacy
+  custom label correctly preserves the text but returns without persisting the
+  inferred custom provenance, contradicting the applied assumption; normalize
+  that source into the serialized index without changing the label. No server,
+  auth, tunnel, relay, limits, switcher layout, task/context, or phase-2 work.
+  Sol implements one review-fix commit; Investigator re-reviews before merge.
+assumptions:
+  reviewed:
+    - id: hosted-attachments-follow-active-computer-tunnel
+      outcome: unchanged
+      reason: Exact upload/retrieval bytes still use relayFetch and authenticated
+        object URLs; the review fix restores demand-bounded resource creation
+        and deterministic revocation under the already-declared behavior.
+    - id: attachments-are-capped-files-served-inert
+      outcome: unchanged
+      reason: Server authorization, caps, raster allowlist, inert dispositions,
+        nosniff, storage, agent delivery, and cleanup remain untouched.
+    - id: hosted-generated-computer-label-follows-authenticated-hostname
+      outcome: unchanged
+      reason: Persisting inferred custom provenance closes the implementation gap in
+        the existing label-source contract without changing which labels are
+        replaceable.
+    - id: hosted-computer-sessions-keep-state-isolated
+      outcome: unchanged
+      reason: Downloads continue through the active entry's routed credential and
+        provenance mutation remains serialized for the addressed computer only.
+files:
+  - packages/web-next/src/runtime/relay-store.ts
+  - packages/web-next/src/runtime/relay-store.spec.ts
+  - packages/web-next/src/room/attachments.ts
+  - packages/web-next/src/room/attachments.spec.ts
+  - packages/web-next/src/room/Transcript.tsx
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room20-attachments.e2e.spec.ts
+  - packages/web-next/tests/room28-preview.e2e.spec.ts
+  - packages/web-next/tests/room32-relay-journey.e2e.spec.ts
+anchors:
+  hosted-attachments-follow-active-computer-tunnel:
+    hosted-attachment-transport:
+      action: change
+      reason: Make raster retrieval viewport/Preview-demanded and download retrieval
+        click-demanded while retaining routed bytes, type checks, inert
+        failures, and deterministic object-URL revocation.
+  hosted-generated-computer-label-follows-authenticated-hostname:
+    authenticated-computer-label:
+      action: change
+      reason: Persist inferred custom provenance during the existing serialized
+        hostname-adoption operation while preserving the operator's label.
