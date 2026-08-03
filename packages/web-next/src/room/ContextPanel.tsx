@@ -315,6 +315,11 @@ function MemberCard(props: {
   // successful compaction — or on a new action error, which is the other way
   // the request can end. Both are edges, so a stale spinner cannot survive.
   const [compacting, setCompacting] = useState(false);
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const clearStartedAt = useRef<{ errors: number; member: Member } | null>(null);
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   const [reviving, setReviving] = useState(false);
   const errorCount = useClientStore((state) => roomSlice(state, props.room).errors.length);
   const startedAt = useRef<{ errors: number; member: Member } | null>(null);
@@ -332,6 +337,25 @@ function MemberCard(props: {
       setCompacting(false);
     }
   }, [compacting, errorCount, member]);
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control
+  useEffect(() => {
+    const started = clearStartedAt.current;
+    if (!clearing || started === null) return;
+    if (errorCount > started.errors) {
+      clearStartedAt.current = null;
+      setClearing(false); // keep the confirm open so the operator can retry or cancel
+      return;
+    }
+    // Success is authoritative only when the member frame has actually removed
+    // the native session reference. A coincidental member update cannot erase
+    // the old ring or dismiss the confirmation early.
+    if (member !== started.member && member.session_ref === undefined) {
+      clearStartedAt.current = null;
+      setClearing(false);
+      setConfirmClear(false);
+    }
+  }, [clearing, errorCount, member]);
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // Revive is guarded the same way: the button disables while the request is in
   // flight and re-enables on the next member update (a success flips the state
   // out of 'dead', removing the button) or on an action error.
@@ -401,6 +425,24 @@ function MemberCard(props: {
               : <Minimize2 size={13} aria-hidden="true" />}
           </button>
         )}
+        {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
+        {member.kind === 'agent' && props.canManage && member.state !== 'dead' && member.session_ref !== undefined && (
+          <button
+            type="button"
+            className="nx-member-clear"
+            data-testid={`member-${member.handle}-clear-context`}
+            disabled={member.state !== 'idle' || clearing}
+            title={member.state !== 'idle'
+              ? `Only an idle agent context can be cleared — @${member.handle} is ${member.state}`
+              : clearing
+                ? `Clearing @${member.handle}'s native context…`
+                : `Clear @${member.handle}'s native context`}
+            onClick={() => setConfirmClear(true)}
+          >
+            Clear
+          </button>
+        )}
+        {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
         {member.kind === 'agent' && props.canManage && member.state === 'dead' && (
           // A dead agent's prominent slot is Revive, not a permanently-disabled
           // Compact. Guarded against a double-dispatch while the revival is pending.
@@ -523,6 +565,40 @@ function MemberCard(props: {
           </div>
         </Modal>
       )}
+
+      {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
+      {confirmClear && (
+        <Modal
+          label={`Clear @${member.handle}'s context?`}
+          onClose={() => { if (!clearing) setConfirmClear(false); }}
+          alert
+          testid="clear-context-dialog"
+        >
+          <h2 className="nx-dialog-title">Clear @{member.handle}&apos;s context?</h2>
+          <p className="nx-dialog-body">
+            This permanently discards the agent&apos;s native session memory. Channel history,
+            identity, configuration, usage limits, and spend remain. The next delivery starts
+            a fresh native session.
+          </p>
+          <div className="nx-dialog-actions">
+            <Button variant="quiet" disabled={clearing} onClick={() => setConfirmClear(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              data-testid="clear-context-confirm"
+              disabled={clearing}
+              onClick={() => {
+                if (clearing) return;
+                clearStartedAt.current = { errors: errorCount, member };
+                setClearing(true);
+                props.connection.act({ act: 'clear_member_context', member_id: member.id });
+              }}
+            >
+              {clearing ? 'Clearing…' : 'Clear context'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
 
       {renaming && (
         <RenameDialog

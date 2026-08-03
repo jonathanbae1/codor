@@ -152,6 +152,22 @@ interface CodexRuntime {
   pendingCompaction: PendingCompaction | null;
 }
 
+function waitForRuntimeExit(child: ChildProcessWithoutNullStreams, label: string): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      reject(new Error(`${label} did not exit after retirement`));
+    }, 10_000);
+    timer.unref?.();
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once('exit', onExit);
+  });
+}
+
 interface PendingCompaction {
   settle: (usage: AgentUsage | undefined) => void;
   fail: (error: Error) => void;
@@ -997,6 +1013,25 @@ export class CodexAdapter implements HarnessAdapter {
       turnId: turn.turnId,
     }, 5_000).catch(() => undefined).finally(() => this.retireRuntime(runtime, true));
   }
+
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=codex-session-reset
+  async resetSession(session: Session | undefined): Promise<void> {
+    if (session === undefined) return; // restart: no retained app-server exists
+    const runtime = this.liveRuntime(session);
+    if (runtime === undefined) return;
+    if (runtime.active !== null && !runtime.active.terminal) {
+      throw new Error('cannot clear Codex context while a turn is in flight');
+    }
+    if (runtime.pendingCompaction !== null) {
+      throw new Error('cannot clear Codex context while compaction is in flight');
+    }
+    const child = runtime.child;
+    const exited = child === null ? Promise.resolve() : waitForRuntimeExit(child, 'Codex app-server');
+    this.retireRuntime(runtime, true);
+    this.runtimes.delete(session);
+    await exited;
+  }
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // harn:end codex-app-server-is-the-member-runtime
 
   // harn:assume codex-bridges-command-and-file-approvals ref=codex-cmdfile-bridge

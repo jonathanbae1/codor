@@ -2741,6 +2741,59 @@ describe('compact_member act (manual-compaction-is-an-operator-act)', () => {
   });
 });
 
+// harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-server-dispatch
+describe('clear_member_context act', () => {
+  it('dispatches an owner reset and publishes the authoritative cleared member', async () => {
+    const agent = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'clearable', cwd: testCwd('clearable'),
+    });
+    daemon.store.updateMember('eng', agent.id, { session_ref: 'native-retained' });
+    const client = await connect();
+    client.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await client.next((frame) => frame.type === 'sync_complete');
+
+    client.ws.send(JSON.stringify({
+      type: 'act', room: 'eng', act: { act: 'clear_member_context', member_id: agent.id },
+    }));
+
+    const frame = await client.next((candidate) =>
+      candidate.type === 'member' &&
+      candidate.member.id === agent.id &&
+      candidate.member.session_ref === undefined);
+    expect(frame).toMatchObject({ type: 'member', member: { id: agent.id } });
+    expect(fake.resets).toHaveLength(1);
+    expect(fake.resets[0]).toMatchObject({ harness: 'fake', cwd: testCwd('clearable') });
+    client.ws.close();
+  });
+
+  it('correlates daemon refusal to the clear act and rejects a non-admin before dispatch', async () => {
+    const fresh = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'already-fresh', cwd: testCwd('already-fresh'),
+    });
+    const owner = await connect();
+    owner.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await owner.next((frame) => frame.type === 'sync_complete');
+    owner.ws.send(JSON.stringify({
+      type: 'act', room: 'eng', act: { act: 'clear_member_context', member_id: fresh.id },
+    }));
+    expect(await owner.next((frame) => frame.type === 'error' && frame.ref === 'clear_member_context'))
+      .toMatchObject({ type: 'error', ref: 'clear_member_context', message: expect.stringContaining('fresh context') });
+
+    const denied = await connectAs(MEMBER_TOKEN);
+    denied.ws.send(JSON.stringify({ type: 'subscribe', room: 'eng', since_seq: 0 }));
+    await denied.next((frame) => frame.type === 'sync_complete');
+    denied.ws.send(JSON.stringify({
+      type: 'act', room: 'eng', act: { act: 'clear_member_context', member_id: fresh.id },
+    }));
+    expect(await denied.next((frame) => frame.type === 'error'))
+      .toMatchObject({ type: 'error', ref: 'act' });
+    expect(fake.resets).toHaveLength(0);
+    owner.ws.close();
+    denied.ws.close();
+  });
+});
+// harn:end member-context-reset-is-authorized-atomic-and-lazy
+
 // harn:assume browser-protocol-epoch-blocks-only-stale-browser-ui ref=browser-protocol-regression
 describe('browser protocol epoch', () => {
   const currentBrowserProtocol = BROWSER_PROTOCOL_EPOCH;

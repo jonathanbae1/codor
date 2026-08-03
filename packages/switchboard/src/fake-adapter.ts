@@ -352,6 +352,10 @@ export class FakeAdapter implements HarnessAdapter {
    */
   private compactionHold: (() => void) | null = null;
   private heldCompactions: Array<() => void> = [];
+  readonly resets: Array<Session | undefined> = [];
+  private resetHold = false;
+  private heldResets: Array<() => void> = [];
+  private nextResetError: Error | undefined;
 
   holdCompactions(): void {
     this.compactionHold = () => undefined;
@@ -370,6 +374,29 @@ export class FakeAdapter implements HarnessAdapter {
       await new Promise<void>((resolve) => this.heldCompactions.push(resolve));
     }
     return await Promise.resolve(this.compactUsage);
+  };
+
+  holdResets(): void {
+    this.resetHold = true;
+  }
+
+  releaseResets(): void {
+    this.resetHold = false;
+    const waiting = this.heldResets;
+    this.heldResets = [];
+    for (const release of waiting) release();
+  }
+
+  failNextReset(message: string): void {
+    this.nextResetError = new Error(message);
+  }
+
+  resetSession = async (session: Session | undefined): Promise<void> => {
+    this.resets.push(session);
+    if (this.resetHold) await new Promise<void>((resolve) => this.heldResets.push(resolve));
+    const error = this.nextResetError;
+    this.nextResetError = undefined;
+    if (error !== undefined) throw error;
   };
 
   interrupt(session: Session): void {

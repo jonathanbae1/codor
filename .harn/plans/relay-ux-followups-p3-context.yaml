@@ -1,0 +1,434 @@
+id: relay-ux-followups-p3-context
+title: Relay UX follow-ups phase 3 - truthful context ceilings and fresh-session reset
+notes: >
+  Third approved phase of Richard's relay UX follow-ups. Repair the Claude
+  same-model overwrite that can replace an engine-reported 1M context ceiling
+  with the curated 200K bootstrap value on a later init/assistant event. Give
+  each translator runtime explicit ceiling provenance: a curated seed may fill
+  an unknown ceiling or replace truth when the actual native model changes, but
+  it may never downgrade an engine report for the same native model. A later
+  engine report is authoritative even when smaller. Preserve that provenance
+  across sequential turn translators, clear prior used/ceiling state on an
+  actual model change, and invalidate the daemon's persisted ceiling when the
+  operator explicitly changes the configured model. Never use a global max or
+  hardcode Opus to 1M.
+
+  Add one owner/admin-only clear_member_context act for a non-removed local
+  agent that has a persisted native session reference. A never-run or
+  already-cleared member is already fresh and refuses clearly. It is a real
+  native-session reset, not compaction or a client-side meter clear. Accept it
+  only while the member is idle, with no in-flight turn, pre-existing
+  non-consumed delivery, pending/active attach, or compaction; a second reset is
+  refused. Hold a per-member reset lease before awaiting native retirement so
+  turn admission cannot race it. Extend HarnessAdapter with an optional
+  resetSession hook; every first-party adapter implements the hook, retained
+  Claude/Codex/ACP runtimes fully dispose and forget their query, app-server, or
+  ACP process when this daemon has a cached session; after a daemon restart, no
+  cached session means there is no process to retire. One-shot CLI adapters
+  verify that no turn process remains. A third-party adapter without the hook
+  refuses clearly. If retirement fails, durable member state remains untouched
+  and the lease is released. A delivery arriving after the lease begins stays
+  queued and is admitted only after a successful reset, becoming the first fresh
+  turn.
+
+  After retirement succeeds, delete the daemon session cache and atomically
+  clear session_ref, session lifecycle, ACP usage baseline/pending baseline,
+  persisted context_window, credential hash, and durable task projection while
+  re-arming conventions and roster briefing flags without clearing a concurrent
+  misaddress. Clear transient lastUsage and waits. Preserve member id, handle,
+  harness, cwd, model, thinking, policy, purpose, role/custody, ACP launch
+  configuration/provider identity, account-limit gauges, spend/run evidence, and
+  all channel messages. Emit one system audit message naming actor and target.
+  Clicking Clear creates no native session and spends no turn; the next
+  addressed delivery uses the existing sessionFor path to spawn a fresh native
+  id, rotate the member credential, and attach the re-armed briefing.
+
+  Add the minimally styled Clear context control beside Compact for now, gated
+  by the existing management role. Confirm in a modal that native memory is
+  discarded while channel history/configuration remain; prevent duplicate
+  dispatch, show pending state, rely on the authoritative member frame before
+  removing the old ring, and recover on the correlated action error. Phase 4
+  owns the approved member-card row/layout redesign. Sol implements;
+  Investigator reviews before Phase 4. No transcript deletion, member
+  replacement, automatic reset, provider-limit/spend reset, task protocol
+  change, compaction semantic change, model catalog change, or deployment.
+assumptions:
+  retire:
+    - id: engine-reported-window-outlives-restarts
+      reason: The original contract made persisted engine truth effectively monotonic
+        and did not invalidate it when the configured model or native session
+        was explicitly reset. Context-window truth must instead be scoped to the
+        current model and native context.
+  create:
+    - id: claude-context-ceiling-preserves-engine-provenance
+      title: Claude context ceilings preserve same-model engine provenance
+      statement: The Claude translator must associate the current context ceiling with
+        its native session model and whether it came from a curated seed or
+        engine modelUsage. A curated seed may fill an unknown ceiling and
+        becomes the new bootstrap truth when the actual native model changes,
+        but a later init or assistant identity for the same model must never
+        replace an engine-reported ceiling. The modelUsage entry matching the
+        current session model is authoritative even when smaller; ambiguous
+        auxiliary entries never widen the denominator, and a real model change
+        clears the previous model's ceiling and used-token fallback.
+      reason: The existing main-model selection contract does not record provenance,
+        allowing a later curated 200K seed to overwrite a same-model 1M engine
+        report.
+      depends_on:
+        - context-ceiling-follows-main-model
+        - normalized-agent-usage-telemetry-with-estimates
+    - id: current-context-window-truth-outlives-restarts
+      title: Persisted context-window truth is scoped to the current model and native
+        context
+      statement: When live usage reports the current native context's window, the
+        daemon persists it and later estimated seeds for that unchanged
+        configured model use it instead of a curated guess, leaving estimated
+        used tokens and the estimated flag untouched. A later engine report may
+        replace it with a larger or smaller value. An explicit configured-model
+        change or successful clear_member_context invalidates it instead of
+        carrying the old model or session denominator forward; members without a
+        current persisted report use the curated backstop, and no path computes
+        a global maximum.
+      reason: Restart protection remains necessary, but engine truth is authoritative
+        for one current model/native context rather than a permanent monotonic
+        ceiling.
+      depends_on:
+        - context-ceiling-follows-main-model
+    - id: member-context-reset-is-authorized-atomic-and-lazy
+      title: Clear context retires one idle agent's native session and lazily starts
+        fresh
+      statement: clear_member_context must be an owner/admin-only act for a
+        non-removed switchboard-local idle agent with a persisted native session
+        reference and no in-flight turn, pre-existing non-consumed delivery,
+        attach acquisition or lease, compaction, or concurrent reset. The daemon
+        must lease turn admission, await the adapter's complete session
+        retirement, then atomically clear native session reference and
+        lifecycle/baseline metadata, persisted and transient context usage,
+        member credential, transient waits, and session-scoped tasks while
+        re-arming the full briefing and preserving misaddress, member
+        identity/configuration, ACP launch identity, channel history/run
+        evidence, provider limits, and spend. Retirement failure changes no
+        durable session state. Success emits one actor/target audit message but
+        creates no native session or paid turn; the next addressed delivery,
+        including one queued after the reset lease began, creates a new native
+        id and credential through the ordinary sessionFor path. A first-party
+        adapter must retire any retained idle runtime; an adapter without reset
+        support refuses rather than pretending the reset worked.
+      reason: Compact preserves a resumable engine session, so fully discarding native
+        memory requires one explicit, authorized, race-safe lifecycle boundary
+        whose retained and cleared state is testable.
+      depends_on:
+        - roles-gate-human-acts-not-agents
+        - one-inflight-turn-per-member
+        - durable-agent-runtime-configuration
+        - member-task-projection-is-durable-and-session-scoped
+        - compaction-reinjects-codor-briefing
+        - current-context-window-truth-outlives-restarts
+  reviewed:
+    - id: context-ceiling-follows-main-model
+      outcome: unchanged
+      reason: Main-model entry selection and auxiliary-model exclusion remain intact;
+        the new provenance contract governs whether a later curated seed may
+        replace already-selected engine truth.
+    - id: member-task-projection-is-durable-and-session-scoped
+      outcome: unchanged
+      reason: Existing same-session persistence and different-session clearing remain
+        unchanged; the new explicit reset contract separately requires the same
+        projection to be cleared when retiring the current session to absent.
+    - id: claude-agent-sdk-query-is-the-session-runtime
+      outcome: unchanged
+      reason: Ordinary turns still share one supervised query; the new explicit reset
+        hook awaits the existing full retirement path and forgets the member
+        runtime before any fresh query can exist.
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: Ordinary turns still share one initialized app-server; explicit reset
+        disposes and forgets it so the next delivery cannot resume its old
+        thread.
+    - id: acp-v1-events-and-capabilities-are-negotiated
+      outcome: unchanged
+      reason: Negotiated resume/load remains session-scoped; explicit reset retires
+        the retained provider process and clears negotiated lifecycle before a
+        later newSession.
+    - id: durable-agent-runtime-configuration
+      outcome: unchanged
+      reason: Clear retains model/thinking/policy and private ACP launch configuration
+        while deliberately discarding only native-session lifecycle and usage
+        baselines.
+    - id: last-agent-usage-is-transient-and-seeded
+      outcome: unchanged
+      reason: Usage remains transient and never journaled; explicit reset removes its
+        member registry entry and the next session repopulates it from new
+        evidence.
+    - id: compaction-reinjects-codor-briefing
+      outcome: unchanged
+      reason: Clear uses the same briefing flag meaning in its own atomic reset
+        transaction while leaving compaction paths unchanged and preserving
+        misaddressed.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: Compact remains native summarize-and-continue; Clear is a separate
+        idle-only act and neither silently substitutes for the other.
+    - id: manual-compaction-leases-out-turn-admission
+      outcome: unchanged
+      reason: Compaction keeps its own lease; context reset adds a separate mutually
+        exclusive lease using the same shared turn-admission seam.
+    - id: roles-gate-human-acts-not-agents
+      outcome: unchanged
+      reason: The new destructive act joins the existing admin minimum-role matrix and
+        is omitted from agent capabilities.
+    - id: revive-via-session-ref
+      outcome: unchanged
+      reason: Revive still resumes a dead agent's saved session; Clear applies only to
+        an idle live member and deliberately removes that resume token.
+    - id: member-config-is-changed-not-respawned
+      outcome: unchanged
+      reason: Ordinary Configure still preserves the native session; only an actual
+        model-setting change invalidates stale displayed/persisted
+        context-window evidence for the next model.
+    - id: agent-member-credentials-stay-secret
+      outcome: unchanged
+      reason: Reset revokes the retired runtime credential in the same atomic boundary
+        and the ordinary fresh session path issues the replacement; no token
+        enters public state or audit copy.
+    - id: normalized-agent-usage-telemetry-with-estimates
+      outcome: unchanged
+      reason: Public AgentUsage fields and pair semantics do not change; ceiling
+        provenance stays private to the Claude translator context.
+    - id: claude-sdk-message-contract-preserves-normalized-runs
+      outcome: unchanged
+      reason: The translator continues carrying only native session identity and
+        context-window telemetry across turns; the added provenance makes that
+        existing carried telemetry precise without changing normalized run
+        events.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: One-shot adapters retain their existing supervised turn-process
+        lifecycle; their reset hooks only verify that no live child remains
+        before confirming an idle reset.
+    - id: turn-start-requires-owned-custody
+      outcome: unchanged
+      reason: Every turn still passes the same custody gate; the reset lease adds one
+        more refusal condition at that shared gate so queued work cannot start
+        while native retirement is in progress.
+files:
+  - packages/protocol/src/adapter.ts
+  - packages/protocol/src/ws.ts
+  - packages/protocol/src/schemas.spec.ts
+  - packages/switchboard/src/authorization.ts
+  - packages/switchboard/src/authorization.spec.ts
+  - packages/switchboard/src/store.ts
+  - packages/switchboard/src/store.spec.ts
+  - packages/switchboard/src/fake-adapter.ts
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+  - packages/switchboard/src/server.ts
+  - packages/switchboard/src/server.spec.ts
+  - packages/adapters/claude-code/src/translate.ts
+  - packages/adapters/claude-code/src/translate.spec.ts
+  - packages/adapters/claude-code/src/adapter.ts
+  - packages/adapters/claude-code/src/adapter.spec.ts
+  - packages/adapters/codex/src/adapter.ts
+  - packages/adapters/codex/src/adapter.spec.ts
+  - packages/adapters/acp/src/adapter.ts
+  - packages/adapters/acp/src/adapter.spec.ts
+  - packages/adapters/antigravity/src/adapter.ts
+  - packages/adapters/copilot/src/adapter.ts
+  - packages/adapters/cursor/src/adapter.ts
+  - packages/adapters/gemini/src/adapter.ts
+  - packages/adapters/grok/src/adapter.ts
+  - packages/adapters/opencode/src/adapter.ts
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/harness.mjs
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+anchors:
+  engine-reported-window-outlives-restarts:
+    persisted-window-seed:
+      action: remove
+      reason: Replace the unscoped monotonic restart contract with current-model and
+        current-session persisted truth.
+  claude-context-ceiling-preserves-engine-provenance:
+    claude-context-provenance:
+      action: change
+      reason: Record curated-versus-engine provenance per current native model and
+        prevent same-model bootstrap events from downgrading learned truth.
+    claude-context-provenance-regression:
+      action: change
+      reason: Cover same-model seed preservation, actual model changes, and later
+        smaller engine reports without hardcoded or global-max behavior.
+  current-context-window-truth-outlives-restarts:
+    persisted-window-seed:
+      action: change
+      reason: Scope persisted engine reports to the unchanged configured model and
+        invalidate them on model change or successful native-context reset.
+  context-ceiling-follows-main-model:
+    claude-main-model-window:
+      action: change
+      reason: Track bootstrap-versus-engine provenance per native model and prevent
+        same-model bootstrap events from downgrading learned truth.
+    claude-main-model-window-regression:
+      action: change
+      reason: Preserve existing matching-main-model and auxiliary-model exclusion
+        regressions while extending the cases around provenance.
+  member-task-projection-is-durable-and-session-scoped:
+    member-task-storage:
+      action: change
+      reason: The atomic fresh-context store transaction clears tasks when session_ref
+        becomes absent by explicit operator action.
+    member-task-daemon-regression:
+      action: change
+      reason: Prove fresh-session reset clears tasks while retained native
+        identity/configuration and ordinary same-session behavior remain.
+  member-context-reset-is-authorized-atomic-and-lazy:
+    adapter-reset-contract:
+      action: change
+      reason: Define the optional adapter hook as complete retirement/forgetting with
+        no new native session creation.
+    clear-context-act-schema:
+      action: change
+      reason: Add the bounded targeted clear_member_context websocket act and protocol
+        regression.
+    clear-context-role-gate:
+      action: change
+      reason: Set owner/admin minimum role and keep the act out of agent authority.
+    clear-context-store-transaction:
+      action: change
+      reason: Atomically clear session-scoped columns, revoke the credential, re-arm
+        briefing flags, append one member change, and preserve retained columns.
+    clear-context-runtime-lease:
+      action: change
+      reason: Gate/reset/retire/delete caches and transient state, audit success, and
+        release queued-after-start work only onto the fresh path.
+    clear-context-server-dispatch:
+      action: change
+      reason: Dispatch the async act and correlate refusals/failures without a false
+        success frame.
+    claude-session-reset:
+      action: change
+      reason: Await query interruption/close/pump settlement and remove both weak and
+        member-keyed runtime entries.
+    codex-session-reset:
+      action: change
+      reason: Cancel parked requests, dispose the client/child, and forget thread and
+        member runtime identity.
+    acp-session-reset:
+      action: change
+      reason: Retire the persistent ACP connection/process before its negotiated
+        lifecycle and session id are cleared.
+    first-party-cli-session-reset:
+      action: change
+      reason: Give every one-shot built-in an honest reset hook that refuses an
+        unexpected live child and otherwise confirms no idle runtime remains.
+    clear-context-web-control:
+      action: change
+      reason: Add confirmed role-gated dispatch with pending/error/member-frame
+        completion behavior, leaving final layout to Phase 4.
+    clear-context-browser-regression:
+      action: change
+      reason: Prove confirmation, no duplicate dispatch, authoritative ring clearing,
+        fresh next native id, retained history/configuration, errors, and Axe
+        behavior.
+  claude-agent-sdk-query-is-the-session-runtime:
+    claude-sdk-session-lifecycle:
+      action: change
+      reason: Expose the existing full query retirement path for the explicit reset
+        contract without changing ordinary retained turns.
+    claude-sdk-session-regression:
+      action: change
+      reason: Prove explicit reset fully retires and forgets the cached query while
+        ordinary sequential turns continue sharing it.
+  claude-sdk-message-contract-preserves-normalized-runs:
+    claude-sdk-message-translation:
+      action: change
+      reason: Carry private ceiling provenance through the existing cross-turn
+        translation context without changing normalized wire events.
+  codex-app-server-is-the-member-runtime:
+    codex-app-server-session-lifecycle:
+      action: change
+      reason: Expose full runtime disposal for explicit reset while preserving
+        ordinary app-server retention.
+    codex-app-server-session-regression:
+      action: change
+      reason: Prove reset cancels parked work, disposes the cached app-server, and
+        prevents reuse of the retired thread.
+  acp-v1-events-and-capabilities-are-negotiated:
+    acp-adapter-runtime:
+      action: change
+      reason: Add complete idle runtime retirement before the daemon discards
+        negotiated session lifecycle.
+    acp-adapter-regression:
+      action: change
+      reason: Prove reset retires the retained provider process and ordinary ACP
+        negotiation/resume behavior remains intact.
+  adapter-process-lifecycle-supervised:
+    antigravity-cli-process-supervision:
+      action: change
+      reason: Add an idle-only reset hook without weakening supervised turn cleanup.
+    copilot-cli-process-supervision:
+      action: change
+      reason: Add an idle-only reset hook without weakening supervised turn cleanup.
+    gemini-cli-process-supervision:
+      action: change
+      reason: Add an idle-only reset hook without weakening supervised turn cleanup.
+    grok-cli-process-supervision:
+      action: change
+      reason: Add an idle-only reset hook without weakening supervised turn cleanup.
+    opencode-cli-process-supervision:
+      action: change
+      reason: Add an idle-only reset hook without weakening supervised turn cleanup.
+  roles-gate-human-acts-not-agents:
+    role-matrix-source:
+      action: change
+      reason: Add clear_member_context at admin rank; agent capabilities remain
+        deliberately unchanged.
+  durable-agent-runtime-configuration:
+    durable-agent-runtime-storage:
+      action: change
+      reason: The reset transaction clears per-session lifecycle/baselines while
+        preserving the private ACP launch record.
+  last-agent-usage-is-transient-and-seeded:
+    last-usage-runtime-registry:
+      action: change
+      reason: Successful reset removes only the selected member's transient usage;
+        model changes also discard stale pre-change display evidence.
+    last-usage-member-projection:
+      action: change
+      reason: The authoritative reset member frame omits the removed usage so the old
+        ring disappears only after server success.
+  compaction-reinjects-codor-briefing:
+    daemon-briefing-reinjection-helper:
+      action: change
+      reason: Reuse its flag semantics in the atomic reset while preserving
+        misaddressed and leaving compaction behavior intact.
+  manual-compaction-leases-out-turn-admission:
+    compaction-lease-state:
+      action: change
+      reason: Add a sibling reset lease and mutual exclusion without altering
+        compaction ownership.
+    compaction-lease-regression:
+      action: change
+      reason: Prove compaction and context reset refuse one another and neither admits
+        a racing turn.
+  manual-compaction-is-an-operator-act:
+    compact-member-contract:
+      action: change
+      reason: Keep compact dispatch behavior unchanged while adding the distinct
+        clear-context server action beside it.
+  turn-start-requires-owned-custody:
+    shared-turn-start-custody-gate:
+      action: change
+      reason: Add reset-lease exclusion to the shared final admission gate so no
+        ordinary, reconciled, or released turn can race native retirement.
+  member-config-is-changed-not-respawned:
+    configure-member-daemon:
+      action: change
+      reason: An actual model setting change drops only stale context-window evidence
+        while preserving the current native resume session.
+  normalized-agent-usage-telemetry-with-estimates:
+    claude-usage-telemetry:
+      action: change
+      reason: Thread private ceiling provenance across turn translators without
+        changing public AgentUsage fields.
+applied:
+  applied_at: 2026-08-03T04:02:20.713Z

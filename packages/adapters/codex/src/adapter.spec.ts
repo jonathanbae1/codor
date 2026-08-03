@@ -134,6 +134,35 @@ describe('Codex app-server controls', () => {
 
 // harn:assume codex-app-server-is-the-member-runtime ref=codex-app-server-session-regression
 describe('persistent Codex app-server lifecycle', () => {
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=codex-session-reset
+  it('disposes and forgets the app-server so the next delivery starts a fresh thread', async () => {
+    const firstServer = createFakeCodexAppServer();
+    const secondServer = createFakeCodexAppServer();
+    const { adapter, factory } = fixtureAdapter(firstServer, secondServer);
+    const session = adapter.spawn({ cwd: '/work' });
+    session.env = { CODOR_MEMBER_ID: 'reset-member' };
+
+    const first = collect(adapter, session, 'old context');
+    await firstServer.waitForRequest('turn/start');
+    completeTurn(firstServer, 'turn-1');
+    await first;
+    expect(session.session_ref).toBe('thread-1');
+
+    await adapter.resetSession(session);
+    expect(firstServer.child.killed).toBe(true);
+    session.session_ref = undefined;
+
+    const fresh = collect(adapter, session, 'fresh context');
+    await secondServer.waitForRequest('thread/start');
+    expect(secondServer.messages.some((message) => message.method === 'thread/resume')).toBe(false);
+    completeTurn(secondServer, 'turn-1');
+    await fresh;
+    expect(factory.servers).toEqual([firstServer, secondServer]);
+    await adapter.resetSession(session);
+    await expect(adapter.resetSession(undefined)).resolves.toBeUndefined();
+  });
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   // harn:assume active-turn-steering-is-ordered-and-durable ref=codex-active-turn-steering-regression
   it('steers only the active expected turn and returns idle fallback after completion', async () => {
     const server = createFakeCodexAppServer({

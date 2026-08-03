@@ -108,20 +108,22 @@ function contextWindowUsed(usage: ClaudeUsage | undefined): number | undefined {
 function reportedContextWindow(
   modelUsage: ClaudeEvent['modelUsage'],
   sessionModel: string | undefined,
-): number | undefined {
+): { model: string; window: number } | undefined {
   const entries = Object.entries(modelUsage ?? {});
   if (sessionModel !== undefined) {
     const own = entries.find(([model]) => model === sessionModel);
     if (own !== undefined) {
       const window = tokenCount(own[1]?.contextWindow);
-      return window !== undefined && window > 0 ? window : undefined;
+      return window !== undefined && window > 0 ? { model: own[0], window } : undefined;
     }
   }
   // Without a session-model match the only safe entry is an unambiguous one:
   // a lone reporting model. Aux/subagent models must never widen the ceiling.
   if (entries.length === 1) {
     const window = tokenCount(entries[0]?.[1]?.contextWindow);
-    return window !== undefined && window > 0 ? window : undefined;
+    return window !== undefined && window > 0
+      ? { model: entries[0]![0], window }
+      : undefined;
   }
   return undefined;
 }
@@ -344,6 +346,9 @@ export interface ClaudeTranslatorContext {
   sessionId?: string;
   sessionModel?: string;
   contextWindowMaxTokens?: number;
+  // harn:assume claude-context-ceiling-preserves-engine-provenance ref=claude-context-provenance
+  contextWindowSource?: 'curated' | 'engine';
+  // harn:end claude-context-ceiling-preserves-engine-provenance
   contextWindowUsedTokens?: number;
 }
 
@@ -362,16 +367,32 @@ export function createTurnTranslator(
 
   let sessionModel = context.sessionModel;
 
+  // harn:assume claude-context-ceiling-preserves-engine-provenance ref=claude-context-provenance
   const seedContextWindow = (model: string | undefined): void => {
     if (model === undefined) return;
+    const changedModel = sessionModel !== undefined && sessionModel !== model;
     sessionModel = model;
     context.sessionModel = model;
+    if (changedModel) {
+      // The previous model's numerator and denominator are one pair. Neither
+      // may cross a real native model boundary.
+      contextWindowMaxTokens = undefined;
+      contextWindowUsedTokens = undefined;
+      delete context.contextWindowMaxTokens;
+      delete context.contextWindowUsedTokens;
+      delete context.contextWindowSource;
+      lastLiveContextKey = undefined;
+    }
     const seeded = CLAUDE_CONTEXT_WINDOWS.get(model);
-    if (seeded !== undefined) {
+    // A later init/assistant for the SAME model is identity noise, not evidence
+    // that the curated catalog outranks an earlier engine report.
+    if (seeded !== undefined && (changedModel || context.contextWindowSource !== 'engine')) {
       contextWindowMaxTokens = seeded;
       context.contextWindowMaxTokens = seeded;
+      context.contextWindowSource = 'curated';
     }
   };
+  // harn:end claude-context-ceiling-preserves-engine-provenance
 
   return {
     sessionId: () => sessionId,
@@ -542,8 +563,23 @@ export function createTurnTranslator(
           const failure = claudeResultFailure(event);
           // harn:end claude-result-errors-follow-native-signals
           // harn:assume normalized-agent-usage-telemetry-with-estimates ref=claude-usage-telemetry
-          contextWindowMaxTokens = reportedContextWindow(event.modelUsage, sessionModel) ??
-            contextWindowMaxTokens;
+          const reported = reportedContextWindow(event.modelUsage, sessionModel);
+          // harn:assume claude-context-ceiling-preserves-engine-provenance ref=claude-context-provenance
+          if (reported !== undefined) {
+            const changedModel = sessionModel !== undefined && sessionModel !== reported.model;
+            if (changedModel) {
+              contextWindowUsedTokens = undefined;
+              delete context.contextWindowUsedTokens;
+              lastLiveContextKey = undefined;
+            }
+            contextWindowMaxTokens = reported.window;
+            context.contextWindowSource = 'engine';
+            // A lone modelUsage entry is unambiguous native identity even when
+            // init was absent, so preserve its provenance across translators.
+            sessionModel = reported.model;
+            context.sessionModel = reported.model;
+          }
+          // harn:end claude-context-ceiling-preserves-engine-provenance
           if (contextWindowMaxTokens !== undefined) {
             context.contextWindowMaxTokens = contextWindowMaxTokens;
           }

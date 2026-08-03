@@ -331,6 +331,67 @@ test.describe('manual compaction', () => {
   });
 });
 
+// harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-browser-regression
+test.describe('clear member context', () => {
+  const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
+  const control = async (path: string, body: unknown = {}): Promise<void> => {
+    const response = await fetch(`${CONTROL}${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`${path} failed: ${await response.text()}`);
+  };
+
+  test('confirms, recovers from retirement failure, waits for member truth, and starts fresh lazily', async ({ page }) => {
+    await openRoom(page, '/?room=context-reset&token=next-e2e-token');
+    const card = page.getByTestId('member-eraser');
+    const clear = page.getByTestId('member-eraser-clear-context');
+    await expect(clear).toBeEnabled();
+    await expect(card.getByTestId('member-eraser-tasks')).toContainText('Old native-session task');
+
+    await clear.click();
+    const dialog = page.getByTestId('clear-context-dialog');
+    await expect(dialog).toContainText("permanently discards the agent's native session memory");
+    await expect(dialog).toContainText('Channel history, identity, configuration, usage limits, and spend remain');
+    const { default: AxeBuilder } = await import('@axe-core/playwright');
+    const { violations } = await new AxeBuilder({ page })
+      .include('[data-testid="clear-context-dialog"]')
+      .analyze();
+    expect(violations).toEqual([]);
+
+    // A correlated action error keeps the confirmation and old member truth,
+    // but re-enables the action for an explicit retry.
+    await control('/fail-reset');
+    const confirm = dialog.getByTestId('clear-context-confirm');
+    await confirm.click();
+    await expect(confirm).toBeEnabled();
+    await expect(dialog).toBeVisible();
+    await expect(clear).toBeVisible();
+    await expect(card.getByTestId('member-eraser-tasks')).toBeVisible();
+
+    // While retirement is held, duplicate dispatch is impossible and the old
+    // ring/control remain until the authoritative member frame clears them.
+    await control('/hold-resets');
+    await confirm.click();
+    await expect(confirm).toBeDisabled();
+    await expect(clear).toBeVisible();
+    await control('/hold-resets', { held: false });
+    await expect(dialog).toBeHidden();
+    await expect(clear).toHaveCount(0);
+    await expect(card.getByTestId('member-eraser-tasks')).toHaveCount(0);
+    await expect(card).toContainText('kept-model');
+
+    // Clear itself did not start a native session. The first addressed delivery
+    // does, receives the re-armed briefing, and makes the saved-session control
+    // available again without a document reload.
+    await control('/enqueue', { turns: [{ kind: 'complete', final_text: '<ACK_OK>' }] });
+    await page.getByTestId('composer-input').fill('@eraser first fresh delivery');
+    await page.getByTestId('composer-send').click();
+    await expect(page.getByTestId('member-eraser-clear-context')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('connection')).toHaveText(/Connected/);
+  });
+});
+// harn:end member-context-reset-is-authorized-atomic-and-lazy
+
 // harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-revive-regression
 test.describe('member lifecycle', () => {
   test('a dead agent swaps the disabled Compact for a direct Revive that brings it back', async ({ page }) => {

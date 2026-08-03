@@ -4852,7 +4852,7 @@ describe('transient lastUsage telemetry', () => {
 });
 // harn:end last-agent-usage-is-transient-and-seeded
 
-describe('persisted context window (engine-reported-window-outlives-restarts)', () => {
+describe('persisted context window (current-context-window-truth-outlives-restarts)', () => {
   it('round-trips the member context_window column and migrates a pre-column db', () => {
     const dbPath = join(dir, 'ctx-window.sqlite');
     let store = new Store(dbPath);
@@ -6593,6 +6593,219 @@ describe('member task projection landing (member-task-projection-is-durable-and-
   });
 });
 // harn:end member-task-projection-is-durable-and-session-scoped
+
+// harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-runtime-lease
+describe('explicit member context reset', () => {
+  const owner = () => daemon.ownerOf('eng');
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  async function establish(handle: string) {
+    const agent = daemon.spawnMember('eng', {
+      harness: 'fake', handle, cwd: testCwd(handle), model: 'kept-model',
+      policy: 'workspace-write', purpose: 'keep purpose',
+    });
+    fake.enqueue({
+      kind: 'complete', final_text: '<ACK_OK>',
+      agent_usage: {
+        contextWindowMaxTokens: 1_000_000,
+        contextWindowUsedTokens: 125_000,
+      },
+      items: [{
+        type: 'run.tasks',
+        update: { op: 'replace', items: [{ id: 'old', content: 'Old task', status: 'pending' }] },
+      }],
+    });
+    daemon.postHumanMessage('eng', `@${handle} establish retained context`);
+    await daemon.settle();
+    const ready = daemon.store.getMember('eng', agent.id)!;
+    expect(ready.session_ref).toBeDefined();
+    expect(ready.tasks?.items).toHaveLength(1);
+    expect(daemon.store.getMemberContextWindow('eng', agent.id)).toBe(1_000_000);
+    return ready;
+  }
+
+  // harn:assume member-task-projection-is-durable-and-session-scoped ref=member-task-daemon-regression
+  it('retires first, clears session-scoped state without a paid turn, and lazily starts fresh', async () => {
+    const agent = await establish('reset-alpha');
+    daemon.store.updateMember('eng', agent.id, { misaddressed: true });
+    const oldCredential = (daemon.store.db.prepare('SELECT credential_hash FROM members WHERE id = ?')
+      .get(agent.id) as { credential_hash: string }).credential_hash;
+    const deliveriesBefore = fake.deliveries.length;
+
+    await daemon.clearMemberContext('eng', agent.id, owner().id);
+
+    expect(fake.resets).toHaveLength(1);
+    expect(fake.resets[0]?.session_ref).toBe(agent.session_ref);
+    expect(fake.deliveries).toHaveLength(deliveriesBefore); // click spent no turn
+    const cleared = daemon.store.getMember('eng', agent.id)!;
+    expect(cleared).toMatchObject({
+      id: agent.id, handle: 'reset-alpha', model: 'kept-model',
+      policy: 'workspace-write', purpose: 'keep purpose', state: 'idle',
+      misaddressed: true, conventions_sent: false, roster_stale: true,
+    });
+    expect(cleared.session_ref).toBeUndefined();
+    expect(cleared.tasks).toBeUndefined();
+    const clearedFrame = frames.map(({ frame }) => frame)
+      .filter((frame): frame is Extract<ServerFrame, { type: 'member' }> =>
+        frame.type === 'member' && frame.member.id === agent.id)
+      .at(-1);
+    expect(clearedFrame?.member.lastUsage).toBeUndefined();
+    expect(daemon.store.getMemberContextWindow('eng', agent.id)).toBeUndefined();
+    expect(daemon.store.findAgentByCredentialHash(oldCredential)).toBeUndefined();
+    expect(daemon.store.listMessages('eng', { limit: 100 }).some((message) =>
+      message.kind === 'system' &&
+      message.body.includes("@richard cleared @reset-alpha's native context"))).toBe(true);
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@reset-alpha first fresh delivery');
+    await daemon.settle();
+    const fresh = daemon.store.getMember('eng', agent.id)!;
+    expect(fresh.session_ref).toBeDefined();
+    expect(fresh.session_ref).not.toBe(agent.session_ref);
+    const newCredential = (daemon.store.db.prepare('SELECT credential_hash FROM members WHERE id = ?')
+      .get(agent.id) as { credential_hash: string }).credential_hash;
+    expect(newCredential).not.toBe(oldCredential);
+    const delivered = fake.deliveries.at(-1)!;
+    expect(delivered.payload).toContain('first fresh delivery');
+    expect(delivered.payload).toContain('[conventions:');
+    expect(delivered.attached).toBe(false);
+  });
+  // harn:end member-task-projection-is-durable-and-session-scoped
+
+  it('leases turn admission so a delivery arriving during retirement is first on the fresh session', async () => {
+    const agent = await establish('reset-lease');
+    const oldRef = agent.session_ref;
+    const deliveriesBefore = fake.deliveries.length;
+    fake.holdResets();
+    const reset = daemon.clearMemberContext('eng', agent.id, owner().id);
+    await until(() => fake.resets.length === 1 ? true : undefined);
+
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@reset-lease queued after lease');
+    await tick();
+    expect(fake.deliveries).toHaveLength(deliveriesBefore);
+    expect(daemon.store.listDeliveries('eng', { recipient: agent.id, state: 'queued' }))
+      .toHaveLength(1);
+
+    fake.releaseResets();
+    await reset;
+    await daemon.settle();
+    const delivery = fake.deliveries.at(-1)!;
+    expect(delivery.payload).toContain('queued after lease');
+    expect(delivery.session_ref).not.toBe(oldRef);
+    expect(delivery.attached).toBe(false);
+  });
+
+  it('keeps reset and manual compaction mutually exclusive', async () => {
+    const resetting = await establish('reset-vs-compact');
+    fake.holdResets();
+    const reset = daemon.clearMemberContext('eng', resetting.id, owner().id);
+    await until(() => fake.resets.length === 1 ? true : undefined);
+    await expect(daemon.compactMember('eng', resetting.id, owner().id))
+      .rejects.toThrow('context is being cleared');
+    fake.releaseResets();
+    await reset;
+
+    const compacting = await establish('compact-vs-reset');
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', compacting.id, owner().id);
+    await until(() => fake.compactions.length === 1 ? true : undefined);
+    await expect(daemon.clearMemberContext('eng', compacting.id, owner().id))
+      .rejects.toThrow('is compacting');
+    fake.releaseCompactions();
+    await compaction;
+  });
+
+  it('preserves durable state when retirement fails and releases the lease', async () => {
+    const agent = await establish('reset-fail');
+    const before = daemon.store.getMember('eng', agent.id)!;
+    const credential = (daemon.store.db.prepare('SELECT credential_hash FROM members WHERE id = ?')
+      .get(agent.id) as { credential_hash: string }).credential_hash;
+    fake.failNextReset('native retirement failed');
+
+    await expect(daemon.clearMemberContext('eng', agent.id, owner().id))
+      .rejects.toThrow('native retirement failed');
+
+    expect(daemon.store.getMember('eng', agent.id)).toMatchObject({
+      session_ref: before.session_ref,
+      tasks: before.tasks,
+      conventions_sent: before.conventions_sent,
+      roster_stale: before.roster_stale,
+    });
+    expect(daemon.store.getMemberContextWindow('eng', agent.id)).toBe(1_000_000);
+    expect(daemon.store.findAgentByCredentialHash(credential)?.member.id).toBe(agent.id);
+
+    // The finally released admission; ordinary work can still use the old session.
+    fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
+    daemon.postHumanMessage('eng', '@reset-fail continue old context');
+    await daemon.settle();
+    expect(fake.deliveries.at(-1)?.session_ref).toBe(before.session_ref);
+  });
+
+  it('refuses non-admins, a never-run member, pre-existing backlog, duplicate reset, and unsupported adapters', async () => {
+    const memberHuman = daemon.store.addMember('eng', {
+      kind: 'human', handle: 'member-human', display_name: 'Member Human', role: 'member',
+    });
+    const neverRun = spawnAgent('never-run');
+    await expect(daemon.clearMemberContext('eng', neverRun.id, owner().id))
+      .rejects.toThrow('already has a fresh context');
+
+    const agent = await establish('reset-guards');
+    await expect(daemon.clearMemberContext('eng', agent.id, memberHuman.id))
+      .rejects.toThrow('only owners and admins');
+
+    const source = daemon.store.postMessage('eng', {
+      author: owner().id, kind: 'chat', body: 'manual backlog',
+    });
+    const queued = daemon.store.createDelivery('eng', {
+      message_id: source.id, recipient: agent.id, state: 'queued',
+    });
+    await expect(daemon.clearMemberContext('eng', agent.id, owner().id))
+      .rejects.toThrow('has pending delivery');
+    daemon.store.updateDelivery('eng', queued.id, { state: 'consumed' });
+
+    fake.holdResets();
+    const first = daemon.clearMemberContext('eng', agent.id, owner().id);
+    await until(() => fake.resets.length > 0 ? true : undefined);
+    await expect(daemon.clearMemberContext('eng', agent.id, owner().id))
+      .rejects.toThrow('already being cleared');
+    fake.releaseResets();
+    await first;
+
+    const unsupported = await establish('reset-unsupported');
+    Reflect.deleteProperty(fake, 'resetSession');
+    await expect(daemon.clearMemberContext('eng', unsupported.id, owner().id))
+      .rejects.toThrow("does not support clearing context");
+  });
+
+  it('passes no session to the adapter after restart and still clears the persisted reference', async () => {
+    const agent = await establish('reset-restart');
+    await daemon.close();
+    fake = new FakeAdapter('fake', { interactiveAttach: true });
+    daemon = newDaemon();
+
+    await daemon.clearMemberContext('eng', agent.id, daemon.ownerOf('eng').id);
+
+    expect(fake.resets).toEqual([undefined]);
+    expect(daemon.store.getMember('eng', agent.id)?.session_ref).toBeUndefined();
+  });
+});
+// harn:end member-context-reset-is-authorized-atomic-and-lazy
+
+// harn:assume current-context-window-truth-outlives-restarts ref=persisted-window-seed
+describe('configured model context-window invalidation', () => {
+  it('preserves a same-model report and invalidates it only on an actual model change', () => {
+    const agent = daemon.spawnMember('eng', {
+      harness: 'thinking-fake', handle: 'window-model', cwd: testCwd('window-model'), model: 'old',
+    });
+    daemon.store.setMemberContextWindow('eng', agent.id, 1_000_000);
+    daemon.configureMember('eng', agent.id, { model: 'old' });
+    expect(daemon.store.getMemberContextWindow('eng', agent.id)).toBe(1_000_000);
+    daemon.configureMember('eng', agent.id, { model: 'new' });
+    expect(daemon.store.getMemberContextWindow('eng', agent.id)).toBeUndefined();
+  });
+});
+// harn:end current-context-window-truth-outlives-restarts
 
 describe('named ACP providers (detection and command-private launch)', () => {
   // harn:assume named-acp-provider-catalog-is-path-detected-and-command-private ref=acp-provider-catalog-regression

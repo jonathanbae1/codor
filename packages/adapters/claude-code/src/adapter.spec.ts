@@ -78,6 +78,34 @@ afterEach(() => {
 
 // harn:assume claude-agent-sdk-query-is-the-session-runtime ref=claude-sdk-session-regression
 describe('Claude Agent SDK query lifecycle', () => {
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=claude-session-reset
+  it('fully retires and forgets the retained query before a fresh session', async () => {
+    const records: MockQueryRecord[] = [];
+    const factory = queryFactory(async function* (input) {
+      for await (const _user of input.prompt) {
+        yield init();
+        yield result('done');
+      }
+    }, records);
+    const adapter = new ClaudeCodeAdapter({ queryFactory: factory });
+    const session = adapter.spawn({ cwd: process.cwd() });
+    session.env = { CODOR_MEMBER_ID: 'reset-member' };
+
+    await collect(adapter.deliver(session, 'old context'));
+    expect(records).toHaveLength(1);
+    await adapter.resetSession(session);
+    expect(records[0]!.interrupt).toHaveBeenCalledOnce();
+    expect(records[0]!.close).toHaveBeenCalledOnce();
+
+    session.session_ref = undefined;
+    await collect(adapter.deliver(session, 'fresh context'));
+    expect(records).toHaveLength(2);
+    expect(records[1]!.input.options).not.toHaveProperty('resume');
+    await adapter.resetSession(session);
+    await expect(adapter.resetSession(undefined)).resolves.toBeUndefined();
+  });
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   it('serves multiple turns through one streaming query and maps native options', async () => {
     const records: MockQueryRecord[] = [];
     const users: SDKUserMessage[] = [];

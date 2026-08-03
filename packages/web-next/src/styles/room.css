@@ -707,6 +707,18 @@
 }
 .nx-member-compact:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Phase 3 keeps Clear functional and compact; Phase 4 owns the final action-row layout. */
+.nx-member-clear {
+  flex: none;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  color: var(--c-error-text);
+  font: var(--t-caption);
+}
+.nx-member-clear:hover:not(:disabled) { background: var(--c-error-tint); }
+.nx-member-clear:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* Revive takes the dead agent's prominent slot: a small labelled pill (not an
    icon-only glyph) so the one recovery action reads clearly. */
 .nx-member-revive {

@@ -215,6 +215,16 @@ export interface HarnessAdapter {
   /** Resolves on adapter acknowledgement (the interaction is truly answered). */
   respondInteraction(session: Session, interaction_id: string, answer: unknown): Promise<void>;
   interrupt(session: Session): void;
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=adapter-reset-contract
+  /**
+   * Optional: permanently retire and forget this member's retained native
+   * runtime without creating a replacement session. `session` is absent after
+   * a daemon restart, when there is no in-memory process to retire. Resolving
+   * means no retained runtime can reuse the cleared native context; rejecting
+   * means the durable session reference must remain untouched.
+   */
+  resetSession?(session: Session | undefined): Promise<void>;
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
   /**
    * Optional: compact this session's context using the harness's OWN
    * compaction — an unwrapped slash command for a persistent SDK session, a

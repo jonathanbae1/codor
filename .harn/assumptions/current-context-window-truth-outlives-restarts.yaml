@@ -1,0 +1,16 @@
+id: current-context-window-truth-outlives-restarts
+hash: a-3487dd089e5e
+title: Persisted context-window truth is scoped to the current model and native
+  context
+state: active
+statement: When live usage reports the current native context's window, the
+  daemon persists it and later estimated seeds for that unchanged configured
+  model use it instead of a curated guess, leaving estimated used tokens and the
+  estimated flag untouched. A later engine report may replace it with a larger
+  or smaller value. An explicit configured-model change or successful
+  clear_member_context invalidates it instead of carrying the old model or
+  session denominator forward; members without a current persisted report use
+  the curated backstop, and no path computes a global maximum.
+depends_on:
+  - context-ceiling-follows-main-model
+created_by: relay-ux-followups-p3-context

@@ -1754,6 +1754,15 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
                   send({ type: 'error', message: String(error), ref: 'compact_member' }),
                 );
             }
+            // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-server-dispatch
+            else if (act.act === 'clear_member_context') {
+              void daemon
+                .clearMemberContext(frame.room, act.member_id, actor.id)
+                .catch((error: unknown) =>
+                  send({ type: 'error', message: String(error), ref: 'clear_member_context' }),
+                );
+            }
+            // harn:end member-context-reset-is-authorized-atomic-and-lazy
             else if (act.act === 'set_role') daemon.setHumanRole(frame.room, act.member_id, act.role);
             else if (act.act === 'pin_message') daemon.pinMessage(frame.room, act.message_id, act.pinned, actor.id);
             else if (act.act === 'delete_message') daemon.deleteMessage(frame.room, act.message_id, actor.id);

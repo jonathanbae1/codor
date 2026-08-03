@@ -1,0 +1,17 @@
+id: claude-context-ceiling-preserves-engine-provenance
+hash: a-bc585ce5fe33
+title: Claude context ceilings preserve same-model engine provenance
+state: active
+statement: The Claude translator must associate the current context ceiling with
+  its native session model and whether it came from a curated seed or engine
+  modelUsage. A curated seed may fill an unknown ceiling and becomes the new
+  bootstrap truth when the actual native model changes, but a later init or
+  assistant identity for the same model must never replace an engine-reported
+  ceiling. The modelUsage entry matching the current session model is
+  authoritative even when smaller; ambiguous auxiliary entries never widen the
+  denominator, and a real model change clears the previous model's ceiling and
+  used-token fallback.
+depends_on:
+  - context-ceiling-follows-main-model
+  - normalized-agent-usage-telemetry-with-estimates
+created_by: relay-ux-followups-p3-context

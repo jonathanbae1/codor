@@ -1673,6 +1673,39 @@ export class Store {
     })();
   }
 
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-store-transaction
+  // harn:assume member-task-projection-is-durable-and-session-scoped ref=member-task-storage
+  /**
+   * Commit the durable half of an explicit fresh-context boundary. Identity,
+   * configuration, history, limits, spend, ACP launch identity, and the
+   * concurrent misaddress bit are deliberately outside this UPDATE.
+   */
+  clearAgentContext(room: string, memberId: string): Member {
+    return this.db.transaction(() => {
+      const existing = this.getMember(room, memberId);
+      if (!existing || existing.kind !== 'agent' || existing.removed_ts !== undefined) {
+        throw new Error(`no active agent member: ${memberId}`);
+      }
+      this.db.prepare(
+        `UPDATE members
+         SET session_ref = NULL,
+             session_lifecycle = NULL,
+             acp_usage_baseline = NULL,
+             acp_usage_pending = NULL,
+             context_window = NULL,
+             credential_hash = NULL,
+             tasks = NULL,
+             conventions_sent = 0,
+             roster_stale = 1
+         WHERE room = ? AND id = ?`,
+      ).run(room, memberId);
+      this.appendChange(room, 'member', memberId);
+      return this.getMember(room, memberId)!;
+    })();
+  }
+  // harn:end member-task-projection-is-durable-and-session-scoped
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
+
   // harn:assume member-task-projection-is-durable-and-session-scoped ref=member-task-storage
   /** Materialize a run.tasks update onto the member's durable task projection in one
    *  transaction. Appends exactly one member change row only when the list actually
@@ -2357,10 +2390,10 @@ export class Store {
     return row?.context_window ?? undefined;
   }
 
-  setMemberContextWindow(room: string, id: string, contextWindow: number): void {
+  setMemberContextWindow(room: string, id: string, contextWindow: number | undefined): void {
     this.db
       .prepare('UPDATE members SET context_window = ? WHERE room = ? AND id = ?')
-      .run(contextWindow, room, id);
+      .run(contextWindow ?? null, room, id);
   }
 
   // harn:assume durable-room-summaries-stream-and-fallback ref=durable-room-summary
