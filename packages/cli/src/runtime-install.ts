@@ -52,11 +52,18 @@ export function durableRuntimeLocation(dataDir: string): string {
   return join(dataDir, 'runtime');
 }
 
-/** A path is ephemeral when it lives in an npx cache or the OS temp directory. */
+// harn:assume setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs ref=pnpm-dlx-runtime-classifier
+/** A path is ephemeral when it lives in an npx cache, a pnpm dlx cache, or the OS temp directory. */
 export function isEphemeralRuntime(path: string): boolean {
   const temp = tmpdir();
-  return path.includes(`${sep}_npx${sep}`) || path === temp || path.startsWith(temp + sep);
+  return (
+    path.includes(`${sep}_npx${sep}`) ||
+    path.includes(`${sep}dlx${sep}`) ||
+    path === temp ||
+    path.startsWith(temp + sep)
+  );
 }
+// harn:end setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
 
 function installedWrapperPackageJson(location: string): string {
   return join(location, 'node_modules', '@richhardry', 'codor', 'package.json');
@@ -65,11 +72,14 @@ function installedWrapperPackageJson(location: string): string {
 // harn:assume setup-installs-durable-per-user-runtime-atomically ref=durable-runtime-install
 /** The self-contained module tree the running CLI resolves against, and whether
  *  it is already durable (a source checkout or a stable install) or ephemeral
- *  (an npx cache / temp dir that must be copied before a service points at it). */
+ *  (an npx cache, a pnpm dlx cache, or a temp dir that must be copied before a
+ *  service points at it). */
 export function resolveInstallSource(runtime: RuntimePaths): { installRoot: string; nodeModules: string; durable: boolean } {
+  // harn:assume setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs ref=pnpm-dlx-source-checkout-boundary
   if (runtime.layout === 'source-checkout') {
     return { installRoot: runtime.root, nodeModules: join(runtime.root, 'node_modules'), durable: true };
   }
+  // harn:end setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
   // The install root is the directory whose node_modules holds the full,
   // self-contained dependency tree (the @richhardry/codor wrapper plus its
   // third-party and native siblings).

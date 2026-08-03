@@ -28,6 +28,18 @@ const ephemeral: RuntimePaths = {
   serviceTemplate: join(npxCli, 'packaging/systemd/codor.service'),
 };
 
+const dlxCli = join(
+  HOME,
+  '.local/share/pnpm/pnpm-cache/dlx/abcd1234ef567890/1706000000000/node_modules/@richhardry/codor/node_modules/@codor/cli',
+);
+const dlxEphemeral: RuntimePaths = {
+  root: dlxCli,
+  layout: 'installed-package',
+  cliEntrypoint: join(dlxCli, 'dist/index.js'),
+  staticRoot: join(dlxCli, 'runtime/web'),
+  serviceTemplate: join(dlxCli, 'packaging/systemd/codor.service'),
+};
+
 const checkoutRoot = join(HOME, 'git/codor');
 const checkout: RuntimePaths = {
   root: checkoutRoot,
@@ -35,6 +47,15 @@ const checkout: RuntimePaths = {
   cliEntrypoint: join(checkoutRoot, 'packages/cli/dist/index.js'),
   staticRoot: join(checkoutRoot, 'packages/web-next/dist'),
   serviceTemplate: join(checkoutRoot, 'packaging/systemd/codor.service'),
+};
+
+const dlxCheckoutRoot = join(HOME, 'git/dlx/codor');
+const dlxCheckout: RuntimePaths = {
+  root: dlxCheckoutRoot,
+  layout: 'source-checkout',
+  cliEntrypoint: join(dlxCheckoutRoot, 'packages/cli/dist/index.js'),
+  staticRoot: join(dlxCheckoutRoot, 'packages/web-next/dist'),
+  serviceTemplate: join(dlxCheckoutRoot, 'packaging/systemd/codor.service'),
 };
 
 const stableCli = '/opt/codor/node_modules/@richhardry/codor/node_modules/@codor/cli';
@@ -97,14 +118,17 @@ function fakeIo(options: { existing?: string; failCopy?: boolean; incompleteCopy
 }
 
 // harn:assume setup-installs-durable-per-user-runtime-atomically ref=durable-runtime-install-regression
+// harn:assume setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs ref=pnpm-dlx-classifier-regression
 describe('isEphemeralRuntime', () => {
-  it('flags npx cache and temp paths, not stable locations', () => {
+  it('flags npx cache, pnpm dlx cache, and temp paths, not stable locations', () => {
     expect(isEphemeralRuntime(join(HOME, '.npm/_npx/abcd1234'))).toBe(true);
+    expect(isEphemeralRuntime(join(HOME, '.local/share/pnpm/pnpm-cache/dlx/abcd1234ef567890/1706000000000'))).toBe(true);
     expect(isEphemeralRuntime(join(tmpdir(), 'x'))).toBe(true);
     expect(isEphemeralRuntime('/opt/codor')).toBe(false);
     expect(isEphemeralRuntime(checkoutRoot)).toBe(false);
   });
 });
+// harn:end setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
 
 describe('installDurableRuntime', () => {
   it('stages, validates, and swaps an ephemeral npx runtime into ~/.codor/runtime', () => {
@@ -120,6 +144,19 @@ describe('installDurableRuntime', () => {
     expect(result.runtime.cliEntrypoint).not.toContain('_npx');
   });
 
+  // harn:assume setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs ref=pnpm-dlx-durable-copy-regression
+  it('stages, validates, and swaps an ephemeral pnpm dlx runtime into ~/.codor/runtime', () => {
+    const { io, moves } = fakeIo();
+    const result = installDurableRuntime({ runtime: dlxEphemeral, dataDir: DATA, version: '0.10.0', io });
+    expect(result.action).toBe('installed');
+    expect(result.location).toBe(LOCATION);
+    expect(moves).toContainEqual([`${LOCATION}.staging`, LOCATION]);
+    // Rooted at the durable location, not the dlx cache the source runtime lived in.
+    expect(result.runtime.cliEntrypoint).toContain(LOCATION);
+    expect(result.runtime.cliEntrypoint).not.toContain('dlx');
+  });
+  // harn:end setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
+
   it('uses a source checkout in place without copying', () => {
     const { io, copies } = fakeIo();
     const result = installDurableRuntime({ runtime: checkout, dataDir: DATA, version: '0.10.0', io });
@@ -127,6 +164,16 @@ describe('installDurableRuntime', () => {
     expect(result.runtime).toBe(checkout);
     expect(copies).toEqual([]);
   });
+
+  // harn:assume setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs ref=pnpm-dlx-source-checkout-regression
+  it('keeps a source checkout in place when its path contains a dlx segment', () => {
+    const { io, copies } = fakeIo();
+    const result = installDurableRuntime({ runtime: dlxCheckout, dataDir: DATA, version: '0.10.0', io });
+    expect(result.action).toBe('in-place');
+    expect(result.runtime).toBe(dlxCheckout);
+    expect(copies).toEqual([]);
+  });
+  // harn:end setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
 
   it('uses an already-stable installed package in place without copying', () => {
     const { io, copies } = fakeIo();
@@ -223,4 +270,4 @@ describe('installDurableRuntime with the real filesystem', () => {
     expect(result.runtime.cliEntrypoint.startsWith(dataDir)).toBe(true);
   });
 });
-// harn:end setup-installs-durable-per-user-runtime
+// harn:end setup-installs-durable-per-user-runtime-atomically

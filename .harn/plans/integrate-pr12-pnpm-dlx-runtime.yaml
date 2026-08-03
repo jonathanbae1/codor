@@ -1,0 +1,93 @@
+id: integrate-pr12-pnpm-dlx-runtime
+title: Integrate PR 12 pnpm dlx ephemeral runtime durability
+notes: >
+  Integrate the exact PR 12 head beee2d60964eab81e0dcdb3733ed3555f0b4cb14 into
+  origin/main at 4ac091a8f2be2ba8e53e50536dcc6403f53e7e99 with a real no-ff
+  merge commit. The contribution classifies installed-package runtimes under the
+  pnpm dlx cache as ephemeral so they flow through the existing durable-runtime
+  copy, while source checkouts remain unconditionally in place and stable
+  installed packages remain in place. The safe false-positive tradeoff is
+  contained to installed-package paths. Preserve the existing atomic staging,
+  validation, intent, backup, and rollback behavior; no protocol, backend,
+  deployment, GitHub merge, push, or PR #13 work is in scope. Keep the exact PR
+  head as the merge commit's second parent.
+assumptions:
+  reviewed:
+    - id: setup-installs-durable-per-user-runtime-atomically
+      outcome: unchanged
+      reason: >
+        The PR extends only the installed-package ephemeral-path classifier.
+        Source checkouts and stable installed packages remain in place, while
+        the existing complete copy, validation, intent-driven reuse, atomic
+        swap, backup, and rollback contract is unchanged.
+  create:
+    - id: setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
+      title: pnpm dlx package-runner runtimes are ephemeral durable-copy inputs
+      statement: >
+        An installed-package runtime resolved beneath a pnpm dlx cache must be
+        classified as ephemeral and flow through the existing durable-runtime
+        copy into the stable per-user runtime before a service references it,
+        while source checkouts remain unconditionally in place and durable even
+        when their path contains a literal dlx segment and the path-classifier
+        false-positive tradeoff remains limited to installed-package runtime
+        paths, so pnpm dlx's disposable package-runner tree cannot become a
+        service's long-lived runtime.
+      reason: >
+        pnpm dlx places package-runner installs in a disposable cache that can
+        disappear independently of the background service; the existing atomic
+        durable copy is the established safe handoff, and source checkouts must
+        not be copied merely because a path contains a dlx segment.
+      depends_on:
+        - setup-installs-durable-per-user-runtime-atomically
+files:
+  - packages/cli/src/runtime-install.ts
+  - packages/cli/src/runtime-install.spec.ts
+anchors:
+  setup-installs-durable-per-user-runtime-atomically:
+    durable-runtime-install:
+      action: change
+      reason: >
+        Extend the anchored runtime classifier/docstring region for pnpm dlx
+        installed-package paths without changing source-checkout or stable
+        in-place behavior or the atomic copy implementation.
+    durable-runtime-install-regression:
+      action: change
+      reason: >
+        The existing durable-runtime regression gains pnpm dlx classifier and
+        copy coverage while retaining its source-checkout, stable-install, and
+        atomic-copy assertions.
+  setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs:
+    pnpm-dlx-runtime-classifier:
+      action: change
+      reason: >
+        Anchor the classifier that recognizes pnpm dlx cache paths as ephemeral
+        for installed-package durable-runtime selection.
+    pnpm-dlx-source-checkout-boundary:
+      action: change
+      reason: >
+        Anchor the source-checkout early return that must remain in place and
+        durable before installed-package path classification is considered.
+    pnpm-dlx-classifier-regression:
+      action: change
+      reason: >
+        Anchor the regression proving pnpm dlx cache paths are ephemeral while
+        temp, stable, and source-checkout paths retain their intended status.
+    pnpm-dlx-durable-copy-regression:
+      action: change
+      reason: >
+        Anchor the regression proving an ephemeral pnpm dlx runtime is staged,
+        validated, atomically swapped, and returned rooted at the durable
+        per-user location.
+    pnpm-dlx-source-checkout-regression:
+      action: change
+      reason: >
+        Anchor the regression proving a source checkout whose path contains a
+        literal dlx segment remains in place and is never copied.
+verification: >
+  After merge, run the full workspace build, serial full workspace tests,
+  complete CLI tests, focused runtime-install tests, Harn plan/check/apply/
+  staged validation, and git diff --check. Confirm a clean worktree and a real
+  merge commit whose first parent is 4ac091a8f2be2ba8e53e50536dcc6403f53e7e99
+  and whose second parent is exactly beee2d60964eab81e0dcdb3733ed3555f0b4cb14.
+applied:
+  applied_at: 2026-08-03T09:35:31.628Z

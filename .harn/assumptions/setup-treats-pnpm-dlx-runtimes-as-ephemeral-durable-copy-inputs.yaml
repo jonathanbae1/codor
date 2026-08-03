@@ -1,0 +1,15 @@
+id: setup-treats-pnpm-dlx-runtimes-as-ephemeral-durable-copy-inputs
+hash: a-3b679a685b5d
+title: pnpm dlx package-runner runtimes are ephemeral durable-copy inputs
+state: active
+statement: >
+  An installed-package runtime resolved beneath a pnpm dlx cache must be
+  classified as ephemeral and flow through the existing durable-runtime copy
+  into the stable per-user runtime before a service references it, while source
+  checkouts remain unconditionally in place and durable even when their path
+  contains a literal dlx segment and the path-classifier false-positive tradeoff
+  remains limited to installed-package runtime paths, so pnpm dlx's disposable
+  package-runner tree cannot become a service's long-lived runtime.
+depends_on:
+  - setup-installs-durable-per-user-runtime-atomically
+created_by: integrate-pr12-pnpm-dlx-runtime
