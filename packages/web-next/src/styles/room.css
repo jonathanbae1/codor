@@ -695,10 +695,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 10px;
+  gap: 4px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 7px;
   border-radius: var(--r-pill);
   color: var(--c-text-muted);
   transition: background-color var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
@@ -715,9 +716,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 10px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: var(--r-pill);
   color: var(--c-error-text);
   font: var(--t-caption);
@@ -732,9 +734,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 10px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid var(--c-line);
   border-radius: var(--r-full);
   background: var(--c-raised);
@@ -1324,7 +1327,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 100%;
   margin: var(--sp-2) 0 0 calc(32px + var(--sp-3));
@@ -1334,20 +1337,20 @@
 .nx-member-context-row .nx-member-revive,
 .nx-member-context-row .nx-member-stop,
 .nx-member-context-row .nx-member-menu .nx-iconbtn {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 0;
+  min-height: 32px;
 }
 .nx-member-context-row .nx-member-stop {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
 }
 .nx-member-action-spacer {
   flex: 1 1 var(--sp-3);
-  min-width: var(--sp-3);
+  min-width: var(--sp-1);
 }
 .nx-member-context-row .nx-member-menu .nx-iconbtn {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
 }
 /* harn:end agent-member-card-separates-context-actions-from-usage */
 
@@ -2393,6 +2396,21 @@
     background: var(--c-surface);
   }
   .nx-mobile-context .nx-context { display: flex; flex: 1; min-height: 0; }
+  .nx-member-context-row .nx-member-compact,
+  .nx-member-context-row .nx-member-clear,
+  .nx-member-context-row .nx-member-revive,
+  .nx-member-context-row .nx-member-stop,
+  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+  .nx-member-context-row .nx-member-stop {
+    width: 44px;
+  }
+  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+    width: 44px;
+  }
   .nx-mobile-context-close {
     align-self: flex-end;
     margin: var(--sp-3) var(--sp-3) 0;

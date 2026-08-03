@@ -112,3 +112,5 @@ verification: >
   Compact and Clear context expose target-specific accessible names while their
   visible labels remain exact. Harn plan/diff/staged/apply checks and git diff
   --check pass in one implementation commit.
+applied:
+  applied_at: 2026-08-03T05:47:02.754Z

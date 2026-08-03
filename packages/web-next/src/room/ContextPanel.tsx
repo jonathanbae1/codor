@@ -1,5 +1,5 @@
 import type { AgentLimit, AgentTaskList, AgentTaskStatus, Member, Policy, Room, ThinkingLevel, WireEvent } from '@codor/protocol';
-import { Bot, ChevronRight, FileText, LoaderCircle, Minimize2, MoreVertical, Plus, RefreshCw, RotateCcw, Square, X } from 'lucide-react';
+import { Bot, ChevronRight, FileText, LoaderCircle, MoreVertical, Plus, RefreshCw, RotateCcw, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactUrl, fetchArtifacts, fetchRunEvents, refreshUsage, type AdapterRegistration, type ArtifactFeed, type MemberDetail } from '@runtime/api.js';
@@ -428,7 +428,7 @@ function MemberCard(props: {
             <button
               type="button"
               className="nx-member-compact"
-              aria-label="Compact"
+              aria-label={`Compact @${member.handle}'s context`}
               data-testid={`member-${member.handle}-compact`}
               disabled={member.state !== 'idle' || compacting}
               title={running
@@ -445,10 +445,8 @@ function MemberCard(props: {
                 props.connection.act({ act: 'compact_member', member_id: member.id });
               }}
             >
-              {compacting
-                ? <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />
-                : <Minimize2 size={13} aria-hidden="true" />}
-              <span>{compacting ? 'Compacting…' : 'Compact'}</span>
+              {compacting && <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />}
+              <span>Compact</span>
             </button>
           )}
           {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
@@ -456,7 +454,7 @@ function MemberCard(props: {
             <button
               type="button"
               className="nx-member-clear"
-              aria-label="Clear context"
+              aria-label={`Clear @${member.handle}'s context`}
               data-testid={`member-${member.handle}-clear-context`}
               disabled={member.state !== 'idle' || clearing}
               title={member.state !== 'idle'

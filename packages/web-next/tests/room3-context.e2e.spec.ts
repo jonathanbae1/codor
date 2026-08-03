@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const ROOM = '/?room=eng&token=next-e2e-token';
 // The tool-evidence tests read a seeded run, so they open the stable fixtures
@@ -270,35 +270,58 @@ test.describe('context window meter', () => {
 test.describe('member card responsive presentation', () => {
   // harn:assume controls-fit-the-surface-they-sit-on ref=control-fits-narrow-surface
   // harn:assume web-room-targets-meet-minimum-hit-size ref=room-target-size-sweep
-  test('wraps full metadata and keeps every member action inside a 390px surface', async ({ page }) => {
+  test('keeps context controls on one line, labelled per member, at desktop and phone widths', async ({ page }) => {
+    const assertControlRow = async (card: Locator, phone: boolean): Promise<void> => {
+      const actions = card.getByTestId('member-fable-context-actions');
+      const targets = [
+        card.getByTestId('member-fable-context-window'),
+        card.getByTestId('member-fable-compact'),
+        card.getByTestId('member-fable-clear-context'),
+        card.getByTestId('member-fable-menu'),
+      ];
+      const boxes = await Promise.all(targets.map(async (target) => {
+        const box = await target.boundingBox();
+        expect(box).not.toBeNull();
+        return box!;
+      }));
+      const centers = boxes.map((box) => box.y + box.height / 2);
+      expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+
+      await expect(card.getByTestId('member-fable-compact')).toContainText('Compact');
+      await expect(card.getByTestId('member-fable-clear-context')).toContainText('Clear context');
+      await expect(card.getByTestId('member-fable-compact')).toHaveAccessibleName("Compact @fable's context");
+      await expect(card.getByTestId('member-fable-clear-context')).toHaveAccessibleName("Clear @fable's context");
+
+      const cardBox = (await card.boundingBox())!;
+      const actionsBox = (await actions.boundingBox())!;
+      expect(actionsBox.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+      if (phone) {
+        for (const box of boxes.slice(1, 4)) {
+          expect(box.width).toBeGreaterThanOrEqual(44);
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+        }
+      }
+    };
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openRoom(page);
+    await assertControlRow(page.getByTestId('member-fable'), false);
+
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/?room=context-reset&token=next-e2e-token');
+    await page.goto(ROOM);
     await expect(page.getByTestId('timeline')).toBeVisible();
     await page.getByTestId('mobile-kebab').click();
     const sheet = page.getByTestId('mobile-context');
-    const card = sheet.getByTestId('member-eraser');
-    const actions = card.getByTestId('member-eraser-context-actions');
-    await expect(card.getByTestId('member-eraser-metadata')).toContainText('workspace-write');
+    await assertControlRow(sheet.getByTestId('member-fable'), true);
 
-    for (const testId of [
-      'member-eraser-compact',
-      'member-eraser-clear-context',
-      'member-eraser-menu',
-    ]) {
-      const box = (await sheet.getByTestId(testId).boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
-      expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(390);
-    }
-    const actionsBox = (await actions.boundingBox())!;
-    expect(actionsBox.x).toBeGreaterThanOrEqual(0);
-    expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(390);
     const pageWidth = await page.evaluate(() => ({ innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     expect(pageWidth.scrollWidth).toBeLessThanOrEqual(pageWidth.innerWidth);
 
     const { default: AxeBuilder } = await import('@axe-core/playwright');
-    const { violations } = await new AxeBuilder({ page }).include('[data-testid="member-eraser"]').analyze();
+    const { violations } = await new AxeBuilder({ page }).include('[data-testid="member-fable"]').analyze();
     expect(violations).toEqual([]);
   });
 });
@@ -414,6 +437,7 @@ test.describe('clear member context', () => {
     const card = page.getByTestId('member-eraser');
     const clear = page.getByTestId('member-eraser-clear-context');
     await expect(clear).toBeEnabled();
+    await expect(clear).toHaveAccessibleName("Clear @eraser's context");
     await expect(card.getByTestId('member-eraser-tasks')).toContainText('Old native-session task');
 
     await clear.click();
