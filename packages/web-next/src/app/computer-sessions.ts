@@ -2,6 +2,7 @@ import type { Room, RoomSummary, ServerFrame } from '@codor/protocol';
 
 import {
   forgetPairedComputer,
+  adoptPairedComputerHostname,
   listPairedComputers,
   loadHostedComputerMaterials,
   openBrowserDeviceSessionWith,
@@ -11,6 +12,7 @@ import {
   setActiveBrowserAccessToken,
   switchComputer,
   type HostedComputerMaterial,
+  type BrowserDeviceSession,
 } from '@runtime/crypto.js';
 import { setRelayTransport } from '@runtime/relay-transport.js';
 import { TunnelClient, type TunnelState } from '@runtime/relay.js';
@@ -76,13 +78,14 @@ interface SessionEntry {
 export interface ComputerSessionDeps {
   load(): Promise<{ materials: HostedComputerMaterial[]; activeId?: string }>;
   makeTunnel(material: HostedComputerMaterial): SessionTunnel;
-  authenticate(material: HostedComputerMaterial, tunnel: SessionTunnel): Promise<string>;
+  authenticate(material: HostedComputerMaterial, tunnel: SessionTunnel): Promise<BrowserDeviceSession>;
   loadRooms(token: string, tunnel: SessionTunnel): Promise<RoomSummary[]>;
   makeConnector(options: ConnectorOptions): RoomConnector;
   switchStored(id: string): Promise<void>;
   pair(code: string, relayUrl: string): Promise<void>;
   forget(id: string): Promise<void>;
   rename(id: string, label: string): Promise<void>;
+  adoptHostname(id: string, hostname: string): Promise<HostedComputerMaterial['computer'] | undefined>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -121,6 +124,7 @@ const defaultDeps: ComputerSessionDeps = {
   pair: pairThroughRelay,
   forget: forgetPairedComputer,
   rename: renamePairedComputer,
+  adoptHostname: adoptPairedComputerHostname,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
@@ -273,7 +277,7 @@ export class ComputerSessionManager {
     const entry = this.entries.get(id);
     if (entry) entry.material = {
       ...entry.material,
-      computer: { ...entry.material.computer, label },
+      computer: { ...entry.material.computer, label, label_source: 'custom' },
     };
     this.publish();
   }
@@ -380,8 +384,14 @@ export class ComputerSessionManager {
   // harn:end hosted-computer-sessions-keep-state-isolated
 
   private async refreshEntryToken(entry: SessionEntry): Promise<string> {
-    const token = await this.deps.authenticate(entry.material, entry.tunnel);
-    return this.setEntryToken(entry, token);
+    const session = await this.deps.authenticate(entry.material, entry.tunnel);
+    // harn:assume hosted-generated-computer-label-follows-authenticated-hostname ref=authenticated-computer-label
+    if (session.hostname) {
+      const computer = await this.deps.adoptHostname(entry.material.computer.id, session.hostname);
+      if (computer) entry.material = { ...entry.material, computer };
+    }
+    // harn:end hosted-generated-computer-label-follows-authenticated-hostname
+    return this.setEntryToken(entry, session.token);
   }
 
   private setEntryToken(entry: SessionEntry, token: string): string {

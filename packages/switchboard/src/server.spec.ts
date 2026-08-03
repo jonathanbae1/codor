@@ -104,6 +104,7 @@ beforeEach(async () => {
     crypto,
     pushSubscriptions,
     homeDir: dir,
+    systemHostname: `  Work Station / East ${'x'.repeat(80)}  `,
   });
   base = `http://127.0.0.1:${server.port}`;
 });
@@ -493,6 +494,7 @@ async function authenticateDevice(device: CryptoVault): Promise<string> {
     switchboard_device_id: string;
   };
   expect(offered.switchboard_device_id).toBe(crypto.keys.identity.device_id);
+  expect(offered).not.toHaveProperty('hostname');
   const sessionResponse = await fetch(`${base}/api/auth/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -502,7 +504,10 @@ async function authenticateDevice(device: CryptoVault): Promise<string> {
     }),
   });
   expect(sessionResponse.status).toBe(200);
-  return ((await sessionResponse.json()) as { access_token: string }).access_token;
+  const session = (await sessionResponse.json()) as { access_token: string; hostname?: string };
+  expect(session.hostname).toBe(`Work-Station-East-${'x'.repeat(45)}`);
+  expect(session.hostname).toHaveLength(63);
+  return session.access_token;
 }
 
 describe('REST', () => {
@@ -524,6 +529,24 @@ describe('REST', () => {
       headers: { authorization: 'Bearer wrong-token' },
     })).status).toBe(401);
     expect((await fetch(`${base}/api/rooms?token=wrong-token`)).status).toBe(401);
+  });
+
+  it('reveals a bounded hostname only after a successful signed browser session', async () => {
+    const challenge = await fetch(`${base}/api/auth/challenge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ device_id: 'not-paired' }),
+    });
+    expect(challenge.status).toBe(401);
+    expect(await challenge.json()).not.toHaveProperty('hostname');
+
+    const refused = await fetch(`${base}/api/auth/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ challenge_id: 'missing', signature: 'bad' }),
+    });
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).not.toHaveProperty('hostname');
   });
 
   it('gates bridge enable and ingress at admin and suppresses own-origin outbound echoes', async () => {
@@ -725,6 +748,7 @@ describe('REST', () => {
       room_keys: [{ room: 'eng', generation: 1 }],
     });
     expect(completed).not.toHaveProperty('access_token');
+    expect(completed).not.toHaveProperty('hostname');
     expect(crypto.keys.getPeer(device.keys.identity.device_id)).toMatchObject({
       sign_public_key: device.keys.identity.sign_public_key,
       encryption_public_key: device.keys.identity.encryption_public_key,

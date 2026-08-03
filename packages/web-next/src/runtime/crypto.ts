@@ -11,7 +11,7 @@ import {
 import { relayDialCandidates } from './relay-dial.js';
 import { relayFetch } from './relay-transport.js';
 import { roomKeyPersistenceOwner } from './active-computer.js';
-import { type RelayComputer, selectActiveComputer } from './relay-records.js';
+import { isBoundedRelayHostname, type RelayComputer, selectActiveComputer } from './relay-records.js';
 import {
   type Kv,
   type RelayMaterial,
@@ -20,6 +20,7 @@ import {
   listComputers,
   migrateIfNeeded,
   hasRelayComputerIndex,
+  adoptComputerHostname,
   persistComputerRoom,
   recordPairedComputer,
   readComputerMaterial,
@@ -300,6 +301,11 @@ export interface HostedComputerMaterial {
   switchboard: BrowserPeer;
 }
 
+export interface BrowserDeviceSession {
+  token: string;
+  hostname?: string;
+}
+
 export async function storedRelayRecord(): Promise<StoredRelayRecord | undefined> {
   return readState<StoredRelayRecord>('relay');
 }
@@ -354,6 +360,13 @@ export async function switchComputer(id: string): Promise<void> {
 /** Rename a paired computer's label in place. */
 export async function renamePairedComputer(id: string, label: string): Promise<void> {
   await renameComputer(browserKv, id, label);
+}
+
+export async function adoptPairedComputerHostname(
+  id: string,
+  hostname: string,
+): Promise<RelayComputer | undefined> {
+  return adoptComputerHostname(browserKv, id, hostname);
 }
 
 /** Forget one specific paired computer (per-computer Forget in the switcher). */
@@ -530,9 +543,15 @@ async function claimThroughRoom(args: {
               const material = await relayMaterial(result, relay, relayAccessOrigin(relayUrl));
               const existing = await listComputers(browserKv);
               const id = result.switchboard.device_id;
-              const label = existing.computers.find((c) => c.id === id)?.label
-                ?? `Computer ${existing.computers.length + 1}`;
-              await recordPairedComputer(browserKv, { id, label, paired_at: new Date().toISOString() }, material);
+              const prior = existing.computers.find((c) => c.id === id);
+              const label = prior?.label ?? `Computer ${existing.computers.length + 1}`;
+              const label_source = prior?.label_source
+                ?? (prior && !/^Computer [1-9][0-9]*$/.test(prior.label) ? 'custom' : 'fallback');
+              await recordPairedComputer(
+                browserKv,
+                { id, label, label_source, paired_at: new Date().toISOString() },
+                material,
+              );
               socket.send(channel.seal({ type: 'done' }));
               settled = true;
               if (deadline) clearTimeout(deadline);
@@ -601,7 +620,7 @@ export function tryTrustedBrowserPairing(origin = window.location.origin): Promi
 export async function openBrowserDeviceSession(origin = window.location.origin): Promise<string | undefined> {
   const switchboard = await readState<BrowserPeer>('peer:switchboard');
   if (switchboard?.kind !== 'switchboard') return undefined;
-  return openBrowserDeviceSessionWith(switchboard, relayFetch, origin);
+  return (await openBrowserDeviceSessionWith(switchboard, relayFetch, origin)).token;
 }
 
 /** Authenticate one indexed computer over its own tunnel. The switchboard
@@ -610,7 +629,7 @@ export async function openBrowserDeviceSessionWith(
   switchboard: BrowserPeer,
   request: (url: string, init?: RequestInit) => Promise<Response>,
   origin: string,
-): Promise<string> {
+): Promise<BrowserDeviceSession> {
   await sodium.ready;
   const identity = await requiredIdentity();
   const challengeResponse = await request(`${origin}/api/auth/challenge`, {
@@ -660,6 +679,7 @@ export async function openBrowserDeviceSessionWith(
     access_token?: unknown;
     device_id?: unknown;
     expires_at?: unknown;
+    hostname?: unknown;
   };
   if (
     typeof session.access_token !== 'string' || session.access_token === '' ||
@@ -669,7 +689,8 @@ export async function openBrowserDeviceSessionWith(
   ) {
     throw new Error('device authentication session is invalid');
   }
-  return session.access_token;
+  const hostname = isBoundedRelayHostname(session.hostname) ? session.hostname : undefined;
+  return { token: session.access_token, ...(hostname ? { hostname } : {}) };
 }
 
 export async function restoreBrowserAccess(origin = window.location.origin): Promise<string> {

@@ -17,19 +17,35 @@ const PNG = Buffer.from(
 
 test.describe('message attachments', () => {
   test('a seeded message renders an inline image and a download chip', async ({ page }) => {
+    const retrievals: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'GET' && request.url().includes('/attachments/')) retrievals.push(request.url());
+    });
     await openRoom(page);
     const attachments = page.getByTestId('message-attachments').first();
     await expect(attachments).toBeVisible();
 
-    // Image renders inline, its src pointing at the served endpoint.
+    // Authenticated bytes render through a short-lived object URL.
     const image = attachments.locator('.nx-attach-image img');
     await expect(image).toBeVisible();
-    await expect(image).toHaveAttribute('src', /\/api\/rooms\/files\/attachments\/.+/);
+    await expect(image).toHaveAttribute('src', /^blob:/);
 
     // The non-image renders as a download chip naming the file.
     const download = attachments.locator('.nx-attach-download', { hasText: 'notes.txt' });
     await expect(download).toBeVisible();
-    await expect(download).toHaveAttribute('download', 'notes.txt');
+    const documentId = (await download.getAttribute('data-testid'))?.replace('attachment-', '');
+    expect(documentId).toBeTruthy();
+    expect(retrievals.some((url) => url.includes(`/attachments/${documentId!}`))).toBe(false);
+
+    const downloadEvent = page.waitForEvent('download');
+    await download.click();
+    const received = await downloadEvent;
+    expect(received.suggestedFilename()).toBe('notes.txt');
+    expect(retrievals.some((url) => url.includes(`/attachments/${documentId!}`))).toBe(true);
+    const stream = await received.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from('build log\nmore lines\n'));
   });
 
   test('attaching files in the composer and sending renders them in the transcript', async ({ page }) => {

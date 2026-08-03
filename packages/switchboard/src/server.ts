@@ -1,6 +1,7 @@
 import { chmodSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { connect as connectSocket } from 'node:net';
+import { hostname as operatingSystemHostname } from 'node:os';
 import { dirname } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -105,6 +106,8 @@ export interface ServerOptions {
   voiceProviders?: readonly VoiceProviderDefinition[];
   /** Transcription provider-call timeout in ms. Default 60000. */
   voiceTimeoutMs?: number;
+  /** Test-only hostname seam; production uses node:os. */
+  systemHostname?: string;
 }
 
 export interface RunningServer {
@@ -123,6 +126,12 @@ type AuthPrincipal =
 
 const PAIRING_CODE_ATTEMPTS = 5;
 const PAIRING_CODE_WINDOW_MS = 60_000;
+
+function authenticatedHostname(raw: string): string | undefined {
+  const bounded = raw.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+|[._-]+$/g, '').slice(0, 63)
+    .replace(/[._-]+$/g, '');
+  return bounded === '' ? undefined : bounded;
+}
 
 function pairingCodeAttemptLimiter(now: () => number): (connection: object) => boolean {
   const attempts = new WeakMap<object, number[]>();
@@ -413,9 +422,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       }
       const peer = options.crypto.browserChallenges.verify(body.challenge_id, body.signature);
       if (peer.kind !== 'device') throw new Error('only paired devices may open browser sessions');
-      return reply.header('cache-control', 'no-store').send(
-        options.crypto.browserSessions.issue(peer.device_id),
-      );
+      // harn:assume authenticated-browser-session-reveals-bounded-hostname ref=browser-session-hostname
+      const hostname = authenticatedHostname(options.systemHostname ?? operatingSystemHostname());
+      return reply.header('cache-control', 'no-store').send({
+        ...options.crypto.browserSessions.issue(peer.device_id),
+        ...(hostname ? { hostname } : {}),
+      });
+      // harn:end authenticated-browser-session-reveals-bounded-hostname
     } catch {
       return reply.code(401).send({ error: 'device authentication failed' });
     }

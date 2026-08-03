@@ -1,0 +1,148 @@
+id: relay-ux-followups-p1-data
+title: Relay UX follow-ups phase 1 - hosted attachments and authenticated hostnames
+notes: >
+  First approved phase of Richard's relay UX follow-ups. Fix the hosted-only
+  attachment 405 by routing upload and retrieval through the already-active
+  per-computer relay transport, preserving exact binary bytes and the existing
+  attachment security/cap contract. Browser-presentable attachment resources use
+  bounded object URLs with deterministic cleanup; direct/self-hosted mode
+  continues through relayFetch's native-fetch fallback. Voice already uses the
+  correct routed byte path and is unchanged except for separate-origin
+  regression coverage. Also replace generated Computer N labels with the actual
+  switchboard hostname learned only from a successful signed browser session.
+  The hostname is bounded and absent from unauthenticated challenge and pairing
+  surfaces; each warm computer updates only its own label, old switchboards
+  without the additive field retain their fallback, and explicit operator
+  renames always win. This phase does not change the blind relay, pairing
+  cryptography, warm-session activation, switcher layout, Add dialog, context
+  controls, task UI, provider APIs, or attachment limits. Sol implements;
+  Investigator reviews before phase 2 starts.
+assumptions:
+  create:
+    - id: authenticated-browser-session-reveals-bounded-hostname
+      title: A signed browser session may reveal only a bounded switchboard hostname
+      statement: A switchboard may include its sanitized bounded operating-system
+        hostname in the successful browser device-session response only after a
+        paired device proves its Ed25519 identity against a fresh challenge; the
+        unauthenticated challenge, pairing code, blind relay, and failed session
+        responses must not expose it, and an older switchboard may omit the
+        additive field without breaking browser authentication.
+      reason: The computer switcher needs the real machine name, but host identity
+        should be disclosed only at the already-authenticated boundary and
+        remain backward compatible.
+      depends_on:
+        - paired-browser-challenge-session
+    - id: hosted-generated-computer-label-follows-authenticated-hostname
+      title: Hosted generated computer labels adopt their authenticated hostnames
+      statement: Each hosted computer session must apply a valid hostname returned by
+        its own signed session only to that indexed computer when its label is
+        still fallback- or hostname-managed, persist the label source with the
+        index, and never replace an explicit operator rename; legacy Computer N
+        entries are treated as fallback-managed, other legacy labels are treated
+        as custom, and an absent or invalid hostname leaves the current label
+        unchanged.
+      reason: Warm concurrent sessions need recognizable real hostnames without one
+        computer overwriting another or a later authentication erasing a human
+        rename.
+      depends_on:
+        - authenticated-browser-session-reveals-bounded-hostname
+        - hosted-computer-sessions-keep-state-isolated
+    - id: hosted-attachments-follow-active-computer-tunnel
+      title: Hosted attachment bytes follow the active computer's authenticated tunnel
+      statement: Web attachment upload and retrieval must use relayFetch so hosted
+        mode sends the exact file bytes and bearer authorization through the
+        active computer's tunnel while direct mode retains native fetch
+        behavior; rendered and downloaded attachment responses must become
+        short-lived object URLs that are revoked on replacement or unmount, and
+        failed or non-raster responses must remain inert without weakening the
+        server's room, count, size, mime, disposition, or nosniff contract.
+      reason: Relative native fetch targets codor.app's Pages origin and returns 405;
+        using the existing routed HTTP transport fixes both writes and reads
+        without adding another upload service or relay protocol.
+      depends_on:
+        - attachments-are-capped-files-served-inert
+        - hosted-computer-sessions-keep-state-isolated
+        - hosted-computer-switching-reuses-warm-session
+  reviewed:
+    - id: paired-browser-challenge-session
+      outcome: unchanged
+      reason: The browser still receives a bounded revocable token only after the same
+        fresh signed challenge; hostname is an additive authenticated response
+        field and never appears earlier.
+    - id: attachments-are-capped-files-served-inert
+      outcome: unchanged
+      reason: Server storage, room authorization, 25 MB and eight-file caps, raster
+        inline allowlist, inert downloads, nosniff, agent paths, deletion, and
+        orphan sweeping are unchanged; only the browser route/resource loader is
+        corrected.
+    - id: hosted-app-keeps-all-paired-computers-live
+      outcome: unchanged
+      reason: Every indexed session remains warm; authentication now returns one
+        additional display datum without adding or restarting tunnels.
+    - id: hosted-computer-sessions-keep-state-isolated
+      outcome: unchanged
+      reason: Hostname adoption and attachment routing are explicitly scoped to the
+        session entry or active transport that owns the credential and store.
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: Label refresh mutates only display metadata and attachment calls use the
+        already-active transport; activation, stores, connectors, and room
+        restoration are untouched.
+    - id: hosted-computer-switcher-is-discoverable-and-accessible
+      outcome: unchanged
+      reason: Existing switcher and recovery rows already render the stored label;
+        this phase changes label truth, not control interaction or layout.
+    - id: pwa-cold-launch-restores-local-auth
+      outcome: unchanged
+      reason: The access token remains bounded and in-memory on signed session open;
+        additive hostname metadata does not enter URLs or replace stored auth.
+files:
+  - packages/switchboard/src/server.ts
+  - packages/switchboard/src/server.spec.ts
+  - packages/web-next/src/runtime/crypto.ts
+  - packages/web-next/src/runtime/relay-records.ts
+  - packages/web-next/src/runtime/relay-records.spec.ts
+  - packages/web-next/src/runtime/relay-store.ts
+  - packages/web-next/src/runtime/relay-store.spec.ts
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/src/app/computer-sessions.spec.ts
+  - packages/web-next/src/room/attachments.ts
+  - packages/web-next/src/room/attachments.spec.ts
+  - packages/web-next/src/room/Transcript.tsx
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/tests/harness.mjs
+  - packages/web-next/tests/room20-attachments.e2e.spec.ts
+  - packages/web-next/tests/room28-preview.e2e.spec.ts
+  - packages/web-next/tests/room32-relay-journey.e2e.spec.ts
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+anchors:
+  paired-browser-challenge-session:
+    browser-device-session-rest:
+      action: change
+      reason: Extend only the successful signed session response with the bounded
+        hostname while challenge and refusal shapes remain unchanged.
+  authenticated-browser-session-reveals-bounded-hostname:
+    browser-session-hostname:
+      action: change
+      reason: Define hostname normalization and its placement exclusively in the
+        authenticated success response, with server contract regressions.
+  hosted-generated-computer-label-follows-authenticated-hostname:
+    authenticated-computer-label:
+      action: change
+      reason: Carry the optional hostname through each session-owned authentication
+        result and persist fallback/hostname/custom label provenance so only the
+        addressed generated label changes.
+  hosted-attachments-follow-active-computer-tunnel:
+    hosted-attachment-transport:
+      action: change
+      reason: Route exact upload and retrieval bytes through relayFetch, manage object
+        URL lifetime for transcript/Preview consumers, and prove the separate-
+        origin hosted path without changing the server attachment contract.
+  hosted-computer-sessions-keep-state-isolated:
+    per-computer-session-state:
+      action: change
+      reason: The session-owned authentication result now updates only its entry's
+        generated label while tokens, connectors, stores, and retry lifecycle
+        remain isolated.
+applied:
+  applied_at: 2026-08-03T02:20:28.547Z

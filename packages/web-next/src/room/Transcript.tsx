@@ -30,7 +30,13 @@ import {
   requestRunJournal,
   useRunJournalVersion,
 } from './run-journals.js';
-import { attachmentUrl, formatAttachmentSize, isImageAttachment } from './attachments.js';
+import {
+  formatAttachmentSize,
+  isImageAttachment,
+  useAttachmentDownload,
+  useAttachmentObjectUrl,
+  useNearViewport,
+} from './attachments.js';
 import { MiniWaveform } from './MiniWaveform.js';
 import { formatElapsed } from './voice.js';
 import { presentRunTimeline, type CompactionRunTimelineItem } from './run-timeline.js';
@@ -843,34 +849,70 @@ function TurnBlock(props: {
 function MessageAttachments(props: { room: string; token: () => string; attachments: Attachment[] }) {
   return (
     <div className="nx-attachments" data-testid="message-attachments">
-      {props.attachments.map((attachment) => {
-        const url = attachmentUrl(props.room, attachment.id, props.token());
-        return isImageAttachment(attachment.mime) ? (
-          <a
-            key={attachment.id}
-            className="nx-attach-image"
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            data-testid={`attachment-${attachment.id}`}
-          >
-            <img src={url} alt={attachment.name} loading="lazy" />
-          </a>
-        ) : (
-          <a
-            key={attachment.id}
-            className="nx-attach-download"
-            href={url}
-            download={attachment.name}
-            data-testid={`attachment-${attachment.id}`}
-          >
-            <Paperclip size={14} aria-hidden="true" />
-            <span className="nx-attach-name">{attachment.name}</span>
-            <span className="nx-attach-size">{formatAttachmentSize(attachment.size)}</span>
-          </a>
-        );
-      })}
+      {props.attachments.map((attachment) => (
+        <MessageAttachment
+          key={attachment.id}
+          room={props.room}
+          token={props.token()}
+          attachment={attachment}
+        />
+      ))}
     </div>
+  );
+}
+
+function MessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
+  return isImageAttachment(props.attachment.mime)
+    ? <RasterMessageAttachment {...props} />
+    : <DownloadMessageAttachment {...props} />;
+}
+
+function RasterMessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
+  const { attachment } = props;
+  const [nearRef, near] = useNearViewport();
+  const url = useAttachmentObjectUrl(props.room, attachment.id, attachment.mime, props.token, near);
+  if (url === undefined) return (
+    <span
+      ref={nearRef}
+      className="nx-attach-image is-loading"
+      role="img"
+      aria-label={`${attachment.name} image loading`}
+      data-testid={`attachment-${attachment.id}`}
+    />
+  );
+  return (
+    <a ref={nearRef} className="nx-attach-image" href={url} target="_blank" rel="noreferrer" data-testid={`attachment-${attachment.id}`}>
+      <img src={url} alt={attachment.name} loading="lazy" />
+    </a>
+  );
+}
+
+function DownloadMessageAttachment(props: { room: string; token: string; attachment: Attachment }) {
+  const { attachment } = props;
+  const download = useAttachmentDownload(
+    props.room,
+    attachment.id,
+    attachment.mime,
+    props.token,
+    attachment.name,
+  );
+  const contents = (
+    <>
+      <Paperclip size={14} aria-hidden="true" />
+      <span className="nx-attach-name">{attachment.name}</span>
+      <span className="nx-attach-size">{formatAttachmentSize(attachment.size)}</span>
+    </>
+  );
+  return (
+    <button
+      type="button"
+      className="nx-attach-download"
+      disabled={download.busy}
+      data-testid={`attachment-${attachment.id}`}
+      onClick={() => { void download.download(); }}
+    >
+      {contents}
+    </button>
   );
 }
 

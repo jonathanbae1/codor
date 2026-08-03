@@ -7,6 +7,10 @@ const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '
 // origin's /api/* hits the Pages-style index.html fallback (HTML 200), which is
 // the exact failure that same-origin test harnesses masked.
 const SPA_ORIGIN = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_SPA_PORT ?? '28139'}`;
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 async function control<T = unknown>(path: string): Promise<T> {
   const response = await fetch(`${CONTROL}${path}`, {
@@ -26,6 +30,41 @@ async function pasteCode(page: import('@playwright/test').Page, code: string): P
   }, code);
 }
 
+async function installFakeMedia(page: import('@playwright/test').Page): Promise<void> {
+  await page.addInitScript(() => {
+    const stream = { getTracks: () => [{ stop() {} }] };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => Promise.resolve(stream) },
+    });
+    class FakeAudioContext {
+      state = 'suspended';
+      sampleRate = 24_000;
+      destination = {};
+      resume() { this.state = 'running'; return Promise.resolve(); }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createScriptProcessor() {
+        const context = this;
+        const node: { onaudioprocess: ((event: unknown) => void) | null; timer: number; connect(): void; disconnect(): void } = {
+          onaudioprocess: null,
+          timer: 0,
+          connect() {
+            node.timer = window.setInterval(() => {
+              if (context.state === 'running') node.onaudioprocess?.({
+                inputBuffer: { getChannelData: () => new Float32Array(2_048).fill(0.4) },
+              });
+            }, 40);
+          },
+          disconnect() { window.clearInterval(node.timer); },
+        };
+        return node;
+      }
+      close() { return Promise.resolve(); }
+    }
+    Object.assign(window, { AudioContext: FakeAudioContext, webkitAudioContext: FakeAudioContext });
+  });
+}
+
 test.describe('relay tunnel journey', () => {
   test('pairs through the relay in real Chromium, tunnels traffic, and recovers after the host drops', async ({ page }) => {
     test.setTimeout(180_000);
@@ -35,6 +74,8 @@ test.describe('relay tunnel journey', () => {
     await page.addInitScript((url) => {
       (window as unknown as { __CODOR_RELAY_URL?: string }).__CODOR_RELAY_URL = url;
     }, relayUrl);
+    await installFakeMedia(page);
+    await page.context().grantPermissions(['microphone']);
 
     // Any direct /api/* request to the SPA origin means a REST call escaped the
     // tunnel — the production bug. Fail the run if even one is attempted.
@@ -69,6 +110,31 @@ test.describe('relay tunnel journey', () => {
     await input.press('Enter');
     await expect(page.getByTestId('timeline')).toContainText('hello over the relay', { timeout: 20_000 });
 
+    // Attachment upload and retrieval both cross the tunnel. The presented URL
+    // is a blob and preserves the exact uploaded bytes.
+    await page.setInputFiles('[data-testid="composer-file"]', {
+      name: 'relay.png', mimeType: 'image/png', buffer: PNG,
+    });
+    await input.fill('@viewer attachment over the relay');
+    await expect(page.getByTestId('composer-send')).toBeEnabled();
+    await page.getByTestId('composer-send').click();
+    const attachment = page.locator('.nx-attach-image img').last();
+    await expect(attachment).toHaveAttribute('src', /^blob:/, { timeout: 20_000 });
+    const retrieved = await attachment.evaluate(async (image) => [
+      ...new Uint8Array(await (await fetch((image as HTMLImageElement).src)).arrayBuffer()),
+    ]);
+    expect(retrieved).toEqual([...PNG]);
+
+    // Voice already uses the routed byte path; exercise it on the same separate
+    // SPA origin so a regression to native fetch is caught by directApiHits.
+    await input.fill('@viewer');
+    await expect(page.getByTestId('composer-mic')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('composer-mic').click();
+    await page.waitForTimeout(180);
+    await page.getByTestId('dictation-add').click();
+    await page.getByTestId('dictation-send').click();
+    await expect(page.locator('[data-testid^="voice-card-"]').last()).toContainText('dictation', { timeout: 30_000 });
+
     // Kill the tunnel host (agent offline) → the connection visibly drops.
     await control('/relay-down');
     await expect(page.getByTestId('connection')).toHaveClass(/is-error/, { timeout: 30_000 });
@@ -76,6 +142,10 @@ test.describe('relay tunnel journey', () => {
     // Restart the host → the reconnect layering re-opens on the new session.
     await control('/relay-up');
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 40_000 });
+    // The connection pill flips on the app-socket open edge; allow its resumed
+    // subscription to settle before testing the first post on the new session.
+    await page.waitForTimeout(1_000);
+    await expect(page.getByTestId('connection')).toHaveClass(/is-live/);
 
     // Still functional after recovery — a fresh app-WS stream on the NEW session.
     await input.fill('@viewer back after recovery');

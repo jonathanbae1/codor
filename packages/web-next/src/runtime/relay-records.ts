@@ -10,6 +10,8 @@ export interface RelayComputer {
   id: string;
   /** Human label shown in the switcher. */
   label: string;
+  /** Who controls the label: generated fallback/hostname, or an operator. */
+  label_source?: 'fallback' | 'hostname' | 'custom';
   /** ISO timestamp of the (most recent) pairing — drives the last-paired default. */
   paired_at: string;
   /**
@@ -19,6 +21,22 @@ export interface RelayComputer {
    * points only ever at a complete one, and superseded generations are junk.
    */
   gen: number;
+}
+
+/** Old indexes predate provenance: only generated `Computer N` labels are safe
+ * to replace automatically; every other legacy label is treated as operator-owned. */
+export function relayComputerLabelSource(computer: RelayComputer): NonNullable<RelayComputer['label_source']> {
+  if (computer.label_source === 'fallback' || computer.label_source === 'hostname' || computer.label_source === 'custom') {
+    return computer.label_source;
+  }
+  return /^Computer [1-9][0-9]*$/.test(computer.label) ? 'fallback' : 'custom';
+}
+
+/** Additive session metadata is optional and independently validated: a bad
+ * hostname can never invalidate an otherwise valid signed browser session. */
+export function isBoundedRelayHostname(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 63 &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value);
 }
 
 /** The browser's list of paired computers + which one is active. */

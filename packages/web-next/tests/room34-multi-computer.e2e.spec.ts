@@ -104,7 +104,7 @@ test.describe('multi-computer pairing', () => {
     await pasteCode(page, a.code);
     await page.getByTestId('pairing-code-submit').click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
+    await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-a/);
     await page.evaluate(() => { (window as unknown as { __computerDocument?: string }).__computerDocument = 'same-document'; });
 
     // Add computer B (host B) through the switcher's "Add a computer".
@@ -118,11 +118,11 @@ test.describe('multi-computer pairing', () => {
 
     // B is the LAST PAIRED → active in the SAME document, with A still warm.
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/);
+    await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-b/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     await page.getByTestId('computer-current').click();
-    await expect(menuItem(page, 'Computer 1').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
-    await expect(menuItem(page, 'Computer 2').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
+    await expect(menuItem(page, 'codor-host-a').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
+    await expect(menuItem(page, 'codor-host-b').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected');
     const popupA11y = await new AxeBuilder({ page }).include('.nx-computer-menu').analyze();
     expect(popupA11y.violations).toEqual([]);
     await page.getByTestId('computer-current').click();
@@ -148,9 +148,9 @@ test.describe('multi-computer pairing', () => {
 
     // Switch back to computer A → its own session, its own tunnel.
     await page.getByTestId('computer-current').click();
-    await menuItem(page, 'Computer 1').getByRole('button').first().click();
+    await menuItem(page, 'codor-host-a').getByRole('button').first().click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
+    await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-a/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     expect(await page.evaluate(() => ({
       ...(window as unknown as { __relaySessionDials: Record<string, number> }).__relaySessionDials,
@@ -163,18 +163,18 @@ test.describe('multi-computer pairing', () => {
     // only aggregate badges in the switcher.
     await control('/computer-b-activity');
     await page.getByTestId('computer-current').click();
-    await expect(menuItem(page, 'Computer 2').locator('[data-testid^="computer-working-"]')).toContainText('working', { timeout: 20_000 });
-    await expect(menuItem(page, 'Computer 2').locator('[data-testid^="computer-unread-"]')).not.toHaveText('0');
+    await expect(menuItem(page, 'codor-host-b').locator('[data-testid^="computer-working-"]')).toContainText('working', { timeout: 20_000 });
+    await expect(menuItem(page, 'codor-host-b').locator('[data-testid^="computer-unread-"]')).not.toHaveText('0');
     await page.getByTestId('computer-current').click();
 
     // Active A fails; recovery offers already-warm B. Choosing it neither reloads
     // nor starts another B relay handshake, and A's retry loop continues.
-    const bSession = await computerSessionId(page, 'Computer 2');
+    const bSession = await computerSessionId(page, 'codor-host-b');
     const bDialsBeforeRecovery = Object.entries(initialDials).find(([url]) => url.includes(bSession))?.[1];
     await control('/relay-down-a-only');
     await expect(page.getByTestId('recovery')).toBeVisible({ timeout: 20_000 });
-    await page.getByRole('button', { name: /Computer 2, Connected/ }).click();
-    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 2/);
+    await page.getByRole('button', { name: /codor-host-b, Connected/ }).click();
+    await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-b/);
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/);
     expect(await page.evaluate(() => (window as unknown as { __computerDocument?: string }).__computerDocument)).toBe('same-document');
     const bDialsAfterRecovery = await page.evaluate((session) => Object.entries(
@@ -184,14 +184,14 @@ test.describe('multi-computer pairing', () => {
 
     await control('/relay-up');
     await page.getByTestId('computer-current').click();
-    await expect(menuItem(page, 'Computer 1').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected', { timeout: 30_000 });
+    await expect(menuItem(page, 'codor-host-a').locator('[data-testid^="computer-connection-"]')).toHaveText('Connected', { timeout: 30_000 });
 
     // Forget computer B → it disappears, A stays active.
-    await menuItem(page, 'Computer 2').getByRole('button', { name: 'Forget' }).click();
+    await menuItem(page, 'codor-host-b').getByRole('button', { name: 'Forget' }).click();
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 30_000 });
-    await expect(page.getByTestId('computer-current')).toHaveText(/Computer 1/);
+    await expect(page.getByTestId('computer-current')).toHaveText(/codor-host-a/);
     await page.getByTestId('computer-current').click();
-    await expect(menuItem(page, 'Computer 2')).toHaveCount(0);
+    await expect(menuItem(page, 'codor-host-b')).toHaveCount(0);
   });
 
   test('a switchboard-served SPA renders no computer switcher (direct-path unchanged)', async ({ page }) => {
