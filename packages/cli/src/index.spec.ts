@@ -286,6 +286,7 @@ describe('@codor/cli', () => {
   // harn:end pairing-code-enrollment-surfaces
 
   // harn:assume setup-dry-run-reports-without-mutation-or-secret ref=setup-dry-run-regression
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-systemd-regression
   posixHostIt('snapshots setup dry-run with the absolute Node path and every detected harness directory', async () => {
     const repoRoot = join(fileURLToPath(new URL('../../../', import.meta.url)), '.');
     const home = '/home/setup-test';
@@ -336,6 +337,7 @@ describe('@codor/cli', () => {
       [dry-run] write /home/setup-test/.config/codor/env mode 600
       CODOR_TOKEN=<redacted generated-or-existing token>
       PATH=/home/setup-test/.local/bin:/home/setup-test/.nvm/versions/node/v22.8.0/bin:/home/setup-test/.opencode/bin:/usr/local/bin:/usr/bin
+      NODE_PATH=<repo>/node_modules/.pnpm/node_modules
       [dry-run] systemctl --user daemon-reload
       [dry-run] systemctl --user enable --now codor.service
       [dry-run] access localhost; skip Tailscale Serve
@@ -344,6 +346,7 @@ describe('@codor/cli', () => {
     `);
     expect(existsSync(join(home, '.config', 'codor'))).toBe(false);
   });
+  // harn:end platform-services-propagate-destination-pnpm-node-path
 
   posixHostIt('refuses to promise Tailscale Serve in a dry-run when the CLI cannot Serve', async () => {
     const home = '/home/setup-test';
@@ -480,12 +483,109 @@ describe('@codor/cli', () => {
     // The service ExecStart references the durable ~/.codor/runtime copy, never the npx cache.
     expect(unit).toContain(`\"${durableCli}\"`);
     expect(unit).not.toContain('_npx');
+    // The stubbed installIo reports no pnpm hoist dir at the source root, so no
+    // NODE_PATH is derived — the negative case for the pnpm-linked detection.
+    expect(readFileSync(join(home, '.config', 'codor', 'env'), 'utf8')).not.toContain('NODE_PATH');
     // The durable install stages the npx module tree beside ~/.codor/runtime.
     expect(copies).toEqual([[
       join(dir, 'npx cache', '.npm', '_npx', 'deadbeef', 'node_modules'),
       join(`${join(home, '.codor', 'runtime')}.staging`, 'node_modules'),
     ]]);
   });
+
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-source-probe-regression
+  it('derives NODE_PATH from the durable copy, not the ephemeral source, when the invoking runtime is ephemeral', async () => {
+    const sourceRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const home = join(dir, 'npx home nodepath');
+    const npxCacheRoot = join(dir, 'npx cache nodepath', '.npm', '_npx', 'deadbeef');
+    const npxCli = join(npxCacheRoot, 'node_modules', '@richhardry', 'codor', 'node_modules', '@codor', 'cli');
+    const sourceHoistDir = join(npxCacheRoot, 'node_modules', '.pnpm', 'node_modules');
+    await runCli(['node', 'codor', 'setup', '--yes', '--access', 'localhost'], {
+      env: { HOME: home, USER: 'setup-test', PATH: '/usr/bin' },
+      stdout: (line) => output.push(line),
+      setup: {
+        exec: () => '',
+        home,
+        nodePath: process.execPath,
+        platform: 'linux',
+        probe: async () => true,
+        randomToken: () => 'a'.repeat(64),
+        sleep: async () => undefined,
+        which: () => undefined,
+        runtime: {
+          root: npxCli,
+          layout: 'installed-package',
+          cliEntrypoint: join(npxCli, 'dist', 'index.js'),
+          staticRoot: join(npxCli, 'runtime', 'web'),
+          serviceTemplate: join(sourceRoot, 'packaging', 'systemd', 'codor.service'),
+        },
+        installIo: {
+          // The ephemeral source is pnpm-linked (unlike the sibling npx case
+          // above), so the positive derivation actually runs here.
+          exists: (path) => path.includes('.staging') || path === sourceHoistDir,
+          copyTree: () => undefined,
+          move: () => undefined,
+          remove: () => undefined,
+          readVersion: () => undefined,
+        },
+      },
+    });
+
+    const durableHoistDir = join(home, '.codor', 'runtime', 'node_modules', '.pnpm', 'node_modules');
+    const env = readFileSync(join(home, '.config', 'codor', 'env'), 'utf8');
+    // This is the case that fails if the probe is pointed at the destination
+    // instead of the source: NODE_PATH must be rooted at the durable copy the
+    // service will actually run from, never at the ephemeral npx cache path.
+    expect(env).toContain(`NODE_PATH=${durableHoistDir}`);
+    expect(env).not.toContain(npxCacheRoot);
+  });
+  // harn:end platform-services-propagate-destination-pnpm-node-path
+
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-reused-destination-regression
+  it('retains NODE_PATH from a reused pnpm durable destination when the source is not pnpm-linked', async () => {
+    const sourceRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const home = join(dir, 'npx home reused');
+    const npxCacheRoot = join(dir, 'npx cache reused', '.npm', '_npx', 'deadbeef');
+    const npxCli = join(npxCacheRoot, 'node_modules', '@richhardry', 'codor', 'node_modules', '@codor', 'cli');
+    const durableRoot = join(home, '.codor', 'runtime');
+    const durableHoistDir = join(durableRoot, 'node_modules', '.pnpm', 'node_modules');
+    const durablePackageJson = join(durableRoot, 'node_modules', '@richhardry', 'codor', 'package.json');
+    const copies: Array<[string, string]> = [];
+    await runCli(['node', 'codor', 'setup', '--yes', '--access', 'localhost'], {
+      env: { HOME: home, USER: 'setup-test', PATH: '/usr/bin' },
+      stdout: (line) => output.push(line),
+      setup: {
+        exec: () => '',
+        home,
+        nodePath: process.execPath,
+        platform: 'linux',
+        probe: async () => true,
+        randomToken: () => 'a'.repeat(64),
+        sleep: async () => undefined,
+        which: () => undefined,
+        runtime: {
+          root: npxCli,
+          layout: 'installed-package',
+          cliEntrypoint: join(npxCli, 'dist', 'index.js'),
+          staticRoot: join(npxCli, 'runtime', 'web'),
+          serviceTemplate: join(sourceRoot, 'packaging', 'systemd', 'codor.service'),
+        },
+        installIo: {
+          exists: (path) => path === durableRoot || path === durableHoistDir,
+          copyTree: (from, to) => { copies.push([from, to]); },
+          move: () => { throw new Error('reused durable runtime must not move'); },
+          remove: () => { throw new Error('reused durable runtime must not remove'); },
+          readVersion: (path) => path === durablePackageJson ? 'dev' : undefined,
+        },
+      },
+    });
+
+    const env = readFileSync(join(home, '.config', 'codor', 'env'), 'utf8');
+    expect(env).toContain(`NODE_PATH=${durableHoistDir}`);
+    expect(env).not.toContain(npxCacheRoot);
+    expect(copies).toEqual([]);
+  });
+  // harn:end platform-services-propagate-destination-pnpm-node-path
 
   // harn:assume wsl-setup-keeps-private-windows-loopback ref=wsl-bind-regression
   it.each([
@@ -606,6 +706,7 @@ describe('@codor/cli', () => {
     expect(sleeps).toEqual(Array.from({ length: 19 }, () => 250));
   });
 
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-systemd-regression
   posixHostIt('writes private setup files, runs confirmed host steps, and pairs against the Serve origin', async () => {
     const repoRoot = join(fileURLToPath(new URL('../../../', import.meta.url)), '.');
     const home = join(dir, 'setup-home');
@@ -661,6 +762,12 @@ describe('@codor/cli', () => {
     expect(readFileSync(envPath, 'utf8')).toContain(
       `PATH=${join(home, '.local', 'bin')}:/opt/node/bin:/usr/bin`,
     );
+    // repoRoot is this real checkout, which is pnpm-linked, so the hoisted
+    // dependency dir the durable copy will carry over is present and durable
+    // (repoRoot === serviceLocation for a source checkout).
+    expect(readFileSync(envPath, 'utf8')).toContain(
+      `NODE_PATH=${join(repoRoot, 'node_modules', '.pnpm', 'node_modules')}`,
+    );
     // Tailscale is resolved to an absolute path, capability-probed, and Serve is
     // published during Choose access — before the daemon is started.
     expect(commands).toEqual([
@@ -676,7 +783,9 @@ describe('@codor/cli', () => {
     expect(output.join('\n')).toMatch(/[23456789A-HJ-NP-Z]{4}-[23456789A-HJ-NP-Z]{4}/);
     expect(output.join('\n')).not.toContain('a'.repeat(64));
   });
+  // harn:end platform-services-propagate-destination-pnpm-node-path
 
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-launchd-regression
   posixHostIt('dry-runs and installs an equivalent private macOS LaunchAgent', async () => {
     const home = join(dir, 'setup & home');
     const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -720,6 +829,11 @@ describe('@codor/cli', () => {
     expect(dryRunPlist).toContain('<string>&lt;redacted generated-or-existing token&gt;</string>');
     expect(dryRunPlist).toContain('<key>ProcessType</key>\n  <string>Background</string>');
     expect(dryRunPlist).toContain('<key>Umask</key>\n  <integer>63</integer>');
+    // repoRoot is this real checkout, which is pnpm-linked (source checkout,
+    // so repoRoot === serviceLocation), so NODE_PATH is emitted alongside PATH.
+    expect(dryRunPlist).toContain(
+      `<key>NODE_PATH</key>\n    <string>${join(repoRoot, 'node_modules', '.pnpm', 'node_modules')}</string>`,
+    );
 
     output = [];
     await runCli(['node', 'codor', 'setup', '--yes', '--access', 'localhost'], {
@@ -758,6 +872,9 @@ describe('@codor/cli', () => {
     expect(installedPlist).toContain(
       `<string>${join(home, '.local', 'bin').replace('&', '&amp;')}:/opt/homebrew/bin:/Applications/Claude Code/bin:/opt/codor tools/bin:/usr/bin</string>`,
     );
+    expect(installedPlist).toContain(
+      `<key>NODE_PATH</key>\n    <string>${join(repoRoot, 'node_modules', '.pnpm', 'node_modules')}</string>`,
+    );
     expect(commands).toEqual([
       `plutil -lint ${launchAgentPath}`,
       'launchctl bootout gui/501/app.codor.switchboard',
@@ -768,6 +885,7 @@ describe('@codor/cli', () => {
     expect(new URL(qrPayload!).origin).toBe('http://127.0.0.1:8137');
     expect(output.join('\n')).not.toContain(token);
   });
+  // harn:end platform-services-propagate-destination-pnpm-node-path
   // harn:end setup-verifies-codor-before-creating-pairing-code
   // harn:end setup-preserves-private-platform-service
 

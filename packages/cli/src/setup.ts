@@ -226,6 +226,7 @@ function xml(value: string): string {
 interface LaunchAgentOptions {
   dataDir: string;
   logDir: string;
+  nodeModulePath?: string;
   nodePath: string;
   runtime: RuntimePaths;
   servicePath: string;
@@ -245,6 +246,10 @@ function renderLaunchAgent(options: LaunchAgentOptions): string {
     staticRoot: xml(options.runtime.staticRoot),
     token: xml(options.token),
   };
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-launchd-emission
+  const nodeModulePathEntry = options.nodeModulePath === undefined
+    ? ''
+    : `\n    <key>NODE_PATH</key>\n    <string>${xml(options.nodeModulePath)}</string>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -272,7 +277,7 @@ function renderLaunchAgent(options: LaunchAgentOptions): string {
     <key>CODOR_TOKEN</key>
     <string>${values.token}</string>
     <key>PATH</key>
-    <string>${values.servicePath}</string>
+    <string>${values.servicePath}</string>${nodeModulePathEntry}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -296,6 +301,7 @@ function renderLaunchAgent(options: LaunchAgentOptions): string {
 </dict>
 </plist>
 `;
+  // harn:end platform-services-propagate-destination-pnpm-node-path
 }
 // harn:end operator-launches-serve-web-next
 
@@ -614,6 +620,7 @@ export async function runRemoteAccess(deps: RemoteAccessDeps): Promise<RemoteAcc
 export function renderWindowsServiceScript(options: {
   dataDir: string;
   logDir: string;
+  nodeModulePath?: string;
   nodePath: string;
   runtime: RuntimePaths;
   servicePath: string;
@@ -622,13 +629,16 @@ export function renderWindowsServiceScript(options: {
   const quote = (value: string): string => value.replaceAll("'", "''");
   const entrypoint = options.runtime.cliEntrypoint;
   const staticRoot = options.runtime.staticRoot;
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-windows-emission
   return [
     `$env:CODOR_TOKEN = (Get-Content -Raw -Path '${quote(options.tokenPath)}').Trim()`,
     `$env:PATH = '${quote(options.servicePath)}'`,
+    ...(options.nodeModulePath === undefined ? [] : [`$env:NODE_PATH = '${quote(options.nodeModulePath)}'`]),
     `Set-Location -Path '${quote(options.runtime.root)}'`,
     `& '${quote(options.nodePath)}' '${quote(entrypoint)}' --data-dir '${quote(options.dataDir)}' up --static-root '${quote(staticRoot)}' --channel desk --channel-name Desk >> '${quote(join(options.logDir, 'codor.out.log'))}' 2>> '${quote(join(options.logDir, 'codor.err.log'))}'`,
     'exit $LASTEXITCODE',
   ].join('\r\n') + '\r\n';
+  // harn:end platform-services-propagate-destination-pnpm-node-path
 }
 
 export function renderWindowsScheduledTask(options: {
@@ -726,6 +736,18 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   const installSource = resolveInstallSource(runtime);
   const serviceLocation = installSource.durable ? installSource.installRoot : durableRuntimeLocation(dataDir);
   const serviceRuntime = installSource.durable ? runtime : packageRuntimePaths(installedCliRoot(serviceLocation));
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-source-destination-derivation
+  // pnpm's hidden hoist directory sits at a fixed offset inside a pnpm-linked
+  // tree and survives installDurableRuntime's wholesale node_modules copy.
+  const hoistDirRelative = join('node_modules', '.pnpm', 'node_modules');
+  const sourceHoistDir = join(installSource.installRoot, hoistDirRelative);
+  const destinationHoistDir = join(serviceLocation, hoistDirRelative);
+  // Probe the invoking source and an already-reused durable destination, then
+  // emit only the destination path where the service will actually run.
+  const nodeModulePath = installIo.exists(sourceHoistDir) || installIo.exists(destinationHoistDir)
+    ? join(serviceLocation, hoistDirRelative)
+    : undefined;
+  // harn:end platform-services-propagate-destination-pnpm-node-path
   const windowsScriptPath = join(configDir, 'codor-service.ps1');
   const windowsTaskPath = join(configDir, 'codor-task.xml');
   const windowsUser = options.env.USERNAME ?? options.env.USER;
@@ -769,9 +791,11 @@ export async function runSetup(options: SetupOptions): Promise<void> {
   }
   const launchDomain = launchUid === undefined ? undefined : `gui/${String(launchUid)}`;
   const launchTarget = launchDomain === undefined ? undefined : `${launchDomain}/${LAUNCH_AGENT_LABEL}`;
+  // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-windows-emission
   const windowsScript = platform === 'win32'
-    ? renderWindowsServiceScript({ dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath, tokenPath })
+    ? renderWindowsServiceScript({ dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath, tokenPath })
     : undefined;
+  // harn:end platform-services-propagate-destination-pnpm-node-path
   const windowsTask = platform === 'win32'
     ? renderWindowsScheduledTask({ scriptPath: windowsScriptPath, user: windowsUser! })
     : undefined;
@@ -816,13 +840,18 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       options.out(`[dry-run] write ${envPath} mode 600`);
       options.out('CODOR_TOKEN=<redacted generated-or-existing token>');
       options.out(`PATH=${servicePath}`);
+      // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-systemd-emission
+      if (nodeModulePath !== undefined) options.out(`NODE_PATH=${nodeModulePath}`);
+      // harn:end platform-services-propagate-destination-pnpm-node-path
       options.out('[dry-run] systemctl --user daemon-reload');
       options.out('[dry-run] systemctl --user enable --now codor.service');
     } else if (platform === 'darwin') {
+      // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-launchd-emission
       const launchAgent = renderLaunchAgent({
-        dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath,
+        dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath,
         token: '<redacted generated-or-existing token>',
       });
+      // harn:end platform-services-propagate-destination-pnpm-node-path
       options.out(`[dry-run] create ${logDir} mode 700`);
       options.out(`[dry-run] install generated LaunchAgent -> ${launchAgentPath} mode 600`);
       options.out('[dry-run] launch agent content:');
@@ -1009,7 +1038,10 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       mkdirSync(userUnitDir, { recursive: true, mode: 0o700 });
       writeFileSync(userUnitPath, unitContent!, { encoding: 'utf8', mode: 0o600 });
       chmodSync(userUnitPath, 0o600);
-      writeFileSync(envPath, `CODOR_TOKEN=${token}\nPATH=${servicePath}\n`, { encoding: 'utf8', mode: 0o600 });
+      // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-systemd-emission
+      const nodePathEnvLine = nodeModulePath === undefined ? '' : `NODE_PATH=${nodeModulePath}\n`;
+      writeFileSync(envPath, `CODOR_TOKEN=${token}\nPATH=${servicePath}\n${nodePathEnvLine}`, { encoding: 'utf8', mode: 0o600 });
+      // harn:end platform-services-propagate-destination-pnpm-node-path
       chmodSync(envPath, 0o600);
       exec('systemctl', ['--user', 'daemon-reload']);
       exec('systemctl', ['--user', 'enable', '--now', 'codor.service']);
@@ -1024,9 +1056,11 @@ export async function runSetup(options: SetupOptions): Promise<void> {
       mkdirSync(launchAgentDir, { recursive: true });
       mkdirSync(logDir, { recursive: true, mode: 0o700 });
       chmodSync(logDir, 0o700);
+      // harn:assume platform-services-propagate-destination-pnpm-node-path ref=node-path-launchd-emission
       writeFileSync(launchAgentPath, renderLaunchAgent({
-        dataDir, logDir, nodePath, runtime: serviceRuntime, servicePath, token,
+        dataDir, logDir, nodeModulePath, nodePath, runtime: serviceRuntime, servicePath, token,
       }), { encoding: 'utf8', mode: 0o600 });
+      // harn:end platform-services-propagate-destination-pnpm-node-path
       chmodSync(launchAgentPath, 0o600);
       await bootstrapLaunchAgent({
         exec, probe, sleep,

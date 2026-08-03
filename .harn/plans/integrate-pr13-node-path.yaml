@@ -1,0 +1,187 @@
+id: integrate-pr13-node-path
+title: Integrate PR 13 destination-rooted pnpm hoist paths for platform services
+notes: >
+  Integrate the exact PR 13 head d0648b3a0cde0c2ae9d4f958dc8d3c53569e15bd into
+  origin/main at 97758b7e36a2725ea5ff009ba3c5fb22342b8714 with a real no-ff
+  merge commit. When the runtime actually used by the service has pnpm's hidden
+  hoist directory, propagate a destination-rooted NODE_PATH to systemd, launchd,
+  and Windows Task Scheduler while preserving platform-specific escaping. Derive
+  it from the invoking source or an already-reused durable destination, and omit
+  it when neither contains the hoist directory. Preserve the existing service,
+  durable-runtime, and dry-run behavior; no backend, protocol, deployment,
+  GitHub merge, push, or PR #14 work is in scope. Keep the exact PR head as the
+  merge commit's second parent.
+assumptions:
+  reviewed:
+    - id: setup-preserves-private-platform-service
+      outcome: unchanged
+      reason: >
+        The native per-user service still uses the resolved absolute runtime,
+        private paths, token handling, and service PATH; NODE_PATH is an
+        additional dependency-path environment value rooted at the runtime the
+        service actually uses.
+    - id: windows-setup-installs-private-task-service
+      outcome: unchanged
+      reason: >
+        Windows still renders the hidden ACL-protected logon task and wrapper,
+        reads the token privately, propagates the daemon exit code, and starts
+        without a terminal; the wrapper only gains an optional escaped
+        NODE_PATH.
+    - id: setup-installs-durable-per-user-runtime-atomically
+      outcome: unchanged
+      reason: >
+        Durable-runtime selection, reuse, complete-tree copy, validation,
+        intent, atomic swap, backup, and rollback remain unchanged; this plan
+        only derives the dependency path from the source and service locations.
+    - id: setup-dry-run-reports-without-mutation-or-secret
+      outcome: unchanged
+      reason: >
+        Dry-run remains read-only and redacted while showing the same complete
+        platform preview, with NODE_PATH included only when the service runtime
+        has the hidden pnpm hoist directory.
+    - id: operator-launches-serve-web-next
+      outcome: unchanged
+      reason: >
+        The LaunchAgent continues to invoke the current web-next runtime and
+        static root; its environment gains only the optional dependency path.
+    - id: adapter-registry-sole-harness-source
+      outcome: unchanged
+      reason: >
+        The adapter registry test remains unchanged; the new setup regressions
+        are inserted earlier in the same CLI spec, so its anchored region is
+        re-accounted for without changing the registry contract.
+  create:
+    - id: platform-services-propagate-destination-pnpm-node-path
+      title: Platform services propagate a destination-rooted pnpm hoist path
+      statement: >
+        When the invoking runtime's installed-package or source tree, or an
+        already-reused durable destination that the service will run from,
+        contains pnpm's hidden hoist directory at
+        node_modules/.pnpm/node_modules, setup must emit NODE_PATH rooted at the
+        service destination for systemd, launchd, and Windows Task Scheduler;
+        when neither source nor destination contains it, NODE_PATH must be
+        omitted, so a service never points at a disposable source tree and a
+        non-pnpm invocation cannot suppress the dependency path required by a
+        reused pnpm runtime.
+      reason: >
+        pnpm-linked packages resolve dependencies through the hidden hoist
+        directory, while services run from a durable destination after an
+        install or reuse. The environment path therefore needs source probing
+        but destination-rooted emission, with no false-positive path when both
+        runtimes lack the hoist directory.
+      depends_on:
+        - setup-preserves-private-platform-service
+        - windows-setup-installs-private-task-service
+        - setup-installs-durable-per-user-runtime-atomically
+        - setup-dry-run-reports-without-mutation-or-secret
+        - operator-launches-serve-web-next
+files:
+  - packages/cli/src/setup.ts
+  - packages/cli/src/setup-win32.spec.ts
+  - packages/cli/src/index.spec.ts
+anchors:
+  setup-preserves-private-platform-service:
+    setup-platform-service-runtime:
+      action: change
+      reason: >
+        Derive the service dependency environment and pass it through the
+        platform-specific service generation inside the shared setup runtime.
+    setup-platform-service-regression:
+      action: change
+      reason: >
+        Existing Linux and macOS service regressions gain destination-rooted
+        NODE_PATH assertions and the source-probe/reuse boundary cases.
+  windows-setup-installs-private-task-service:
+    windows-service-rendering:
+      action: change
+      reason: >
+        The Windows wrapper gains an optional escaped NODE_PATH assignment while
+        retaining token, path, logging, and exit-code behavior.
+    windows-setup-runtime:
+      action: change
+      reason: >
+        Setup passes the derived destination-rooted dependency path into the
+        Windows service renderer.
+    windows-setup-regression:
+      action: change
+      reason: >
+        Windows dry-run, no-hoist, and pnpm-linked service regressions cover
+        omission and destination-rooted NODE_PATH emission.
+  setup-dry-run-reports-without-mutation-or-secret:
+    setup-dry-run-runtime:
+      action: change
+      reason: >
+        Dry-run shows NODE_PATH for each platform only when the service runtime
+        has pnpm's hidden hoist directory, without creating files or leaking a
+        token.
+    setup-dry-run-regression:
+      action: change
+      reason: >
+        The Linux dry-run snapshot records the destination-rooted NODE_PATH and
+        preserves the no-hoist negative case.
+  operator-launches-serve-web-next:
+    launchd-current-web-client:
+      action: change
+      reason: >
+        LaunchAgent environment emission gains optional XML-escaped NODE_PATH
+        without changing the web-next entrypoint or static root.
+  adapter-registry-sole-harness-source:
+    registry-cli-composition:
+      action: change
+      reason: >
+        Account for the existing registry test anchor shifted after setup
+        regressions are inserted earlier in the CLI spec; registry assertions
+        and adapter composition remain unchanged.
+  platform-services-propagate-destination-pnpm-node-path:
+    node-path-source-destination-derivation:
+      action: change
+      reason: >
+        Anchor source and reused-destination hoist detection and the
+        destination-rooted NODE_PATH selection.
+    node-path-systemd-emission:
+      action: change
+      reason: >
+        Anchor systemd dry-run and environment-file emission of the optional
+        destination-rooted NODE_PATH.
+    node-path-launchd-emission:
+      action: change
+      reason: >
+        Anchor launchd plist emission and its destination-rooted XML-escaped
+        NODE_PATH environment value.
+    node-path-windows-emission:
+      action: change
+      reason: >
+        Anchor Windows PowerShell wrapper emission and its platform-safe quoted
+        NODE_PATH value.
+    node-path-systemd-regression:
+      action: change
+      reason: |
+        Anchor Linux dry-run and real-service assertions for NODE_PATH.
+    node-path-launchd-regression:
+      action: change
+      reason: >
+        Anchor macOS dry-run and installed LaunchAgent assertions for NODE_PATH
+        and XML escaping.
+    node-path-windows-regression:
+      action: change
+      reason: |
+        Anchor Windows omission and pnpm-linked destination emission assertions.
+    node-path-source-probe-regression:
+      action: change
+      reason: >
+        Anchor the PR regression proving a pnpm source hoist is emitted as a
+        durable destination path rather than an ephemeral source path.
+    node-path-reused-destination-regression:
+      action: change
+      reason: >
+        Anchor the reuse-edge regression proving a non-pnpm source still emits
+        NODE_PATH when the already-reused durable destination has pnpm's hoist.
+verification: >
+  After merge, run the full workspace build, serial full workspace tests,
+  complete CLI tests, focused Windows/systemd/launchd/runtime tests, Harn plan/
+  check/apply/staged validation, and git diff --check. Confirm a clean worktree
+  and a real merge commit whose first parent is
+  97758b7e36a2725ea5ff009ba3c5fb22342b8714 and whose second parent is exactly
+  d0648b3a0cde0c2ae9d4f958dc8d3c53569e15bd.
+applied:
+  applied_at: 2026-08-03T09:53:16.791Z

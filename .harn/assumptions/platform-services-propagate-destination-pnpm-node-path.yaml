@@ -1,0 +1,20 @@
+id: platform-services-propagate-destination-pnpm-node-path
+hash: a-da8170db3d92
+title: Platform services propagate a destination-rooted pnpm hoist path
+state: active
+statement: >
+  When the invoking runtime's installed-package or source tree, or an
+  already-reused durable destination that the service will run from, contains
+  pnpm's hidden hoist directory at node_modules/.pnpm/node_modules, setup must
+  emit NODE_PATH rooted at the service destination for systemd, launchd, and
+  Windows Task Scheduler; when neither source nor destination contains it,
+  NODE_PATH must be omitted, so a service never points at a disposable source
+  tree and a non-pnpm invocation cannot suppress the dependency path required by
+  a reused pnpm runtime.
+depends_on:
+  - setup-preserves-private-platform-service
+  - windows-setup-installs-private-task-service
+  - setup-installs-durable-per-user-runtime-atomically
+  - setup-dry-run-reports-without-mutation-or-secret
+  - operator-launches-serve-web-next
+created_by: integrate-pr13-node-path
