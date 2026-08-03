@@ -449,10 +449,10 @@ daemon.postHumanMessage('preview', '@painter show a vector');
 await daemon.settle();
 daemon.recordArtifactError('preview', 999); // durable path-free per-run storage-failure state
 
-// harn:assume people-and-agents-shows-only-nonempty-task-lists ref=member-task-browser-fixture
-// Tasks: a durable nonempty checklist (three states + explanation, >5 rows for the
-// expansion control) on one agent and no tasks on another, plus control endpoints
-// for live update and clearing — all without any provider call.
+// harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-browser-fixture
+// Tasks: a durable checklist (three states + explanation, >5 rows for the expansion
+// control) on one agent and no tasks on another, plus control endpoints for live,
+// all-completed, duplicate, and clearing transitions — all without any provider call.
 const tasksCwd = join(dir, 'tasks-work');
 mkdirSync(tasksCwd, { recursive: true });
 const planner = daemon.spawnMember('tasks', { harness: 'fake', handle: 'planner', cwd: tasksCwd });
@@ -469,6 +469,13 @@ const PLANNER_TASKS = {
     { id: 't5', content: 'Update the docs', status: 'pending' },
     { id: 't6', content: 'Request review', status: 'pending' },
   ],
+};
+const COMPLETED_PLANNER_TASKS = {
+  ...PLANNER_TASKS,
+  items: PLANNER_TASKS.items.map(({ active_form: _activeForm, ...task }) => ({
+    ...task,
+    status: 'completed',
+  })),
 };
 const resetPlannerTasks = () => {
   daemon.store.setAgentSessionRuntime('tasks', planner.id, PLANNER_SESSION, { load: true, resume: true });
@@ -1265,6 +1272,14 @@ createServer((req, res) => {
         // Restore the full seeded checklist + session so each browser test is isolated.
         resetPlannerTasks();
         payload = { ok: true };
+      }
+      if (url.pathname === '/tasks-complete') {
+        // Complete every item in place so the browser can prove the presentation
+        // hides an all-completed projection without a provider call or write-back.
+        const member = daemon.store.getMemberByHandle('tasks', 'planner');
+        const updated = daemon.store.applyMemberTaskUpdate('tasks', member.id, COMPLETED_PLANNER_TASKS);
+        if (updated) daemon.emitMember('tasks', updated);
+        payload = { ok: updated !== undefined };
       }
       if (url.pathname === '/tasks-duplicate') {
         // Re-deliver the identical seeded update: the store no-ops and emits no frame.

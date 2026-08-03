@@ -1,0 +1,27 @@
+id: agent-member-card-separates-context-actions-from-usage
+hash: a-046aca4bc23e
+title: Agent cards put context actions above usage without crowding identity
+state: active
+statement: >
+  A People and agents card keeps avatar, handle, truthful harness/model/policy
+  metadata, and member state in an identity header whose metadata wraps inside
+  the card instead of being squeezed by actions. An agent then renders one
+  context/action row above spend and reported rate-limit usage: the existing
+  circular context meter remains free of inline token amounts and carries detail
+  through its tooltip and accessible name; Compact and Clear context are
+  labelled controls on the same row, followed by flexible space, the currently
+  applicable direct Stop or Revive control, and the overflow action. Existing
+  role, state, session, confirmation, pending, error, and one-dispatch gates
+  remain authoritative. The row wraps rather than clips in narrow cards, all
+  member actions are at least 44 by 44 CSS pixels on a phone, five-hour usage is
+  labelled 5h, and weekly/seven-day usage is labelled 7d without changing the
+  reported values or inventing a limit.
+depends_on:
+  - member-context-window-meter-derived-from-last-usage
+  - member-context-reset-is-authorized-atomic-and-lazy
+  - manual-compaction-is-an-operator-act
+  - dead-agent-surfaces-revive-in-its-action-area
+  - agent-usage-limits-reported-not-guessed
+  - web-room-targets-meet-minimum-hit-size
+  - controls-fit-the-surface-they-sit-on
+created_by: relay-ux-followups-p4-member-ui

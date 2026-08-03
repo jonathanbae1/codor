@@ -695,8 +695,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  gap: 4px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 7px;
   border-radius: var(--r-pill);
   color: var(--c-text-muted);
   transition: background-color var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
@@ -707,11 +710,16 @@
 }
 .nx-member-compact:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Phase 3 keeps Clear functional and compact; Phase 4 owns the final action-row layout. */
+/* Clear remains a guarded action; its explicit label joins the context row below. */
 .nx-member-clear {
   flex: none;
-  height: 24px;
-  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: var(--r-pill);
   color: var(--c-error-text);
   font: var(--t-caption);
@@ -726,8 +734,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 10px;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid var(--c-line);
   border-radius: var(--r-full);
   background: var(--c-raised);
@@ -1269,15 +1279,17 @@
   color: var(--c-error-text);
   font: var(--t-caption);
 }
+/* harn:assume web-room-visual-hierarchy-matches-soft-editorial-reference ref=soft-editorial-room-style */
 .nx-member {
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-card);
 }
 .nx-member:hover { background: var(--c-muted); }
-.nx-member-row {
+.nx-member-identity {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-3);
+  min-width: 0;
 }
 .nx-member-id {
   flex: 1;
@@ -1287,13 +1299,16 @@
 }
 .nx-member-id strong { font: var(--t-ui-strong); }
 .nx-member-sub {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
   font: var(--t-caption);
   color: var(--c-faded);
 }
-.nx-member-state { flex: none; }
+.nx-member-meta-item { overflow-wrap: anywhere; }
+.nx-member-state { flex: none; margin-left: auto; }
 .nx-member-meter {
   margin: var(--sp-1) 0 0 calc(32px + var(--sp-3));
   font: var(--t-caption);
@@ -1305,8 +1320,41 @@
   gap: var(--sp-2);
   margin: var(--sp-1) 0 0 calc(32px + var(--sp-3));
 }
+/* harn:end web-room-visual-hierarchy-matches-soft-editorial-reference */
 
-/* harn:assume people-and-agents-shows-only-nonempty-task-lists ref=member-task-list-style */
+/* harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-style */
+.nx-member-context-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+  margin: var(--sp-2) 0 0 calc(32px + var(--sp-3));
+}
+.nx-member-context-row .nx-member-compact,
+.nx-member-context-row .nx-member-clear,
+.nx-member-context-row .nx-member-revive,
+.nx-member-context-row .nx-member-stop,
+.nx-member-context-row .nx-member-menu .nx-iconbtn {
+  min-width: 0;
+  min-height: 32px;
+}
+.nx-member-context-row .nx-member-stop {
+  width: 32px;
+  height: 32px;
+}
+.nx-member-action-spacer {
+  flex: 1 1 var(--sp-3);
+  min-width: var(--sp-1);
+}
+.nx-member-context-row .nx-member-menu .nx-iconbtn {
+  width: 32px;
+  height: 32px;
+}
+/* harn:end agent-member-card-separates-context-actions-from-usage */
+
+/* harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-style */
 .nx-member-tasks {
   margin: var(--sp-2) 0 0 calc(32px + var(--sp-3));
 }
@@ -1329,21 +1377,37 @@
 }
 .nx-task {
   display: grid;
-  grid-template-columns: 1em auto 1fr;
-  align-items: baseline;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
   gap: var(--sp-2);
   font: var(--t-caption);
   color: var(--c-ink);
 }
-.nx-task-mark { color: var(--c-secondary); text-align: center; }
-.nx-task.is-in_progress .nx-task-mark { color: var(--c-link); }
-.nx-task-mark.is-active { animation: nx-task-pulse 1.3s var(--m-ease, ease-in-out) infinite; }
-.nx-task-state {
-  font: var(--t-caption-strong);
+.nx-task-mark {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  justify-self: center;
   color: var(--c-secondary);
-  white-space: nowrap;
+  font: var(--t-ui-strong);
+  line-height: 1;
 }
-.nx-task.is-in_progress .nx-task-state { color: var(--c-link); }
+.nx-task-mark.is-pending {
+  border: 1px solid var(--c-secondary);
+  border-radius: var(--r-full);
+  color: transparent;
+}
+.nx-task-mark.is-completed { color: var(--c-secondary); }
+.nx-task-progress {
+  width: 28px;
+  height: 5px;
+  justify-self: center;
+  border-radius: var(--r-full);
+  background: linear-gradient(90deg, var(--c-link) 0 28%, var(--c-muted) 28% 58%, var(--c-link) 58% 86%, var(--c-muted) 86%);
+  background-size: 220% 100%;
+  animation: nx-task-progress 1.25s var(--m-ease, ease-in-out) infinite;
+}
 .nx-task-text { min-width: 0; overflow-wrap: anywhere; }
 .nx-task.is-completed .nx-task-text {
   color: var(--c-secondary);
@@ -1359,11 +1423,11 @@
   cursor: pointer;
 }
 .nx-tasklist-toggle:hover { text-decoration: underline; }
-@keyframes nx-task-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+@keyframes nx-task-progress {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
 }
-/* harn:end people-and-agents-shows-only-nonempty-task-lists */
+/* harn:end people-and-agents-shows-actionable-compact-task-lists */
 .nx-limit {
   font: var(--t-caption);
   color: var(--c-secondary);
@@ -2010,9 +2074,9 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .nx-dotgrid::after { animation: none; opacity: 0; }
-  /* harn:assume people-and-agents-shows-only-nonempty-task-lists ref=member-task-list-style */
-  .nx-task-mark.is-active { animation: none; }
-  /* harn:end people-and-agents-shows-only-nonempty-task-lists */
+  /* harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-style */
+  .nx-task-progress { animation: none; }
+  /* harn:end people-and-agents-shows-actionable-compact-task-lists */
 }
 
 
@@ -2332,6 +2396,21 @@
     background: var(--c-surface);
   }
   .nx-mobile-context .nx-context { display: flex; flex: 1; min-height: 0; }
+  .nx-member-context-row .nx-member-compact,
+  .nx-member-context-row .nx-member-clear,
+  .nx-member-context-row .nx-member-revive,
+  .nx-member-context-row .nx-member-stop,
+  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+  .nx-member-context-row .nx-member-stop {
+    width: 44px;
+  }
+  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+    width: 44px;
+  }
   .nx-mobile-context-close {
     align-self: flex-end;
     margin: var(--sp-3) var(--sp-3) 0;

@@ -1,0 +1,116 @@
+id: relay-ux-followups-p4-review-fixes
+title: Phase 4 review fixes - one-line compact context actions and scoped names
+notes: >
+  Contained review correction on top of Phase 4 commit 4a44b604. The approved
+  context ring, Compact, Clear context, flexible spacing, and overflow control
+  must remain one visual row at both the 1440px desktop context rail and the
+  installed 390px phone context sheet. The current implementation passes only an
+  inside-viewport assertion: at 390px the overflow wraps onto a second line
+  alone, adding a large empty band and contradicting the requested compact
+  single-row hierarchy. Tighten the controls rather than shrinking phone hit
+  targets: remove the redundant normal-state Compact glyph if needed, keep a
+  compact stable visible `Compact` label during pending compaction while the
+  spinner/data/title provide progress, use compact desktop heights, and apply
+  the required 44x44 targets at the phone breakpoint. Preserve the existing
+  circular ring, Clear context label, flexible trailing alignment, and all
+  current role/state/session/pending/error/confirmation/dispatch behavior.
+
+  Restore member-specific accessible names for repeated actions: Compact and
+  Clear context must name the target handle while retaining their exact visible
+  labels. Strengthen the browser regression to compare control center lines at
+  1440 and 390, assert the phone hit boxes and card bounds, and assert scoped
+  accessible names. No task, usage, runtime, protocol, persistence, other room
+  layout, deployment, version, or release change is in scope. Luna implements;
+  Investigator performs the final review before integration.
+assumptions:
+  reviewed:
+    - id: agent-member-card-separates-context-actions-from-usage
+      outcome: unchanged
+      reason: The correction makes the shipped layout satisfy its already-stated
+        same-row, compact, wrapping-safe, phone-target, and authoritative-gating
+        contract; no meaning changes.
+    - id: member-context-window-meter-derived-from-last-usage
+      outcome: unchanged
+      reason: The existing ring data, drawing, pending state, and tooltip remain
+        unchanged; only neighboring control geometry is tightened.
+    - id: member-context-reset-is-authorized-atomic-and-lazy
+      outcome: unchanged
+      reason: Clear context retains the same visible label and behavior while its
+        accessible name regains target identity.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: Compact retains the same action, guards, spinner, title, and completion
+        behavior; its stable short label prevents pending-state reflow.
+    - id: dead-agent-surfaces-revive-in-its-action-area
+      outcome: unchanged
+      reason: Direct Revive/Stop placement and lifecycle gates remain unchanged while
+        sharing the corrected one-line geometry.
+    - id: web-room-targets-meet-minimum-hit-size
+      outcome: unchanged
+      reason: Desktop may use compact controls, but every member-card action remains
+        at least 44x44 in the 390px phone surface and the rendered test proves
+        it.
+    - id: controls-fit-the-surface-they-sit-on
+      outcome: unchanged
+      reason: The stronger regression proves both containment and a single visual row
+        in the actual narrow context sheet.
+    - id: web-room-visual-hierarchy-matches-soft-editorial-reference
+      outcome: unchanged
+      reason: The member card stays framed and tokenized; this removes accidental
+        vertical whitespace without changing surface composition.
+files:
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+anchors:
+  agent-member-card-separates-context-actions-from-usage:
+    member-card-context-action-layout:
+      action: change
+      reason: Restore target-specific accessible names and keep Compact's visible
+        pending label stable so the row does not reflow.
+    member-card-context-action-style:
+      action: change
+      reason: Use compact desktop geometry and 44px phone targets while keeping the
+        ring, Compact, Clear context, spacer, lifecycle action, and overflow on
+        one visual line at 390px.
+    member-card-context-action-regression:
+      action: change
+      reason: Assert member-specific accessible names and equal center lines for the
+        ring and primary controls at both desktop and phone widths.
+  member-context-reset-is-authorized-atomic-and-lazy:
+    clear-context-web-control:
+      action: change
+      reason: Give the repeated Clear context button a target-specific accessible name
+        without changing visible copy or dispatch.
+    clear-context-browser-regression:
+      action: change
+      reason: Continue selecting and exercising the control through its test id while
+        additionally checking the scoped accessible name.
+  dead-agent-surfaces-revive-in-its-action-area:
+    member-lifecycle-controls:
+      action: change
+      reason: Keep the existing Stop/Revive slot aligned in the corrected action row.
+  web-room-targets-meet-minimum-hit-size:
+    room-target-size-sweep:
+      action: change
+      reason: Prove every member action keeps a 44x44 phone hit box after desktop
+        geometry is compacted.
+  controls-fit-the-surface-they-sit-on:
+    control-fits-narrow-surface:
+      action: change
+      reason: Strengthen the phone test from mere containment to one-line center
+        alignment with no horizontal overflow.
+  web-room-visual-hierarchy-matches-soft-editorial-reference:
+    soft-editorial-room-style:
+      action: change
+      reason: Remove the accidental second-line whitespace using existing tokens.
+verification: >
+  Web-next full unit suite and build pass. Focused room3 context presentation,
+  compaction, clear-context, lifecycle, phone geometry, and Axe checks pass. At
+  1440px and 390px the ring, Compact, Clear context, and overflow share one
+  center line; every phone control remains at least 44x44 and inside the card;
+  Compact and Clear context expose target-specific accessible names while their
+  visible labels remain exact. Harn plan/diff/staged/apply checks and git diff
+  --check pass in one implementation commit.
+applied:
+  applied_at: 2026-08-03T05:47:02.754Z

@@ -1,5 +1,5 @@
 import type { AgentLimit, AgentTaskList, AgentTaskStatus, Member, Policy, Room, ThinkingLevel, WireEvent } from '@codor/protocol';
-import { Bot, ChevronRight, FileText, LoaderCircle, Minimize2, MoreVertical, Plus, RefreshCw, RotateCcw, Square, X } from 'lucide-react';
+import { Bot, ChevronRight, FileText, LoaderCircle, MoreVertical, Plus, RefreshCw, RotateCcw, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactUrl, fetchArtifacts, fetchRunEvents, refreshUsage, type AdapterRegistration, type ArtifactFeed, type MemberDetail } from '@runtime/api.js';
@@ -232,17 +232,21 @@ function MembersTab(props: { room: string; token: () => string; connection: Conn
   );
 }
 
-// harn:assume people-and-agents-shows-only-nonempty-task-lists ref=member-task-list-ui
-const TASK_SYMBOL: Record<AgentTaskStatus, string> = { pending: '○', in_progress: '◐', completed: '✓' };
-const TASK_LABEL: Record<AgentTaskStatus, string> = { pending: 'Pending', in_progress: 'In progress', completed: 'Completed' };
+// harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-ui
+const TASK_STATUS_LABEL: Record<AgentTaskStatus, string> = {
+  pending: 'Pending',
+  in_progress: 'In progress',
+  completed: 'Completed',
+};
 const TASK_COLLAPSED = 5;
 
-/** A bounded, accessible checklist beneath an agent card. Rendered only for a
- *  nonempty projection; state carries text + symbol redundancy (never color alone),
- *  and the expanded list scrolls inside a fixed bound so the panel stays finite. */
+/** A bounded, accessible checklist beneath an agent card. The projection stays
+ *  durable and untouched; completed-only state is simply not a useful section
+ *  to render, while mixed lists retain their completed history. */
 function MemberTaskList(props: { handle: string; tasks: AgentTaskList }) {
   const [expanded, setExpanded] = useState(false);
   const items = props.tasks.items;
+  if (!items.some((task) => task.status !== 'completed')) return null;
   const visible = expanded ? items : items.slice(0, TASK_COLLAPSED);
   const extra = items.length - TASK_COLLAPSED;
   return (
@@ -253,10 +257,21 @@ function MemberTaskList(props: { handle: string; tasks: AgentTaskList }) {
       <ul className={`nx-tasklist${expanded ? ' is-expanded' : ''}`} aria-label={`@${props.handle} tasks`}>
         {visible.map((task) => (
           <li key={task.id} className={`nx-task is-${task.status}`}>
-            <span className={`nx-task-mark${task.status === 'in_progress' ? ' is-active' : ''}`} aria-hidden="true">
-              {TASK_SYMBOL[task.status]}
-            </span>
-            <span className="nx-task-state">{TASK_LABEL[task.status]}</span>
+            {task.status === 'in_progress' ? (
+              <span
+                className="nx-task-progress"
+                role="img"
+                aria-label={TASK_STATUS_LABEL[task.status]}
+              />
+            ) : (
+              <span
+                className={`nx-task-mark is-${task.status}`}
+                role="img"
+                aria-label={TASK_STATUS_LABEL[task.status]}
+              >
+                {task.status === 'completed' ? '✓' : '○'}
+              </span>
+            )}
             <span className="nx-task-text">
               {task.status === 'in_progress' && task.active_form !== undefined ? task.active_form : task.content}
             </span>
@@ -277,7 +292,7 @@ function MemberTaskList(props: { handle: string; tasks: AgentTaskList }) {
     </div>
   );
 }
-// harn:end people-and-agents-shows-only-nonempty-task-lists
+// harn:end people-and-agents-shows-actionable-compact-task-lists
 
 function MemberCard(props: {
   member: Member;
@@ -370,16 +385,23 @@ function MemberCard(props: {
     }
   }, [reviving, errorCount, member]);
 
+  const metadata = member.kind === 'human'
+    ? [member.display_name].filter((value): value is string => Boolean(value))
+    : [member.harness, member.model, member.policy].filter((value): value is string => Boolean(value));
+
+  // harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-layout
   return (
     <li className="nx-member" data-testid={`member-${member.handle}`}>
-      <div className="nx-member-row">
+      <div className="nx-member-identity">
         <Chip name={member.handle} accent={memberAccent(member)} size={32} />
         <span className="nx-member-id">
           <strong>@{member.handle}</strong>
-          <span className="nx-member-sub">
-            {member.kind === 'human'
-              ? member.display_name
-              : [member.harness, member.model, member.policy].filter(Boolean).join(' · ') || 'agent'}
+          <span className="nx-member-sub" data-testid={`member-${member.handle}-metadata`}>
+            {metadata.length > 0 ? metadata.map((value, index) => (
+              <span key={`${value}-${index}`} className="nx-member-meta-item">
+                {index > 0 && ' · '}{value}
+              </span>
+            )) : 'agent'}
           </span>
         </span>
         <span className="nx-member-state">
@@ -387,127 +409,130 @@ function MemberCard(props: {
             ? <Eyebrow>{member.role ?? 'human'}</Eyebrow>
             : <MemberStateWord state={member.state} />}
         </span>
-        {/* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-wiring */}
-        {member.kind === 'agent' && (
+      </div>
+      {member.kind === 'agent' && (
+        <div className="nx-member-context-row" data-testid={`member-${member.handle}-context-actions`}>
+          {/* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-wiring */}
           <ContextWindowMeter
             usage={member.lastUsage}
             pending={member.state === 'running'}
             testId={`member-${member.handle}-context-window`}
           />
-        )}
-        {/* harn:end member-context-window-meter-derived-from-last-usage */}
-        {/* harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-lifecycle-controls */}
-        {member.kind === 'agent' && props.canManage && member.state !== 'dead' && (
-          // Beside the ring, because the ring is what makes an operator want it.
-          // Never hidden while running — hiding it would read as "not available
-          // here"; disabled with the reason keeps the lever discoverable. A dead
-          // agent is the one exception: Compact gives way to Revive below.
-          <button
-            type="button"
-            className="nx-member-compact"
-            aria-label={`Compact @${member.handle}'s context`}
-            data-testid={`member-${member.handle}-compact`}
-            disabled={member.state !== 'idle' || compacting}
-            title={running
-              ? 'Stop the run first — compacting mid-turn would race the engine'
-              : member.state !== 'idle'
-                ? `Only an idle agent can be compacted — @${member.handle} is ${member.state}`
-                : compacting
-                  ? 'Compacting this agent\u2019s engine session…'
-                  : 'Compact this agent\u2019s engine session'}
-            data-compacting={compacting ? 'true' : undefined}
-            onClick={() => {
-              startedAt.current = { errors: errorCount, member };
-              setCompacting(true);
-              props.connection.act({ act: 'compact_member', member_id: member.id });
-            }}
-          >
-            {compacting
-              ? <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />
-              : <Minimize2 size={13} aria-hidden="true" />}
-          </button>
-        )}
-        {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
-        {member.kind === 'agent' && props.canManage && member.state !== 'dead' && member.session_ref !== undefined && (
-          <button
-            type="button"
-            className="nx-member-clear"
-            data-testid={`member-${member.handle}-clear-context`}
-            disabled={member.state !== 'idle' || clearing}
-            title={member.state !== 'idle'
-              ? `Only an idle agent context can be cleared — @${member.handle} is ${member.state}`
-              : clearing
-                ? `Clearing @${member.handle}'s native context…`
-                : `Clear @${member.handle}'s native context`}
-            onClick={() => setConfirmClear(true)}
-          >
-            Clear
-          </button>
-        )}
-        {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
-        {member.kind === 'agent' && props.canManage && member.state === 'dead' && (
-          // A dead agent's prominent slot is Revive, not a permanently-disabled
-          // Compact. Guarded against a double-dispatch while the revival is pending.
-          <button
-            type="button"
-            className="nx-member-revive"
-            data-testid={`member-${member.handle}-revive`}
-            disabled={reviving}
-            title={reviving ? 'Reviving…' : `Revive @${member.handle} from its saved session`}
-            aria-label={`Revive @${member.handle}`}
-            onClick={() => {
-              if (reviving) return;
-              revivedAt.current = { errors: errorCount, member };
-              setReviving(true);
-              props.connection.act({ act: 'revive', member_id: member.id });
-            }}
-          >
-            {reviving
-              ? <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />
-              : <RotateCcw size={13} aria-hidden="true" />}
-            <span>Revive</span>
-          </button>
-        )}
-        {member.kind === 'agent' && running && props.canStop && (
-          <button
-            type="button"
-            className="nx-member-stop"
-            aria-label={`Stop @${member.handle}`}
-            data-testid={`member-${member.handle}-stop`}
-            title="Stop this run (the agent stays alive)"
-            onClick={() => props.connection.act({ act: 'interrupt', member_id: member.id })}
-          >
-            <Square size={13} aria-hidden="true" />
-          </button>
-        )}
-        {member.kind === 'agent' && props.canManage && (
-          <div className="nx-member-menu" ref={menuRef}>
-            <IconButton
-              icon={MoreVertical}
-              label={`Actions for @${member.handle}`}
-              size="sm"
-              variant="quiet"
-              data-testid={`member-${member.handle}-menu`}
-              onClick={() => setMenu((v) => !v)}
-            />
-            {menu && (
-              <div className="nx-menu" role="menu" aria-label={`@${member.handle} actions`}>
-                <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename…</button>
-                <button role="menuitem" onClick={() => { setMenu(false); setConfiguring(true); }}>Configure…</button>
-                {member.state !== 'dead' && (
-                  <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('kill'); }}>
-                    Kill…
+          {/* harn:end member-context-window-meter-derived-from-last-usage */}
+          {/* harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-lifecycle-controls */}
+          {props.canManage && member.state !== 'dead' && (
+            // Beside the ring, because the ring is what makes an operator want it.
+            // Never hidden while running — hiding it would read as "not available
+            // here"; disabled with the reason keeps the lever discoverable. A dead
+            // agent is the one exception: Compact gives way to Revive below.
+            <button
+              type="button"
+              className="nx-member-compact"
+              aria-label={`Compact @${member.handle}'s context`}
+              data-testid={`member-${member.handle}-compact`}
+              disabled={member.state !== 'idle' || compacting}
+              title={running
+                ? 'Stop the run first — compacting mid-turn would race the engine'
+                : member.state !== 'idle'
+                  ? `Only an idle agent can be compacted — @${member.handle} is ${member.state}`
+                  : compacting
+                    ? 'Compacting this agent\u2019s engine session…'
+                    : 'Compact this agent\u2019s engine session'}
+              data-compacting={compacting ? 'true' : undefined}
+              onClick={() => {
+                startedAt.current = { errors: errorCount, member };
+                setCompacting(true);
+                props.connection.act({ act: 'compact_member', member_id: member.id });
+              }}
+            >
+              {compacting && <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />}
+              <span>Compact</span>
+            </button>
+          )}
+          {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
+          {props.canManage && member.state !== 'dead' && member.session_ref !== undefined && (
+            <button
+              type="button"
+              className="nx-member-clear"
+              aria-label={`Clear @${member.handle}'s context`}
+              data-testid={`member-${member.handle}-clear-context`}
+              disabled={member.state !== 'idle' || clearing}
+              title={member.state !== 'idle'
+                ? `Only an idle agent context can be cleared — @${member.handle} is ${member.state}`
+                : clearing
+                  ? `Clearing @${member.handle}'s native context…`
+                  : `Clear @${member.handle}'s native context`}
+              onClick={() => setConfirmClear(true)}
+            >
+              Clear context
+            </button>
+          )}
+          {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
+          <span className="nx-member-action-spacer" aria-hidden="true" />
+          {props.canManage && member.state === 'dead' && (
+            // A dead agent's prominent slot is Revive, not a permanently-disabled
+            // Compact. Guarded against a double-dispatch while the revival is pending.
+            <button
+              type="button"
+              className="nx-member-revive"
+              data-testid={`member-${member.handle}-revive`}
+              disabled={reviving}
+              title={reviving ? 'Reviving…' : `Revive @${member.handle} from its saved session`}
+              aria-label={`Revive @${member.handle}`}
+              onClick={() => {
+                if (reviving) return;
+                revivedAt.current = { errors: errorCount, member };
+                setReviving(true);
+                props.connection.act({ act: 'revive', member_id: member.id });
+              }}
+            >
+              {reviving
+                ? <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />
+                : <RotateCcw size={13} aria-hidden="true" />}
+              <span>Revive</span>
+            </button>
+          )}
+          {running && props.canStop && (
+            <button
+              type="button"
+              className="nx-member-stop"
+              aria-label={`Stop @${member.handle}`}
+              data-testid={`member-${member.handle}-stop`}
+              title="Stop this run (the agent stays alive)"
+              onClick={() => props.connection.act({ act: 'interrupt', member_id: member.id })}
+            >
+              <Square size={13} aria-hidden="true" />
+            </button>
+          )}
+          {props.canManage && (
+            <div className="nx-member-menu" ref={menuRef}>
+              <IconButton
+                icon={MoreVertical}
+                label={`Actions for @${member.handle}`}
+                size="sm"
+                variant="quiet"
+                data-testid={`member-${member.handle}-menu`}
+                onClick={() => setMenu((v) => !v)}
+              />
+              {menu && (
+                <div className="nx-menu" role="menu" aria-label={`@${member.handle} actions`}>
+                  <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename…</button>
+                  <button role="menuitem" onClick={() => { setMenu(false); setConfiguring(true); }}>Configure…</button>
+                  {member.state !== 'dead' && (
+                    <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('kill'); }}>
+                      Kill…
+                    </button>
+                  )}
+                  <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('remove'); }}>
+                    Remove…
                   </button>
-                )}
-                <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('remove'); }}>
-                  Remove…
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        {/* harn:end dead-agent-surfaces-revive-in-its-action-area */}
-      </div>
+                </div>
+              )}
+            </div>
+          )}
+          {/* harn:end dead-agent-surfaces-revive-in-its-action-area */}
+        </div>
+      )}
       {member.kind === 'agent' && (spend !== undefined || (detail?.queued_count ?? 0) > 0) && (
         <p className="nx-member-meter">
           {tokens !== undefined ? `${compactCount(tokens)} tokens` : ''}
@@ -529,9 +554,10 @@ function MemberCard(props: {
           )}
         </p>
       )}
-      {member.kind === 'agent' && (member.tasks?.items.length ?? 0) > 0 && (
-        <MemberTaskList handle={member.handle} tasks={member.tasks!} />
+      {member.kind === 'agent' && member.tasks !== undefined && member.tasks.items.some((task) => task.status !== 'completed') && (
+        <MemberTaskList handle={member.handle} tasks={member.tasks} />
       )}
+      {/* harn:end agent-member-card-separates-context-actions-from-usage */}
 
       {confirming !== undefined && (
         <Modal
@@ -634,7 +660,7 @@ function MemberCard(props: {
 
 function limitWindowLabel(window: string): string {
   if (window === 'five_hour') return '5h';
-  if (window === 'seven_day' || window === 'weekly') return 'weekly';
+  if (window === 'seven_day' || window === 'weekly') return '7d';
   return window.replace(/_/g, ' ');
 }
 
