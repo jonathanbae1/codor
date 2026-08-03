@@ -78,10 +78,26 @@ describe('ComputerSwitcher', () => {
     expect(host!.querySelector('[data-testid="computer-activity-badge"]')?.textContent).toBe('4');
 
     await act(async () => { trigger.click(); });
-    expect(host!.querySelector('[role="menu"]')).toBeNull();
-    expect(host!.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(host!.querySelector('[data-testid="computer-connection-C"]')?.textContent).toBe('Repair required');
-    expect((host!.querySelector('[data-testid="computer-switch-C"]') as HTMLButtonElement).disabled).toBe(true);
+    const popup = document.body.querySelector('.nx-computer-menu') as HTMLElement;
+    expect(popup.parentElement).toBe(document.body);
+    expect(popup.getAttribute('data-positioned')).toBe('true');
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-connection-C"]')?.textContent).toBe('Repair required');
+    expect((document.body.querySelector('[data-testid="computer-switch-C"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('cleans viewport listeners when the portaled popup closes', async () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener');
+    const removeEventListener = vi.spyOn(window, 'removeEventListener');
+    await render([view(), view({ id: 'B', label: 'Laptop', active: false })]);
+    const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
+    await act(async () => { trigger.click(); });
+    expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function), true);
+    await act(async () => { trigger.click(); });
+    expect(removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function), true);
   });
 
   it('closes on Escape and returns focus to the trigger', async () => {
@@ -89,11 +105,11 @@ describe('ComputerSwitcher', () => {
     const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
     trigger.focus();
     await act(async () => { trigger.click(); });
-    expect(document.activeElement).toBe(host!.querySelector('[data-computer-choice="true"]'));
+    expect(document.activeElement).toBe(document.body.querySelector('[data-computer-choice="true"]'));
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -102,7 +118,7 @@ describe('ComputerSwitcher', () => {
     const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
     await act(async () => { trigger.click(); });
     await act(async () => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
-    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -111,24 +127,24 @@ describe('ComputerSwitcher', () => {
     const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
     await act(async () => { trigger.click(); });
     await act(async () => {
-      host!.querySelector('[data-testid="computer-switch-B"]')?.dispatchEvent(
+      document.body.querySelector('[data-testid="computer-switch-B"]')?.dispatchEvent(
         new MouseEvent('dblclick', { bubbles: true }),
       );
     });
-    expect(host!.querySelector('[data-testid="computer-rename-B"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-rename-B"]')).not.toBeNull();
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await act(async () => { trigger.click(); });
-    expect(host!.querySelector('[data-testid="computer-rename-B"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-rename-B"]')).toBeNull();
   });
 
-  it('guides Add Computer through a copyable command before the unchanged code input', async () => {
+  it('shows both Add Computer steps together with the unchanged code input', async () => {
     await render([view()]);
     const trigger = host!.querySelector('[data-testid="computer-current"]') as HTMLButtonElement;
     await act(async () => { trigger.click(); });
-    await act(async () => { (host!.querySelector('[data-testid="computer-add"]') as HTMLButtonElement).click(); });
+    await act(async () => { (document.body.querySelector('[data-testid="computer-add"]') as HTMLButtonElement).click(); });
     const modal = document.body.querySelector('[data-testid="computer-add-modal"]') as HTMLElement;
     expect(modal.contains(document.activeElement)).toBe(true);
     expect(document.body.querySelector('[data-testid="computer-add-step-1"]')).not.toBeNull();
@@ -136,13 +152,14 @@ describe('ComputerSwitcher', () => {
     expect(document.body.textContent).toContain('single-use');
     expect(document.body.textContent).toContain('ten minutes');
     expect(document.body.textContent).toContain('private relay');
-    expect(document.body.querySelector('[data-testid="pairing-code-0"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-add-step-2"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="pairing-code-0"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-add-next"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="computer-add-back"]')).toBeNull();
 
     await act(async () => { (document.body.querySelector('[data-testid="computer-add-copy"]') as HTMLButtonElement).click(); });
     expect((navigator.clipboard.writeText as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('codor pair');
     expect(document.body.querySelector('[data-testid="computer-add-copy"]')?.textContent).toBe('Copied');
-    await act(async () => { (document.body.querySelector('[data-testid="computer-add-next"]') as HTMLButtonElement).click(); });
-    expect(document.body.querySelector('[data-testid="computer-add-step-2"]')).not.toBeNull();
     expect(document.body.querySelectorAll('input[data-testid^="pairing-code-"]')).toHaveLength(8);
   });
 });

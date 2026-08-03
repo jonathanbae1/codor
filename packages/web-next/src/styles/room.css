@@ -3073,11 +3073,13 @@
 }
 .nx-computer-current-chevron { flex: none; color: var(--c-faded); }
 .nx-computer-menu {
-  position: absolute; bottom: 100%; left: 0; z-index: 20; width: min(340px, calc(100vw - 24px));
-  max-height: min(70dvh, 520px); margin-bottom: 6px; padding: var(--sp-2);
+  position: fixed; top: var(--nx-computer-menu-top, 0px); left: var(--nx-computer-menu-left, 0px); z-index: 40;
+  width: min(340px, calc(100vw - 24px)); max-height: var(--nx-computer-menu-max-height, min(70dvh, 520px));
+  margin: 0; padding: var(--sp-2);
   overflow-y: auto; background: var(--c-surface); border: 1px solid var(--c-line);
   border-radius: var(--r-panel); box-shadow: var(--e-float);
 }
+.nx-computer-menu[data-positioned='false'] { visibility: hidden; }
 .nx-computer-menu-heading {
   padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--c-faded); font: var(--t-eyebrow);
   text-transform: uppercase;
@@ -3112,9 +3114,13 @@
   width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--c-line-strong);
   border-radius: 6px; background: var(--c-surface); color: var(--c-ink); font: inherit;
 }
+.nx-computer-add-grid { display: grid; gap: var(--sp-5); }
 .nx-computer-add-step { display: grid; gap: var(--sp-3); }
 .nx-computer-add-step h3 { margin: 0; font: var(--t-ui-strong); }
 .nx-computer-add-step p { margin: 0; color: var(--c-body); }
+.nx-computer-add-step + .nx-computer-add-step {
+  padding-top: var(--sp-5); border-top: 1px solid var(--c-line);
+}
 .nx-computer-pair-command {
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3); border: 1px solid var(--c-line); border-radius: var(--r-control);
@@ -3122,14 +3128,18 @@
 }
 .nx-computer-pair-command .nx-code { color: var(--c-ink); }
 .nx-computer-pair-command .nx-btn.is-quiet { color: var(--c-body); }
-.nx-computer-add-actions { display: flex; justify-content: flex-end; }
 
 @media (max-width: 719px) {
   .nx-computer-menu {
-    left: 50%; width: min(360px, calc(100vw - 24px)); max-height: min(68dvh, 480px);
-    transform: translateX(-50%);
+    top: auto; left: max(var(--sp-3), env(safe-area-inset-left, 0px)); right: max(var(--sp-3), env(safe-area-inset-right, 0px));
+    bottom: max(var(--sp-3), env(safe-area-inset-bottom, 0px)); width: auto;
+    max-height: min(var(--nx-computer-menu-max-height, 68dvh), calc(100dvh - var(--sp-3) - var(--sp-3) - env(safe-area-inset-bottom, 0px)));
+    border-radius: var(--r-panel) var(--r-panel) 0 0;
   }
   .nx-computer-current { max-width: min(100%, 270px); }
   .nx-computer-choice { min-height: 62px; }
   .nx-computer-choice-actions { gap: 4px; }
+  .nx-computer-pair-command { align-items: flex-start; flex-wrap: wrap; }
+  .nx-computer-add-grid { gap: var(--sp-4); }
+  .nx-computer-add-step + .nx-computer-add-step { padding-top: var(--sp-4); }
 }
