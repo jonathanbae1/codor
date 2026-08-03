@@ -153,7 +153,7 @@ test.describe('usage gauges', () => {
     const limits = page.getByTestId('member-fable-limits');
     await expect(limits.locator('.nx-gauge.is-warn')).toContainText('18% left'); // seeded
 
-    // The harness reports a nearly exhausted 5h window → error tint, 8% left.
+    // The harness reports nearly exhausted 5h and seven_day windows → error tint.
     await enqueue([{
       kind: 'complete',
       final_text: 'usage numbers refreshed',
@@ -161,7 +161,7 @@ test.describe('usage gauges', () => {
         type: 'run.limits',
         limits: [
           { window: 'five_hour', status: 'allowed_warning', used_percent: 92 },
-          { window: 'weekly', status: 'allowed_warning', used_percent: 82 },
+          { window: 'seven_day', status: 'allowed_warning', used_percent: 82 },
           { window: 'monthly', status: 'allowed', used_percent: 20 },
         ],
       }],
@@ -169,10 +169,11 @@ test.describe('usage gauges', () => {
     await postToFable(page, '@fable refresh your usage numbers');
     const error = limits.locator('.nx-gauge.is-error');
     await expect(error).toContainText('5h');
+    await expect(limits.locator('.nx-gauge').filter({ hasText: '7d' })).toContainText('18% left');
     await expect(error).toContainText('8% left');
     await expect(error.locator('.nx-gauge-fill')).toHaveAttribute('style', /width: 8%/);
 
-    // Restore the seed shape (later specs pin it): pill 5h, warn weekly, ok monthly.
+    // Restore the seed shape (later specs pin it): pill 5h, warn weekly/7d, ok monthly.
     await enqueue([{
       kind: 'complete',
       final_text: 'usage numbers restored',

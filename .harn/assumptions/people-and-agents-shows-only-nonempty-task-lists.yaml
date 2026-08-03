@@ -1,7 +1,7 @@
 id: people-and-agents-shows-only-nonempty-task-lists
 hash: a-7f6225f8fd3b
 title: People and agents renders only nonempty bounded accessible task lists
-state: active
+state: retired
 statement: An agent card renders a task section only when its durable member
   task projection is nonempty. Pending, in-progress, and completed rows carry
   visible text and symbol redundancy; in-progress may show the native active
@@ -13,3 +13,4 @@ statement: An agent card renders a task section only when its durable member
 depends_on:
   - member-task-projection-is-durable-and-session-scoped
 created_by: codor-polish-phase5-tasks
+retired_by: relay-ux-followups-p4-member-ui

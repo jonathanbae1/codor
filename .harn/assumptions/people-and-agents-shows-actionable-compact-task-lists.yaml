@@ -1,0 +1,20 @@
+id: people-and-agents-shows-actionable-compact-task-lists
+hash: a-05d709ced939
+title: People and agents renders bounded actionable task lists with compact status
+state: active
+statement: >
+  An agent card renders a task section only while its durable member task
+  projection contains at least one non-completed item; an empty or all-completed
+  projection renders no task section without mutating durable state. Pending
+  rows use a hollow mark, completed rows use a check, and in-progress rows use a
+  compact indeterminate progress bar; each visual carries an accessible status
+  name so state is not conveyed by color alone, while visible Pending, In
+  progress, and Completed words are omitted. In-progress text may use native
+  active_form and completed content in a mixed list remains muted and struck. At
+  most five rows are initially visible, Show all and Show fewer control the
+  remainder, the expanded list scrolls inside a 240px bound, and optional
+  explanation is subdued context. Member frames update the existing store live
+  with no polling, client task cache, or write-back.
+depends_on:
+  - member-task-projection-is-durable-and-session-scoped
+created_by: relay-ux-followups-p4-member-ui

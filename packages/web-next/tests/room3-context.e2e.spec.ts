@@ -211,7 +211,7 @@ test.describe('usage limits', () => {
     await expect(limits.locator('.nx-limit')).toContainText('5h: allowed · resets');
     // …windows with used_percent render % LEFT gauges, tinted by what remains.
     const warn = limits.locator('.nx-gauge.is-warn');
-    await expect(warn).toContainText('weekly');
+    await expect(warn).toContainText('7d');
     await expect(warn).toContainText('18% left');
     await expect(warn.locator('.nx-gauge-fill')).toHaveAttribute('style', /width: 18%/);
     const ok = limits.locator('.nx-gauge.is-ok');
@@ -235,8 +235,76 @@ test.describe('context window meter', () => {
     await expect(page.getByTestId('member-scout-context-window')).toHaveClass(/is-pending/);
     await expect(page.getByTestId('member-hydrate-context-window')).toHaveCount(0);
   });
+
+  test('keeps identity, labelled context actions, and usage in a readable order', async ({ page }) => {
+    await openRoom(page, '/?room=context-reset&token=next-e2e-token');
+    const card = page.getByTestId('member-eraser');
+    const identity = card.locator('.nx-member-identity');
+    const metadata = page.getByTestId('member-eraser-metadata');
+    const actions = page.getByTestId('member-eraser-context-actions');
+    await expect(metadata).toContainText('fake');
+    await expect(metadata).toContainText('kept-model');
+    await expect(metadata).toContainText('workspace-write');
+    await expect(actions.getByTestId('member-eraser-compact')).toContainText('Compact');
+    await expect(actions.getByTestId('member-eraser-clear-context')).toContainText('Clear context');
+    await expect(actions.getByTestId('member-eraser-menu')).toBeVisible();
+
+    const identityBox = (await identity.boundingBox())!;
+    const actionBox = (await actions.boundingBox())!;
+    expect(actionBox.y).toBeGreaterThanOrEqual(identityBox.y + identityBox.height);
+
+    await openRoom(page);
+    const fableActions = page.getByTestId('member-fable-context-actions');
+    const ring = page.getByTestId('member-fable-context-window');
+    const limits = page.getByTestId('member-fable-limits');
+    await expect(ring).toHaveAttribute('title', /tokens/);
+    await expect(fableActions).not.toContainText('tokens');
+    const fableActionBox = (await fableActions.boundingBox())!;
+    const limitsBox = (await limits.boundingBox())!;
+    expect(fableActionBox.y).toBeLessThan(limitsBox.y);
+  });
 });
 // harn:end member-context-window-meter-derived-from-last-usage
+
+// harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-regression
+test.describe('member card responsive presentation', () => {
+  // harn:assume controls-fit-the-surface-they-sit-on ref=control-fits-narrow-surface
+  // harn:assume web-room-targets-meet-minimum-hit-size ref=room-target-size-sweep
+  test('wraps full metadata and keeps every member action inside a 390px surface', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/?room=context-reset&token=next-e2e-token');
+    await expect(page.getByTestId('timeline')).toBeVisible();
+    await page.getByTestId('mobile-kebab').click();
+    const sheet = page.getByTestId('mobile-context');
+    const card = sheet.getByTestId('member-eraser');
+    const actions = card.getByTestId('member-eraser-context-actions');
+    await expect(card.getByTestId('member-eraser-metadata')).toContainText('workspace-write');
+
+    for (const testId of [
+      'member-eraser-compact',
+      'member-eraser-clear-context',
+      'member-eraser-menu',
+    ]) {
+      const box = (await sheet.getByTestId(testId).boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+    }
+    const actionsBox = (await actions.boundingBox())!;
+    expect(actionsBox.x).toBeGreaterThanOrEqual(0);
+    expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(390);
+    const pageWidth = await page.evaluate(() => ({ innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+    expect(pageWidth.scrollWidth).toBeLessThanOrEqual(pageWidth.innerWidth);
+
+    const { default: AxeBuilder } = await import('@axe-core/playwright');
+    const { violations } = await new AxeBuilder({ page }).include('[data-testid="member-eraser"]').analyze();
+    expect(violations).toEqual([]);
+  });
+});
+// harn:end web-room-targets-meet-minimum-hit-size
+// harn:end controls-fit-the-surface-they-sit-on
+// harn:end agent-member-card-separates-context-actions-from-usage
 
 test.describe('manual compaction', () => {
   const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;

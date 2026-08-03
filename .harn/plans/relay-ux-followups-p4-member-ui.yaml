@@ -1,0 +1,275 @@
+id: relay-ux-followups-p4-member-ui
+title: Relay UX follow-ups phase 4 - readable member cards and compact task status
+notes: >
+  Fourth and final approved phase of Richard's relay UX follow-ups. Redesign the
+  People and agents card hierarchy without changing any runtime, protocol,
+  persistence, authorization, usage, compaction, or reset semantics. Keep the
+  identity header focused on avatar, handle, full harness/model/policy metadata,
+  and member state: action icons may no longer squeeze the model into an
+  unreadable ellipsis, and long truthful metadata must wrap inside the card.
+
+  For each agent, place one compact context/action row immediately below the
+  identity header and above both spend and rate-limit usage. The existing
+  circular context ring is the only always-visible context amount; it keeps its
+  existing tooltip/accessible used/max/cost detail and shows no inline token
+  count. On that same row, in this visual order, show the existing Compact act
+  as a labelled Compact button, the existing clear_member_context act as a
+  labelled Clear context button when currently eligible, a flexible gap, any
+  currently applicable direct Stop or Revive action, and the existing overflow
+  action button at the trailing edge. Preserve every current visibility,
+  disabled, pending, confirmation, error, and one-dispatch rule. The row may
+  wrap rather than clip on a narrow card, and every member-card action keeps at
+  least a 44 by 44 CSS-pixel phone target.
+
+  Render reported spend and account-limit windows below that action row. Keep
+  all harness-reported values and reset details unchanged, but label five-hour
+  windows `5h` and both seven_day/weekly wire names `7d`; other provider window
+  names retain the existing readable fallback. Do not change the marketing
+  homepage demonstration, which is not the live member-card surface shown in the
+  approved screenshot.
+
+  Replace the task list's wide visible Pending / In progress / Completed status
+  words with compact, non-color-only marks: a pending hollow mark, a completed
+  check, and a small indeterminate progress bar for an in-progress row, each
+  retaining an accessible status name. Keep native active_form text,
+  explanation, ordering, five-row collapse, Show all/fewer, 240px scroll bound,
+  live member-frame updates, and session lifecycle exactly as they are. If the
+  projection is empty or every task is completed, render no task section; this
+  is presentation-only and does not delete or rewrite durable task state. Luna
+  implements; Investigator reviews before local-main integration. No hostname,
+  computer-session, attachment, landing-page, backend, deployment,
+  package-version, or release change is in scope.
+assumptions:
+  retire:
+    - id: people-and-agents-shows-only-nonempty-task-lists
+      reason: The approved UI no longer renders an all-completed projection and no
+        longer spells every status out beside every row, so the old nonempty and
+        visible-text contract has changed meaning.
+  create:
+    - id: people-and-agents-shows-actionable-compact-task-lists
+      title: People and agents renders bounded actionable task lists with compact
+        status
+      statement: >
+        An agent card renders a task section only while its durable member task
+        projection contains at least one non-completed item; an empty or
+        all-completed projection renders no task section without mutating
+        durable state. Pending rows use a hollow mark, completed rows use a
+        check, and in-progress rows use a compact indeterminate progress bar;
+        each visual carries an accessible status name so state is not conveyed
+        by color alone, while visible Pending, In progress, and Completed words
+        are omitted. In-progress text may use native active_form and completed
+        content in a mixed list remains muted and struck. At most five rows are
+        initially visible, Show all and Show fewer control the remainder, the
+        expanded list scrolls inside a 240px bound, and optional explanation is
+        subdued context. Member frames update the existing store live with no
+        polling, client task cache, or write-back.
+      reason: The task area should show only work still in play and communicate status
+        in much less horizontal space while remaining accessible.
+      depends_on:
+        - member-task-projection-is-durable-and-session-scoped
+    - id: agent-member-card-separates-context-actions-from-usage
+      title: Agent cards put context actions above usage without crowding identity
+      statement: >
+        A People and agents card keeps avatar, handle, truthful
+        harness/model/policy metadata, and member state in an identity header
+        whose metadata wraps inside the card instead of being squeezed by
+        actions. An agent then renders one context/action row above spend and
+        reported rate-limit usage: the existing circular context meter remains
+        free of inline token amounts and carries detail through its tooltip and
+        accessible name; Compact and Clear context are labelled controls on the
+        same row, followed by flexible space, the currently applicable direct
+        Stop or Revive control, and the overflow action. Existing role, state,
+        session, confirmation, pending, error, and one-dispatch gates remain
+        authoritative. The row wraps rather than clips in narrow cards, all
+        member actions are at least 44 by 44 CSS pixels on a phone, five-hour
+        usage is labelled 5h, and weekly/seven-day usage is labelled 7d without
+        changing the reported values or inventing a limit.
+      reason: Identity and model truth must remain readable while context controls
+        stay compact, discoverable, and directly above the usage they govern.
+      depends_on:
+        - member-context-window-meter-derived-from-last-usage
+        - member-context-reset-is-authorized-atomic-and-lazy
+        - manual-compaction-is-an-operator-act
+        - dead-agent-surfaces-revive-in-its-action-area
+        - agent-usage-limits-reported-not-guessed
+        - web-room-targets-meet-minimum-hit-size
+        - controls-fit-the-surface-they-sit-on
+  reviewed:
+    - id: member-task-projection-is-durable-and-session-scoped
+      outcome: unchanged
+      reason: Durable projection, live updates, ordering, idempotence, and
+        session-scoped clearing do not change; hiding an all-completed list is a
+        read-only presentation decision.
+    - id: member-context-window-meter-derived-from-last-usage
+      outcome: unchanged
+      reason: The same derived ring, thresholds, pending state, and tooltip move to a
+        dedicated row; no amount or percentage is added to protocol state.
+    - id: member-context-reset-is-authorized-atomic-and-lazy
+      outcome: unchanged
+      reason: Clear context is relabelled and relocated while its authorization,
+        confirmation, lease, pending, error, and authoritative completion
+        behavior remain intact.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: Compact becomes a labelled control in the new row but dispatches the
+        same idle-only human act with the same pending and failure behavior.
+    - id: dead-agent-surfaces-revive-in-its-action-area
+      outcome: unchanged
+      reason: Revive remains a direct guarded action for dead agents while Compact is
+        absent; only the containing row changes.
+    - id: agent-usage-limits-reported-not-guessed
+      outcome: unchanged
+      reason: The UI changes two short display labels and position only; it preserves
+        every reported value and continues to render no invented limits.
+    - id: account-usage-limits-are-probed-periodically-and-honestly-refreshable
+      outcome: unchanged
+      reason: Probing, refresh, errors, and last-known-good behavior are untouched.
+    - id: web-room-targets-meet-minimum-hit-size
+      outcome: unchanged
+      reason: The new wrapping action row must keep every member control at least
+        44x44 on the installed phone and adds a rendered geometry regression.
+    - id: controls-fit-the-surface-they-sit-on
+      outcome: unchanged
+      reason: Metadata and controls explicitly wrap within the narrow context surface;
+        a browser regression proves there is no clipping or horizontal overflow.
+    - id: web-room-visual-hierarchy-matches-soft-editorial-reference
+      outcome: unchanged
+      reason: Member cards remain framed responsive surfaces using existing tokens;
+        only their internal information hierarchy is clarified.
+    - id: member-config-is-changed-not-respawned
+      outcome: unchanged
+      reason: Configure remains in the same overflow menu and keeps the existing
+        change-in-place behavior.
+    - id: removing-an-agent-is-one-deliberate-step
+      outcome: unchanged
+      reason: Remove remains the same confirmed overflow action and retains its
+        one-act daemon behavior.
+files:
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/harness.mjs
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+  - packages/web-next/tests/room11-batch-b.e2e.spec.ts
+  - packages/web-next/tests/room30-tasks.e2e.spec.ts
+anchors:
+  people-and-agents-shows-only-nonempty-task-lists:
+    member-task-list-ui:
+      action: remove
+      reason: Replace visible status words and render-on-any-nonempty behavior with
+        the approved compact actionable presentation.
+    member-task-list-style:
+      action: remove
+      reason: Replace the three-column status-word layout and pulsing glyph styling.
+    member-task-browser-fixture:
+      action: remove
+      reason: Replace the old fixture contract with one that can also produce an
+        all-completed projection.
+    member-task-browser-regression:
+      action: remove
+      reason: Replace assertions for visible status words and every nonempty list.
+  people-and-agents-shows-actionable-compact-task-lists:
+    compact-member-task-list-ui:
+      action: change
+      reason: Filter only the rendered all-completed projection and expose compact
+        accessible marks without mutating member tasks.
+    compact-member-task-list-style:
+      action: change
+      reason: Style the pending mark, completed check, and indeterminate in-progress
+        bar while preserving bounds, explanation, and completed treatment.
+    compact-member-task-browser-fixture:
+      action: change
+      reason: Add a deterministic control that completes every seeded task without a
+        provider call while retaining existing live/clear/session controls.
+    compact-member-task-browser-regression:
+      action: change
+      reason: Prove no visible status words, accessible status names, check/bar marks,
+        mixed-list behavior, all-completed disappearance, expansion, live
+        persistence, mobile fit, themes, keyboard, and Axe.
+  agent-member-card-separates-context-actions-from-usage:
+    member-card-context-action-layout:
+      action: change
+      reason: Split identity from the context/action row, expose full wrapping model
+        metadata, order labelled actions, and place spend/limits below it.
+    member-card-context-action-style:
+      action: change
+      reason: Add compact desktop spacing, wrapping narrow layout, labelled control
+        treatments, trailing overflow alignment, and phone target sizes using
+        existing tokens.
+    member-card-context-action-regression:
+      action: change
+      reason: Prove identity visibility, row ordering, exact action labels and gates,
+        no inline ring amounts, tooltip detail, 5h/7d labels, narrow fit, 44px
+        phone targets, and Axe in rendered cards.
+  member-context-window-meter-derived-from-last-usage:
+    context-window-meter-wiring:
+      action: change
+      reason: Move the unchanged ring from the crowded identity header into the
+        dedicated context/action row.
+    context-window-meter-style:
+      action: change
+      reason: Integrate the unchanged circular meter with the new row without adding
+        inline numeric text.
+    context-window-meter-browser-smoke:
+      action: change
+      reason: Keep derivation and tooltip assertions while proving the ring's new
+        position above usage.
+  member-context-reset-is-authorized-atomic-and-lazy:
+    clear-context-web-control:
+      action: change
+      reason: Relabel the existing guarded control to Clear context and move it beside
+        Compact without changing dispatch behavior.
+    clear-context-browser-regression:
+      action: change
+      reason: Preserve reset confirmation/race/error coverage through the new label
+        and layout.
+  dead-agent-surfaces-revive-in-its-action-area:
+    member-lifecycle-controls:
+      action: change
+      reason: Move the unchanged guarded Revive/Stop actions into the dedicated row
+        while preserving the dead/running visibility rules.
+    member-revive-regression:
+      action: change
+      reason: Keep one-click pending/error/recovery coverage at the new location.
+  web-room-targets-meet-minimum-hit-size:
+    room-target-size-sweep:
+      action: change
+      reason: Include the newly labelled member-card action row in rendered phone
+        target-size coverage.
+  controls-fit-the-surface-they-sit-on:
+    control-fits-narrow-surface:
+      action: change
+      reason: Prove the context/action row and full model metadata wrap inside the
+        real narrow member card without clipping.
+  web-room-visual-hierarchy-matches-soft-editorial-reference:
+    soft-editorial-room-visual-hierarchy:
+      action: change
+      reason: Reorder only the member card's identity, context actions, and usage
+        groups within the approved framed surface.
+    soft-editorial-room-style:
+      action: change
+      reason: Apply the new member-card hierarchy with existing responsive tokens.
+  member-config-is-changed-not-respawned:
+    member-card-settings:
+      action: change
+      reason: Preserve Configure in the trailing overflow while restructuring its
+        containing card.
+  removing-an-agent-is-one-deliberate-step:
+    remove-member-control:
+      action: change
+      reason: Preserve confirmed Remove in the trailing overflow while restructuring
+        its containing card.
+verification: >
+  Web-next full unit suite and production/PWA build pass. Focused Playwright
+  room3 context/reset/lifecycle coverage, room11 usage refresh coverage, and the
+  full room30 task suite pass. Browser assertions prove the identity model text
+  is not occluded, the ring/action row is above spend and limits, Compact/Clear
+  context/overflow share the row, the ring has no inline token amount while its
+  tooltip retains used/max detail, weekly and seven_day render as 7d, and the
+  task section omits status words, exposes accessible compact marks, and
+  disappears for an all-completed projection. At 390px every member action is at
+  least 44x44, the card has no horizontal overflow or clipped control, and the
+  relevant member/task states are Axe-clean in light and dark modes. Harn plan
+  check, diff check, staged check, apply, and git diff --check pass in the
+  single implementation commit.
+applied:
+  applied_at: 2026-08-03T05:21:18.246Z

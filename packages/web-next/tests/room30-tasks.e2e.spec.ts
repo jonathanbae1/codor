@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // The tasks room seeds @planner with a durable six-item checklist (three states +
-// explanation, >5 rows for the expansion control) and a task-free @idler. Live
-// update, duplicate delivery, clearing, and a different-native-session are driven
-// through the control port — no provider calls. Each test resets the fixture first
-// so a mutating test cannot disturb a later one.
+// explanation, >5 rows for the expansion control) and a task-free @idler. Live,
+// all-completed, duplicate delivery, clearing, and a different-native-session are
+// driven through the control port — no provider calls. Each test resets the fixture
+// first so a mutating test cannot disturb a later one.
 const TASKS = '/?room=tasks&token=next-e2e-token';
 const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
 
@@ -19,20 +19,25 @@ async function openTasks(page: Page): Promise<void> {
   await expect(page.getByTestId('connection')).toHaveText(/Connected/);
 }
 
+// harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-browser-regression
 test.describe('member task checklist', () => {
   test.beforeEach(async () => {
     await control('/tasks-reset');
   });
 
-  test('renders only nonempty lists with three redundant status states and an explanation', async ({ page }) => {
+  test('renders actionable lists with compact accessible status marks and an explanation', async ({ page }) => {
     await openTasks(page);
     const tasks = page.getByTestId('member-planner-tasks');
     await expect(tasks).toBeVisible();
-    await expect(page.getByTestId('member-idler-tasks')).toHaveCount(0); // nonempty only
+    await expect(page.getByTestId('member-idler-tasks')).toHaveCount(0); // no projection
 
-    await expect(tasks.getByText('Completed', { exact: true }).first()).toBeVisible();
-    await expect(tasks.getByText('In progress', { exact: true }).first()).toBeVisible();
-    await expect(tasks.getByText('Pending', { exact: true }).first()).toBeVisible();
+    await expect(tasks.locator('[role="img"][aria-label="Completed"]')).toBeVisible();
+    await expect(tasks.locator('[role="img"][aria-label="In progress"]')).toBeVisible();
+    await expect(tasks.locator('[role="img"][aria-label="Pending"]')).toHaveCount(3);
+    await expect(tasks.locator('.nx-task-state')).toHaveCount(0);
+    await expect(tasks.getByText('Completed', { exact: true })).toHaveCount(0);
+    await expect(tasks.getByText('In progress', { exact: true })).toHaveCount(0);
+    await expect(tasks.getByText('Pending', { exact: true })).toHaveCount(0);
     await expect(tasks).toContainText('Wiring the refresh TTL config'); // in-progress active form
     await expect(tasks.locator('.nx-task.is-completed .nx-task-text')).toHaveCSS('text-decoration-line', 'line-through');
     await expect(tasks.locator('.nx-tasklist-note')).toHaveText('Shipping the auth refactor');
@@ -59,6 +64,19 @@ test.describe('member task checklist', () => {
     await expect(page.getByTestId('member-planner-tasks').locator('.nx-task')).toHaveCount(6);
   });
 
+  test('hides the section when every projected task is completed', async ({ page }) => {
+    await openTasks(page);
+    await expect(page.getByTestId('member-planner-tasks')).toBeVisible();
+    await control('/tasks-complete');
+    await expect(page.getByTestId('member-planner-tasks')).toHaveCount(0);
+
+    // The durable projection remains completed across a reload; the UI is only
+    // suppressing the non-actionable section.
+    await page.reload();
+    await expect(page.getByTestId('connection')).toHaveText(/Connected/);
+    await expect(page.getByTestId('member-planner-tasks')).toHaveCount(0);
+  });
+
   test('renders inside the responsive context dialog at mobile width', async ({ page }) => {
     // At mobile width the desktop connection pill is hidden; wait on the timeline and
     // the responsive context trigger instead, then let the list assertion auto-wait.
@@ -77,7 +95,7 @@ test.describe('member task checklist', () => {
       await openTasks(page);
       const tasks = page.getByTestId('member-planner-tasks');
       await expect(tasks).toBeVisible();
-      await expect(tasks.getByText('In progress', { exact: true }).first()).toBeVisible();
+      await expect(tasks.locator('[role="img"][aria-label="In progress"]')).toBeVisible();
 
       const { default: AxeBuilder } = await import('@axe-core/playwright');
       const { violations } = await new AxeBuilder({ page }).analyze();
@@ -116,3 +134,4 @@ test.describe('member task checklist', () => {
     await expect(page.getByTestId('member-planner-tasks')).toHaveCount(0);
   });
 });
+// harn:end people-and-agents-shows-actionable-compact-task-lists
