@@ -138,6 +138,8 @@ interface CodexRuntime {
   identity?: RuntimeIdentity;
   client: CodexAppServerClient | null;
   child: ChildProcessWithoutNullStreams | null;
+  /** Disposed child retained for supervision until its exit is confirmed. */
+  retiringChild: ChildProcessWithoutNullStreams | null;
   connecting: Promise<void> | null;
   active: TurnState | null;
   /** Native server requests parked by native id awaiting a Codor answer. */
@@ -572,6 +574,7 @@ export class CodexAdapter implements HarnessAdapter {
       ...(memberKey !== undefined && { memberKey }),
       client: null,
       child: null,
+      retiringChild: null,
       connecting: null,
       active: null,
       ...(session.session_ref !== undefined && { threadId: session.session_ref }),
@@ -596,6 +599,12 @@ export class CodexAdapter implements HarnessAdapter {
 
   private async ensureClient(runtime: CodexRuntime): Promise<void> {
     if (runtime.client !== null) return;
+    if (runtime.retiringChild !== null) {
+      if (runtime.retiringChild.exitCode === null && runtime.retiringChild.signalCode === null) {
+        throw new Error('previous Codex app-server retirement is still pending');
+      }
+      runtime.retiringChild = null;
+    }
     if (runtime.connecting !== null) return await runtime.connecting;
     const connecting = this.connect(runtime);
     runtime.connecting = connecting;
@@ -1025,11 +1034,15 @@ export class CodexAdapter implements HarnessAdapter {
     if (runtime.pendingCompaction !== null) {
       throw new Error('cannot clear Codex context while compaction is in flight');
     }
-    const child = runtime.child;
+    const child = runtime.child ?? runtime.retiringChild;
     const exited = child === null ? Promise.resolve() : waitForRuntimeExit(child, 'Codex app-server');
-    this.retireRuntime(runtime, true);
-    this.runtimes.delete(session);
+    runtime.retiringChild = child;
+    this.retireRuntime(runtime);
     await exited;
+    runtime.retiringChild = null;
+    this.runtimes.delete(runtime.session);
+    this.runtimes.delete(session);
+    if (runtime.memberKey !== undefined) this.memberRuntimes.delete(runtime.memberKey);
   }
   // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // harn:end codex-app-server-is-the-member-runtime

@@ -1,0 +1,168 @@
+id: relay-ux-followups-p3-review-fixes
+title: Relay UX follow-ups phase 3 review fixes - close context-reset races
+notes: >
+  Investigator review of f004afb found four contained correctness gaps in the
+  already-approved fresh-context boundary. First, clear_member_context accepts
+  an idle mirrored member when it has no durable attach lease, even though the
+  switchboard does not own that external native runtime; require owned custody.
+  Also refuse acquireAttachLease while the reset lease is held so an attach
+  cannot start after the reset's initial no-attach check and resume the context
+  being discarded. Keep deliveries arriving after the reset lease queued as
+  designed.
+
+  Second, invalidate asynchronous usage by identity, not just by deleting the
+  current map entry. A peek started for an old session/model must re-read the
+  member after await and do nothing if session_ref or configured model changed,
+  the session was cleared, or the member was removed. Likewise, live or
+  compaction usage produced by a turn that began under a prior configured model
+  must not repopulate lastUsage or persisted context_window after Configure has
+  changed that model. Unchanged-model engine reports remain authoritative in
+  either direction.
+
+  Third, preserve the server error frame's ref in isolated client-room state so
+  Clear context stops pending only for clear_member_context errors. An unrelated
+  same-room action error must not re-enable/dismiss the held reset; the
+  authoritative cleared member frame remains the only success edge. Keep the
+  existing human-visible string error list unchanged.
+
+  Finally, Codex reset must not forget its member/session runtime maps until the
+  captured app-server child has actually exited. Exercise delayed exit and
+  retirement failure so a rejected reset never silently loses supervision of a
+  still-live child. This is a review correction only: no layout work, new reset
+  semantics, protocol act, deployment, or unrelated baseline diff-chip repair.
+assumptions:
+  retire: []
+  create: []
+  reviewed:
+    - id: member-context-reset-is-authorized-atomic-and-lazy
+      outcome: unchanged
+      reason: The existing contract already limits reset to a switchboard-local
+        runtime, excludes attach acquisition/leases, requires complete
+        retirement, and requires correlated failure recovery; the fixes make
+        those guarantees race-safe and observable.
+    - id: current-context-window-truth-outlives-restarts
+      outcome: unchanged
+      reason: Model/session-scoped persisted truth remains the contract; delayed old
+        work must not restore evidence invalidated by an explicit boundary.
+    - id: last-agent-usage-is-transient-and-seeded
+      outcome: unchanged
+      reason: Artifact seeds and live reports remain transient, but their async
+        landing must still belong to the member's current model/session
+        identity.
+    - id: attach-custody-lease-tracks-child-pid
+      outcome: unchanged
+      reason: Attach still owns the same durable process lease; it now refuses while
+        the daemon is already retiring that member's native runtime.
+    - id: custody-uncertain-never-double-writes
+      outcome: unchanged
+      reason: Reset cannot create or overlap interactive custody, preserving the
+        established single native writer rule.
+    - id: attach-lease-actions-room-bound
+      outcome: unchanged
+      reason: Attach follow-up actions and room validation are untouched.
+    - id: cli-member-recovery-is-actionable
+      outcome: unchanged
+      reason: Existing attach remediation remains unchanged; reset-in-progress is a
+        bounded transient refusal.
+    - id: windows-process-liveness-probes-own-pid
+      outcome: unchanged
+      reason: The reset lease adds no process-probe or platform-specific behavior.
+    - id: readme-explains-existing-session-custody
+      outcome: unchanged
+      reason: Existing documentation remains accurate because reset cannot seize a
+        terminal-owned mirrored session.
+    - id: turn-start-requires-owned-custody
+      outcome: unchanged
+      reason: The ordinary turn gate remains unchanged; this review only aligns the
+        explicit reset and attach gates with the same custody invariant.
+    - id: member-config-is-changed-not-respawned
+      outcome: unchanged
+      reason: Configure may still take effect while an old turn finishes, but usage
+        from that old configured model cannot become evidence for the new model.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: Manual compaction remains an idle owner/admin native operation and still
+        lands an immediate re-baseline; the landing now discards evidence
+        produced for a configured model that changed while compaction was
+        pending.
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: Codex continues retaining one supervised app-server; explicit reset now
+        keeps it supervised until exit is confirmed before forgetting it.
+    - id: codex-app-server-resolves-windows-command-shims
+      outcome: unchanged
+      reason: Command resolution and platform launcher behavior are untouched.
+    - id: codex-bridges-command-and-file-approvals
+      outcome: unchanged
+      reason: Pending request cancellation and approval mappings remain unchanged.
+files:
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+  - packages/adapters/codex/src/adapter.ts
+  - packages/adapters/codex/src/adapter.spec.ts
+  - packages/web-next/src/app/store.ts
+  - packages/web-next/src/app/store.spec.ts
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/tests/harness.mjs
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+anchors:
+  member-context-reset-is-authorized-atomic-and-lazy:
+    clear-context-runtime-lease:
+      action: change
+      reason: Require owned custody, exclude attach acquisition throughout the lease,
+        and add race regressions without changing queued-after-start delivery
+        behavior.
+    codex-session-reset:
+      action: change
+      reason: Forget runtime lookup entries only after the captured child exit is
+        confirmed; keep failure supervised and durable state untouched.
+    clear-context-web-control:
+      action: change
+      reason: Observe only errors correlated to clear_member_context while retaining
+        authoritative member-frame success.
+    clear-context-client-error-correlation:
+      action: change
+      reason: Preserve per-ref error counts alongside the existing human-visible error
+        strings for action-local pending state.
+    clear-context-browser-regression:
+      action: change
+      reason: Prove unrelated action errors do not terminate a held reset and the
+        correlated reset failure still permits retry.
+  current-context-window-truth-outlives-restarts:
+    persisted-window-seed:
+      action: change
+      reason: Discard delayed peeks and old-turn engine reports after model/session
+        identity changes instead of repopulating invalidated context truth.
+  last-agent-usage-is-transient-and-seeded:
+    last-usage-seeding:
+      action: change
+      reason: Revalidate session_ref and configured model after each async artifact
+        peek before landing transient usage.
+    last-usage-runtime-registry:
+      action: change
+      reason: Ignore live/completion/compaction usage from a turn whose configured
+        model is no longer current.
+    last-usage-daemon-regression:
+      action: change
+      reason: Cover delayed peek after clear/model change and old-model events landing
+        after Configure.
+  manual-compaction-is-an-operator-act:
+    compact-member-contract:
+      action: change
+      reason: Land a completed compaction's usage only when the configured model it
+        compacted is still the member's current model.
+  attach-custody-lease-tracks-child-pid:
+    attach-release-handshake:
+      action: change
+      reason: Refuse new attach acquisition while the context-reset lease owns native
+        retirement.
+  codex-app-server-is-the-member-runtime:
+    codex-app-server-session-lifecycle:
+      action: change
+      reason: Keep the disposed child/runtime findable until its exit is confirmed.
+    codex-app-server-session-regression:
+      action: change
+      reason: Exercise delayed exit/failure ordering in addition to the normal fresh
+        thread path.
+applied:
+  applied_at: 2026-08-03T04:31:26.247Z

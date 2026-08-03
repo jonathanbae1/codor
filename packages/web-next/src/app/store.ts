@@ -35,6 +35,9 @@ export interface RoomSlice {
   support: RoomSupport | undefined;
   historyCursor: number | undefined;
   errors: string[];
+  // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-client-error-correlation
+  errorRefs: Record<string, number>;
+  // harn:end member-context-reset-is-authorized-atomic-and-lazy
 }
 
 export interface ClientState {
@@ -62,6 +65,7 @@ const emptyInbox: Record<string, Delivery> = {};
 const emptyRunEvents: Record<number, RunEventBuffer> = {};
 const emptyMemberHistory: Record<string, MemberStateObservation[]> = {};
 const emptyErrors: string[] = [];
+const emptyErrorRefs: Record<string, number> = {};
 
 const EMPTY_ROOM: RoomSlice = {
   hydrated: false,
@@ -77,6 +81,7 @@ const EMPTY_ROOM: RoomSlice = {
   support: undefined,
   historyCursor: undefined,
   errors: emptyErrors,
+  errorRefs: emptyErrorRefs,
 };
 
 const freshRoom = (room?: Room): RoomSlice => ({
@@ -93,6 +98,7 @@ const freshRoom = (room?: Room): RoomSlice => ({
   support: undefined,
   historyCursor: undefined,
   errors: [],
+  errorRefs: {},
 });
 
 interface HydrationStaging {
@@ -331,7 +337,18 @@ export function createClientStore(): ClientStore {
           };
           break;
         case 'error':
-          next = { ...current, errors: [...current.errors, frame.message] };
+          // harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-client-error-correlation
+          next = {
+            ...current,
+            errors: [...current.errors, frame.message],
+            ...(frame.ref !== undefined && {
+              errorRefs: {
+                ...current.errorRefs,
+                [frame.ref]: (current.errorRefs[frame.ref] ?? 0) + 1,
+              },
+            }),
+          };
+          // harn:end member-context-reset-is-authorized-atomic-and-lazy
           break;
         default:
           return {};

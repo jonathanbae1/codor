@@ -2684,6 +2684,84 @@ describe('failed turns', () => {
     const detailed = daemon.memberDetails('eng').find((d) => d.member.id === alpha.id)!;
     expect(detailed.member.lastUsage).toEqual(live);
   });
+
+  it('drops delayed peek evidence after clear or configured-model change', async () => {
+    const stale = { contextWindowMaxTokens: 1_000_000, contextWindowUsedTokens: 44_000, estimated: true };
+    const pending = new Map<string, (usage: AgentUsage) => void>();
+    vi.spyOn(fake, 'peekContextUsage').mockImplementation((ref) =>
+      new Promise((resolve) => pending.set(ref, resolve)));
+
+    const cleared = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'peek-cleared', cwd: testCwd('peek-cleared'), model: 'old',
+    });
+    fake.enqueue({ kind: 'complete', final_text: 'establish' });
+    daemon.postHumanMessage('eng', '@peek-cleared establish');
+    await daemon.settle();
+    const clearedRef = daemon.store.getMember('eng', cleared.id)!.session_ref!;
+    await daemon.reconcile();
+    await until(() => pending.has(clearedRef) ? true : undefined);
+    await daemon.clearMemberContext('eng', cleared.id, daemon.ownerOf('eng').id);
+    pending.get(clearedRef)!(stale);
+    await daemon.settle();
+    expect(daemon.memberDetails('eng').find((detail) => detail.member.id === cleared.id)?.member)
+      .not.toHaveProperty('lastUsage');
+
+    const reconfigured = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'peek-model', cwd: testCwd('peek-model'), model: 'old',
+    });
+    fake.enqueue({ kind: 'complete', final_text: 'establish' });
+    daemon.postHumanMessage('eng', '@peek-model establish');
+    await daemon.settle();
+    const reconfiguredRef = daemon.store.getMember('eng', reconfigured.id)!.session_ref!;
+    await daemon.reconcile();
+    await until(() => pending.has(reconfiguredRef) ? true : undefined);
+    daemon.configureMember('eng', reconfigured.id, { model: 'new' });
+    pending.get(reconfiguredRef)!(stale);
+    await daemon.settle();
+    expect(daemon.memberDetails('eng').find((detail) => detail.member.id === reconfigured.id)?.member)
+      .not.toHaveProperty('lastUsage');
+  });
+
+  it('drops live, completion, and compaction usage from an obsolete configured model', async () => {
+    const oldUsage = { contextWindowMaxTokens: 1_000_000, contextWindowUsedTokens: 80_000 };
+    const turning = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'old-turn-usage', cwd: testCwd('old-turn-usage'), model: 'old',
+    });
+    fake.enqueue({
+      kind: 'complete', final_text: 'old model completed', agent_usage: oldUsage,
+      items: [
+        { type: 'run.item', item_type: 'text_delta', payload: { text: 'started old model' } },
+        { type: 'usage_updated', usage: oldUsage },
+      ],
+      item_delay_ms: 50,
+    });
+    daemon.postHumanMessage('eng', '@old-turn-usage go');
+    await until(() => daemon.store.listRunMessages('eng', { author: turning.id, limit: 1 })
+      .some((run) => daemon.blobs.read('eng', run.run!.events_ref)
+        .some((event) => event.type === 'run.item')) ? true : undefined);
+    daemon.configureMember('eng', turning.id, { model: 'new' });
+    await daemon.settle();
+    expect(daemon.memberDetails('eng').find((detail) => detail.member.id === turning.id)?.member)
+      .not.toHaveProperty('lastUsage');
+    expect(daemon.store.getMemberContextWindow('eng', turning.id)).toBeUndefined();
+
+    const compacting = daemon.spawnMember('eng', {
+      harness: 'fake', handle: 'old-compact-usage', cwd: testCwd('old-compact-usage'), model: 'old',
+    });
+    fake.enqueue({ kind: 'complete', final_text: 'establish' });
+    daemon.postHumanMessage('eng', '@old-compact-usage establish');
+    await daemon.settle();
+    fake.compactUsage = oldUsage;
+    fake.holdCompactions();
+    const compaction = daemon.compactMember('eng', compacting.id, daemon.ownerOf('eng').id);
+    await until(() => fake.compactions.length === 1 ? true : undefined);
+    daemon.configureMember('eng', compacting.id, { model: 'new' });
+    fake.releaseCompactions();
+    await compaction;
+    expect(daemon.memberDetails('eng').find((detail) => detail.member.id === compacting.id)?.member)
+      .not.toHaveProperty('lastUsage');
+    expect(daemon.store.getMemberContextWindow('eng', compacting.id)).toBeUndefined();
+  });
   // harn:end last-agent-usage-is-transient-and-seeded
 
   it('does not re-broadcast a member frame for an unchanged usage snapshot', async () => {
@@ -6680,6 +6758,10 @@ describe('explicit member context reset', () => {
     const reset = daemon.clearMemberContext('eng', agent.id, owner().id);
     await until(() => fake.resets.length === 1 ? true : undefined);
 
+    await expect(daemon.acquireAttachLease('eng', agent.id, process.pid))
+      .rejects.toThrow('context is being cleared');
+    expect(daemon.store.getAttachLeaseForMember(agent.id)).toBeUndefined();
+
     fake.enqueue({ kind: 'complete', final_text: '<ACK_OK>' });
     daemon.postHumanMessage('eng', '@reset-lease queued after lease');
     await tick();
@@ -6753,6 +6835,10 @@ describe('explicit member context reset', () => {
     const agent = await establish('reset-guards');
     await expect(daemon.clearMemberContext('eng', agent.id, memberHuman.id))
       .rejects.toThrow('only owners and admins');
+    daemon.store.updateMember('eng', agent.id, { custody: 'mirrored' });
+    await expect(daemon.clearMemberContext('eng', agent.id, owner().id))
+      .rejects.toThrow('not switchboard-owned');
+    daemon.store.updateMember('eng', agent.id, { custody: 'owned' });
 
     const source = daemon.store.postMessage('eng', {
       author: owner().id, kind: 'chat', body: 'manual backlog',

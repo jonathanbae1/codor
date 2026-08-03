@@ -322,6 +322,8 @@ function MemberCard(props: {
   // harn:end member-context-reset-is-authorized-atomic-and-lazy
   const [reviving, setReviving] = useState(false);
   const errorCount = useClientStore((state) => roomSlice(state, props.room).errors.length);
+  const clearErrorCount = useClientStore((state) =>
+    roomSlice(state, props.room).errorRefs.clear_member_context ?? 0);
   const startedAt = useRef<{ errors: number; member: Member } | null>(null);
   const revivedAt = useRef<{ errors: number; member: Member } | null>(null);
   useEffect(() => {
@@ -341,7 +343,7 @@ function MemberCard(props: {
   useEffect(() => {
     const started = clearStartedAt.current;
     if (!clearing || started === null) return;
-    if (errorCount > started.errors) {
+    if (clearErrorCount > started.errors) {
       clearStartedAt.current = null;
       setClearing(false); // keep the confirm open so the operator can retry or cancel
       return;
@@ -354,7 +356,7 @@ function MemberCard(props: {
       setClearing(false);
       setConfirmClear(false);
     }
-  }, [clearing, errorCount, member]);
+  }, [clearing, clearErrorCount, member]);
   // harn:end member-context-reset-is-authorized-atomic-and-lazy
   // Revive is guarded the same way: the button disables while the request is in
   // flight and re-enables on the next member update (a success flips the state
@@ -588,7 +590,7 @@ function MemberCard(props: {
               disabled={clearing}
               onClick={() => {
                 if (clearing) return;
-                clearStartedAt.current = { errors: errorCount, member };
+                clearStartedAt.current = { errors: clearErrorCount, member };
                 setClearing(true);
                 props.connection.act({ act: 'clear_member_context', member_id: member.id });
               }}

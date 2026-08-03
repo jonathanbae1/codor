@@ -161,6 +161,78 @@ describe('persistent Codex app-server lifecycle', () => {
     await adapter.resetSession(session);
     await expect(adapter.resetSession(undefined)).resolves.toBeUndefined();
   });
+
+  it('keeps the disposed runtime supervised and un-reusable until delayed child exit', async () => {
+    const firstServer = createFakeCodexAppServer();
+    const secondServer = createFakeCodexAppServer();
+    const { adapter, factory } = fixtureAdapter(firstServer, secondServer);
+    const session = adapter.spawn({ cwd: '/work' });
+    session.env = { CODOR_MEMBER_ID: 'delayed-reset-member' };
+    const first = collect(adapter, session, 'old context');
+    await firstServer.waitForRequest('turn/start');
+    completeTurn(firstServer, 'turn-1');
+    await first;
+
+    const mutable = firstServer.child as unknown as { killed: boolean };
+    firstServer.child.kill = vi.fn(() => {
+      mutable.killed = true;
+      return true; // retirement requested, but exit remains deliberately delayed
+    });
+    const reset = adapter.resetSession(session);
+    expect(firstServer.child.kill).toHaveBeenCalled();
+
+    const raced = await collect(adapter, session, 'must not spawn while retiring');
+    expect(raced).toContainEqual(expect.objectContaining({
+      type: 'run.completed', status: 'failed',
+      error: 'previous Codex app-server retirement is still pending',
+    }));
+    expect(factory.servers).toEqual([firstServer]);
+
+    firstServer.exit(0);
+    await reset;
+    session.session_ref = undefined;
+    const fresh = collect(adapter, session, 'fresh after confirmed exit');
+    await secondServer.waitForRequest('thread/start');
+    completeTurn(secondServer, 'turn-1');
+    await fresh;
+    expect(factory.servers).toEqual([firstServer, secondServer]);
+    await adapter.resetSession(session);
+  });
+
+  it('retains supervision after retirement timeout instead of forgetting a live child', async () => {
+    const server = createFakeCodexAppServer();
+    const { adapter, factory } = fixtureAdapter(server);
+    const session = adapter.spawn({ cwd: '/work' });
+    session.env = { CODOR_MEMBER_ID: 'failed-reset-member' };
+    const first = collect(adapter, session, 'old context');
+    await server.waitForRequest('turn/start');
+    completeTurn(server, 'turn-1');
+    await first;
+
+    const mutable = server.child as unknown as { killed: boolean };
+    server.child.kill = vi.fn(() => {
+      mutable.killed = true;
+      return true;
+    });
+    vi.useFakeTimers();
+    try {
+      const reset = adapter.resetSession(session);
+      const rejected = expect(reset).rejects.toThrow('did not exit after retirement');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const raced = await collect(adapter, session, 'still supervised');
+    expect(raced).toContainEqual(expect.objectContaining({
+      type: 'run.completed', status: 'failed',
+      error: 'previous Codex app-server retirement is still pending',
+    }));
+    expect(factory.servers).toEqual([server]);
+    server.exit(0);
+    await adapter.resetSession(session);
+  });
   // harn:end member-context-reset-is-authorized-atomic-and-lazy
 
   // harn:assume active-turn-steering-is-ordered-and-durable ref=codex-active-turn-steering-regression

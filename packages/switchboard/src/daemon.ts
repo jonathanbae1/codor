@@ -831,9 +831,17 @@ export class Daemon {
     const existing = this.lastUsage.get(member.id);
     if (existing !== undefined && existing.estimated !== true) return;
     const ref = member.session_ref;
+    const model = member.model;
     this.track((async () => {
       const peeked = await adapter.peekContextUsage!(ref);
       if (peeked === undefined) return;
+      const fresh = this.store.getMember(room, member.id);
+      if (
+        fresh?.kind !== 'agent' ||
+        fresh.removed_ts !== undefined ||
+        fresh.session_ref !== ref ||
+        fresh.model !== model
+      ) return;
       // The artifact scan cannot see settings-applied windows (e.g. the 1m
       // beta), so an engine-reported window persisted on the member outranks
       // the peek's curated guess; the used-tokens estimate stays the peek's.
@@ -843,8 +851,7 @@ export class Daemon {
       if (current !== undefined && current.estimated !== true) return; // live won meanwhile
       if (isDeepStrictEqual(current, seeded)) return;
       this.lastUsage.set(member.id, { ...seeded });
-      const fresh = this.store.getMember(room, member.id);
-      if (fresh !== undefined && fresh.removed_ts === undefined) this.emitMember(room, fresh);
+      this.emitMember(room, fresh);
     })().catch(() => undefined));
   }
   // harn:end last-agent-usage-is-transient-and-seeded
@@ -1735,6 +1742,9 @@ export class Daemon {
     const existing = this.store.getMember(room, memberId);
     if (!existing || existing.kind !== 'agent') throw new Error(`no such agent member: ${memberId}`);
     if (existing.custody !== 'owned') throw new Error(`member @${existing.handle} is not switchboard-owned`);
+    if (this.resettingContext.has(memberId)) {
+      throw new Error(`member @${existing.handle} context is being cleared`);
+    }
     // harn:assume cli-member-recovery-is-actionable ref=attach-error-remediation
     if (existing.state === 'dead') {
       throw new Error(
@@ -2101,7 +2111,10 @@ export class Daemon {
     this.compacting.add(memberId);
     try {
       const usage = await adapter.compactSession(session);
-      this.landCompactedUsage(room, memberId, usage);
+      this.landCompactedUsage(room, memberId, usage, {
+        model: member.model,
+        sessionRef: member.session_ref,
+      });
       // A successful manual compaction summarizes the codor briefing out of the
       // engine's context just like an auto-compaction, but it never surfaces the
       // timeline WireEvent outward (the adapter observes it internally), so the
@@ -2130,6 +2143,9 @@ export class Daemon {
     }
     if (member.host !== undefined && member.host !== this.hostId) {
       throw new Error(`@${member.handle} is not local to this switchboard`);
+    }
+    if (member.custody !== 'owned') {
+      throw new Error(`@${member.handle} is not switchboard-owned`);
     }
     if (member.session_ref === undefined) {
       throw new Error(`@${member.handle} already has a fresh context`);
@@ -2187,12 +2203,23 @@ export class Daemon {
    * engine reported no usage: the UI needs a completion edge to stop showing
    * the operator a spinner, and silence is indistinguishable from still-working.
    */
-  private landCompactedUsage(room: string, memberId: string, usage?: AgentUsage): void {
-    if (usage !== undefined) {
+  private landCompactedUsage(
+    room: string,
+    memberId: string,
+    usage: AgentUsage | undefined,
+    expected: { model: string | undefined; sessionRef: string | undefined },
+  ): void {
+    const current = this.store.getMember(room, memberId);
+    if (
+      usage !== undefined &&
+      current?.kind === 'agent' &&
+      current.removed_ts === undefined &&
+      current.model === expected.model &&
+      current.session_ref === expected.sessionRef
+    ) {
       this.lastUsage.set(memberId, { ...usage });
       this.landContextWindow(room, memberId, usage);
     }
-    const current = this.store.getMember(room, memberId);
     if (current !== undefined) this.emitMember(room, current);
   }
   // harn:end manual-compaction-is-an-operator-act
@@ -3319,6 +3346,8 @@ export class Daemon {
         // Live usage is member runtime state: broadcast it, but do not append it
         // to the durable run journal or change log.
         if (event.type === 'usage_updated') {
+          const current = this.store.getMember(room, member.id);
+          if (current === undefined || current.model !== member.model || current.removed_ts !== undefined) continue;
           this.landContextWindow(room, member.id, event.usage);
           // Keyed by bare member id like every sibling per-member map (ULIDs
           // never repeat, so no cross-room collision). Skip the re-broadcast
@@ -3400,8 +3429,11 @@ export class Daemon {
         } else if (journalEvent.type === 'run.completed') {
           // harn:assume last-agent-usage-is-transient-and-seeded ref=last-usage-runtime-registry
           if (journalEvent.agent_usage !== undefined) {
-            this.lastUsage.set(member.id, { ...journalEvent.agent_usage });
-            this.landContextWindow(room, member.id, journalEvent.agent_usage);
+            const current = this.store.getMember(room, member.id);
+            if (current !== undefined && current.model === member.model && current.removed_ts === undefined) {
+              this.lastUsage.set(member.id, { ...journalEvent.agent_usage });
+              this.landContextWindow(room, member.id, journalEvent.agent_usage);
+            }
           }
           // harn:end last-agent-usage-is-transient-and-seeded
           // harn:assume failed-run-details-never-route-as-replies ref=failed-run-finalization

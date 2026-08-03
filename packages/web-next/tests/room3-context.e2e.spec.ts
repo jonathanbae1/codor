@@ -374,6 +374,12 @@ test.describe('clear member context', () => {
     await confirm.click();
     await expect(confirm).toBeDisabled();
     await expect(clear).toBeVisible();
+    // An unrelated compact_member refusal lands in the same room while reset
+    // remains held. Its correlated UI action recovers, but Clear stays pending.
+    const compact = page.getByTestId('member-eraser-compact');
+    await compact.click({ force: true });
+    await expect(compact).toBeEnabled();
+    await expect(confirm).toBeDisabled();
     await control('/hold-resets', { held: false });
     await expect(dialog).toBeHidden();
     await expect(clear).toHaveCount(0);
