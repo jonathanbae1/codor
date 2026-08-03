@@ -1,0 +1,77 @@
+id: integrate-pr10-tailscale-serve-consent
+title: Integrate PR 10 bounded Tailscale Serve consent wait and diagnostics
+notes: >
+  Integrate the exact PR 10 head 4e070b9833bbdbeda81b83a7f59d6439f891944b into
+  origin/main with a real no-ff merge commit. The contribution bounds `tailscale
+  serve --bg` while it waits for browser consent, preserves useful stdout and
+  stderr diagnostics, and leaves `serve status` and other commands unbounded.
+  Preserve the existing two-argument exec override shape through an optional
+  third options argument, retain Tailscale resolution/capability and
+  remote-access recovery semantics, and keep the exact PR head as the second
+  parent. No cherry-pick, squash, GitHub merge, push, or deployment is in scope.
+assumptions:
+  reviewed:
+    - id: setup-resolves-and-capability-probes-tailscale-serve
+      outcome: unchanged
+      reason: Tailscale PATH/app resolution, absolute-path invocation, capability
+        probing, Serve status parsing, and the existing access-selection
+        behavior remain unchanged; only the Serve invocation gets a bounded wait
+        and richer diagnostics.
+    - id: setup-recovers-remote-access-with-one-clear-decision
+      outcome: unchanged
+      reason: Remote-access recovery still stays in place, preserves the unique
+        diagnostic, shows the resolved Retry command, never runs sudo, and
+        offers one Retry or local decision; the new Serve error detail only
+        makes stdout consent guidance available to that existing screen.
+  create:
+    - id: setup-bounds-tailscale-serve-consent-and-keeps-diagnostics-actionable
+      title: Tailscale Serve consent waits are bounded and diagnostics stay actionable
+      statement: Setup's exec seam must remain compatible with existing two-argument
+        overrides while accepting an optional timeout, must apply a 20-second
+        timeout only to `tailscale serve --bg`, must leave `tailscale serve
+        status` and every other command unbounded, and must preserve distinct
+        nonempty command-message, stdout, and stderr diagnostics without
+        duplicating blocks, so a Serve call waiting for browser consent cannot
+        hang setup forever and the operator can act on the consent or permission
+        guidance.
+      reason: Tailscale prints the HTTPS-consent URL to stdout and can block instead
+        of failing when certificates are not enabled; setup needs a bounded
+        wait, an actionable error, and backwards-compatible test seams.
+      depends_on:
+        - setup-resolves-and-capability-probes-tailscale-serve
+        - setup-recovers-remote-access-with-one-clear-decision
+files:
+  - packages/cli/src/setup-tailscale.spec.ts
+  - packages/cli/src/setup.ts
+anchors:
+  setup-resolves-and-capability-probes-tailscale-serve:
+    tailscale-resolution:
+      action: change
+      reason: Extend configureTailscaleServe with a bounded serve --bg wait and
+        stdout/stderr-aware diagnostics without changing resolution, probing, or
+        status semantics.
+  setup-bounds-tailscale-serve-consent-and-keeps-diagnostics-actionable:
+    tailscale-exec-override-seam:
+      action: change
+      reason: Anchor the optional timeout argument on SetupOverrides.exec while
+        retaining compatibility with existing two-argument overrides.
+    tailscale-default-exec-timeout:
+      action: change
+      reason: Anchor defaultExec's translation of timeoutMs into execFileSync's
+        timeout option.
+    tailscale-serve-consent-command:
+      action: change
+      reason: Anchor the existing configureTailscaleServe command and diagnostic
+        region, including the serve --bg-only timeout.
+    tailscale-serve-consent-regression:
+      action: change
+      reason: Keep regressions for stdout consent guidance, bounded serve --bg,
+        unbounded serve status, and two-argument-compatible overrides.
+verification: >
+  After merge, run the full workspace build and serial full workspace test
+  suite, complete CLI tests, focused Tailscale tests, Harn
+  plan/check/apply/staged validation, and git diff --check. Confirm a clean
+  worktree and a real merge commit whose first parent is current origin/main and
+  whose second parent is exactly 4e070b9833bbdbeda81b83a7f59d6439f891944b.
+applied:
+  applied_at: 2026-08-03T09:19:39.697Z

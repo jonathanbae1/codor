@@ -1,0 +1,15 @@
+id: setup-bounds-tailscale-serve-consent-and-keeps-diagnostics-actionable
+hash: a-f6d29be0e5c1
+title: Tailscale Serve consent waits are bounded and diagnostics stay actionable
+state: active
+statement: Setup's exec seam must remain compatible with existing two-argument
+  overrides while accepting an optional timeout, must apply a 20-second timeout
+  only to `tailscale serve --bg`, must leave `tailscale serve status` and every
+  other command unbounded, and must preserve distinct nonempty command-message,
+  stdout, and stderr diagnostics without duplicating blocks, so a Serve call
+  waiting for browser consent cannot hang setup forever and the operator can act
+  on the consent or permission guidance.
+depends_on:
+  - setup-resolves-and-capability-probes-tailscale-serve
+  - setup-recovers-remote-access-with-one-clear-decision
+created_by: integrate-pr10-tailscale-serve-consent
