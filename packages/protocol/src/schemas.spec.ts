@@ -946,6 +946,17 @@ describe('wire events', () => {
       status: 'failed',
       error: 'Prompt is too long',
     });
+    expect(WireEventSchema.parse({
+      type: 'run.completed',
+      status: 'failed',
+      error: 'native stop',
+      recoverable: true,
+    })).toMatchObject({
+      type: 'run.completed',
+      status: 'failed',
+      error: 'native stop',
+      recoverable: true,
+    });
   });
   // harn:end failed-run-details-never-route-as-replies
 

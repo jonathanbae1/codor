@@ -17,6 +17,8 @@ import {
 const MAX_DISCOVERY_BYTES = 4096;
 const MAX_HISTORY_CHARS = 256 * 1024;
 const MAX_HISTORY_ITEMS = 40;
+const MAX_CHECKPOINT_CHARS = 128 * 1024;
+const MAX_CHECKPOINT_RESPONSE_CHARS = 512 * 1024;
 const DEFAULT_DISCOVERY = join(homedir(), '.codor', 'copilot-vscode-bridge.json');
 
 interface DiscoveryRecord {
@@ -37,13 +39,23 @@ interface BridgeEvent {
   result?: unknown;
   response?: unknown[];
   message?: string;
+  recoverable?: boolean;
+  assistant_text?: string;
 }
 
+// harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-session-checkpoint
 interface VscodeSession extends Session {
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
   active_turn_id?: string;
   bridge_generation?: string;
+  failure_checkpoint?: {
+    prompt: string;
+    response: string;
+    native_response: unknown[];
+    bridge_generation: string;
+  };
 }
+// harn:end vscode-copilot-recoverable-native-failure-preserves-context
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -115,8 +127,11 @@ class BridgeClient {
     return current !== undefined && discoveryGeneration(current) === generation;
   }
 
-  async request(path: string, init: RequestInit = {}): Promise<Response> {
+  async request(path: string, init: RequestInit = {}, expectedGeneration?: string): Promise<Response> {
     const value = this.record();
+    if (expectedGeneration !== undefined && discoveryGeneration(value) !== expectedGeneration) {
+      throw new Error('VS Code Copilot bridge generation changed; reload the companion extension');
+    }
     const response = await fetch(`http://127.0.0.1:${value.port}${path}`, {
       ...init,
       headers: {
@@ -150,6 +165,28 @@ function responseText(parts: unknown[] | undefined): string {
       ? record(source?.markdown)!.value as string
       : '';
   }).join('');
+}
+
+function boundedCheckpointText(value: string): string {
+  return value.length <= MAX_CHECKPOINT_CHARS ? value : value.slice(-MAX_CHECKPOINT_CHARS);
+}
+
+function boundedNativeResponse(parts: unknown[] | undefined): unknown[] {
+  if (parts === undefined) return [];
+  const selected: unknown[] = [];
+  let used = 0;
+  for (const part of parts) {
+    let encoded: string;
+    try {
+      encoded = JSON.stringify(part);
+    } catch {
+      break;
+    }
+    if (used + encoded.length > MAX_CHECKPOINT_RESPONSE_CHARS) break;
+    selected.push(part);
+    used += encoded.length;
+  }
+  return selected;
 }
 
 function boundedHistory(
@@ -282,11 +319,36 @@ export class CopilotVscodeAdapter implements HarnessAdapter {
   ): AsyncIterable<WireEvent> {
     const runtime = session as VscodeSession;
     let finalText = '';
+    let partialText = '';
     let finished = false;
+    let terminalStatus: 'completed' | 'failed' | undefined;
     const toolCalls = new Set<number>();
     const toolResults = new Set<number>();
     const fileChanges = new Set<number>();
     try {
+      // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-session-checkpoint
+      // A checkpoint is a one-shot continuation input. Consume it only after
+      // revalidating the exact session generation, and clear it on every path
+      // so a failed request cannot replay a native tool or prompt forever.
+      const checkpoint = runtime.failure_checkpoint;
+      if (checkpoint !== undefined) {
+        runtime.failure_checkpoint = undefined;
+        if (
+          runtime.bridge_generation !== checkpoint.bridge_generation
+          || !this.client.sameGeneration(checkpoint.bridge_generation)
+        ) {
+          throw new Error(
+            'VS Code Copilot recoverable context was lost with its bridge generation; '
+            + 'reload the companion extension before continuing',
+          );
+        }
+        runtime.history = boundedHistory([
+          ...(runtime.history ?? []),
+          { role: 'user', text: checkpoint.prompt },
+          { role: 'assistant', text: checkpoint.response },
+        ]);
+      }
+      // harn:end vscode-copilot-recoverable-native-failure-preserves-context
       const response = await this.client.request('/v1/turn', {
         method: 'POST',
         body: JSON.stringify({
@@ -294,13 +356,14 @@ export class CopilotVscodeAdapter implements HarnessAdapter {
           ...(session.model !== undefined && { model: session.model }),
           history: boundedHistory(runtime.history),
         }),
-      });
+      }, runtime.bridge_generation);
       for await (const event of ndjson(response)) {
         if (event.type === 'started' && typeof event.turn_id === 'string') {
           runtime.active_turn_id = event.turn_id;
           hooks.onStarted?.({});
           if (session.session_ref !== undefined) hooks.onSessionRef?.(session.session_ref);
         } else if (event.type === 'part' && typeof event.text_delta === 'string') {
+          partialText = boundedCheckpointText(partialText + event.text_delta);
           yield { type: 'run.item', item_type: 'text_delta', payload: { text: event.text_delta } };
         } else if (event.type === 'part' && typeof event.index === 'number') {
           const part = record(event.part);
@@ -361,6 +424,7 @@ export class CopilotVscodeAdapter implements HarnessAdapter {
           finalText = responseText(event.response);
           const result = record(event.result);
           const failed = result?.errorDetails !== undefined || result?.error !== undefined;
+          terminalStatus = failed ? 'failed' : 'completed';
           yield {
             type: 'run.completed',
             status: failed ? 'failed' : 'completed',
@@ -369,12 +433,31 @@ export class CopilotVscodeAdapter implements HarnessAdapter {
           };
           finished = true;
         } else if (event.type === 'error') {
+          // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-session-checkpoint
+          const recoverable = event.recoverable === true
+            && runtime.bridge_generation !== undefined
+            && this.client.sameGeneration(runtime.bridge_generation);
+          if (recoverable) {
+            const response = event.response;
+            runtime.failure_checkpoint = {
+              prompt: payload,
+              response: boundedCheckpointText(
+                event.assistant_text
+                  ?? (partialText !== '' ? partialText : responseText(response)),
+              ),
+              native_response: boundedNativeResponse(response),
+              bridge_generation: runtime.bridge_generation!,
+            };
+          }
           yield {
             type: 'run.completed',
             status: 'failed',
             error: event.message?.slice(0, 1000) || 'VS Code Copilot turn failed',
+            ...(recoverable && { recoverable: true }),
           };
+          terminalStatus = 'failed';
           finished = true;
+          // harn:end vscode-copilot-recoverable-native-failure-preserves-context
         }
       }
       if (!finished) {
@@ -383,7 +466,7 @@ export class CopilotVscodeAdapter implements HarnessAdapter {
           status: 'failed',
           error: 'VS Code Copilot bridge ended without a terminal result',
         };
-      } else if (finalText !== '') {
+      } else if (terminalStatus === 'completed' && finalText !== '') {
         runtime.history = boundedHistory([
           ...(runtime.history ?? []),
           { role: 'user', text: payload },

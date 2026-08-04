@@ -1,0 +1,185 @@
+id: copilot-vscode-p2-recoverable-failure
+title: Preserve bounded Copilot VS Code context after a recoverable native stop
+notes: >
+  Phase 2 only: classify a native VS Code Agent stop as recoverable when the
+  explicit native error and exact authenticated bridge generation are healthy;
+  checkpoint the accepted prompt and bounded latest partial assistant text in
+  that exact in-memory session for the next explicit delivery. Never retry a
+  tool automatically. Bridge, auth, discovery, protocol, generation, reload,
+  restart, lost-cache, ACP, Copilot CLI, and ordinary adapter failures remain
+  fail closed and terminal. No Phase 3 packaging, release, delivery, merge,
+  push, deployment, or unrelated adapter changes.
+assumptions:
+  create:
+    - id: vscode-copilot-recoverable-native-failure-preserves-context
+      title: A live Copilot VS Code native stop may continue once with its bounded
+        in-memory checkpoint
+      statement: >
+        Only a copilot-vscode turn that emits an explicit recoverable
+        native-stop marker while the exact authenticated bridge generation
+        recorded by that in-memory session is still current may leave its member
+        available and checkpoint the accepted prompt plus bounded latest partial
+        assistant response in that exact session. The next explicit Codor
+        delivery consumes that checkpoint as bounded previousRequests and then
+        clears it; tools are never retried automatically. Bridge loss, reload,
+        authentication or discovery loss, protocol failure, generation change,
+        daemon restart or lost cache, ACP, Copilot CLI, and every other adapter
+        remain terminal and fail closed, with no context or checkpoint mixed
+        across members, windows, sessions, or generations.
+      reason: >
+        The native VS Code Agent can stop after accepting a prompt while its
+        authenticated bridge remains healthy. Preserving only the exact live
+        session's bounded prompt and partial response makes an explicit continue
+        useful without replacing native context or replaying a tool.
+      depends_on:
+        - vscode-copilot-native-agent-auto-approves-and-streams-evidence
+        - vscode-copilot-bridge-is-manual-local-and-credential-private
+        - copilot-vscode-revive-requires-exact-live-cache
+        - failed-run-details-never-route-as-replies
+        - one-inflight-turn-per-member
+  reviewed:
+    - id: vscode-copilot-native-agent-auto-approves-and-streams-evidence
+      outcome: unchanged
+      reason: Native Agent execution, local approval, evidence streaming, and bounded
+        ordinary failure remain unchanged.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: The manual loopback bearer bridge remains credential-private; generation
+        is revalidated before continuation.
+    - id: copilot-vscode-revive-requires-exact-live-cache
+      outcome: unchanged
+      reason: Explicit revive still requires the exact live cached session; restart
+        and cache loss fail closed.
+    - id: failed-run-details-never-route-as-replies
+      outcome: unchanged
+      reason: Unmarked failures retain empty-body, error-evidence, dead-member, and
+        no-reply behavior.
+    - id: run-failure-evidence-is-surfaced
+      outcome: unchanged
+      reason: Recoverable diagnostics remain failed-run evidence and ordinary evidence
+        consumers are unchanged.
+    - id: finalized-turn-routes-aggregate-from-terminal-output
+      outcome: unchanged
+      reason: A recoverable stop has no aggregate to route; successful terminal
+        aggregation is unchanged.
+    - id: group-participant-terminality-commits-with-the-turn
+      outcome: unchanged
+      reason: Recoverable availability is committed atomically with the failed run and
+        group participant state.
+    - id: delivery-attempt-wal-reconcile
+      outcome: unchanged
+      reason: Boot still binds and reconciles delivery attempts; it deliberately
+        cannot restore an in-memory checkpoint.
+    - id: one-inflight-turn-per-member
+      outcome: unchanged
+      reason: Only one turn runs per member and explicit queued work drains after
+        settlement.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: No process or lifecycle supervision contract changes.
+    - id: fake-adapter-drives-live-collaboration
+      outcome: unchanged
+      reason: The existing fake collaboration adapter remains unchanged; the
+        regression mocks only the scoped copilot-vscode delivery.
+files:
+  - packages/adapters/copilot/vscode-extension/src/native-chat.ts
+  - packages/adapters/copilot/vscode-extension/src/native-chat.spec.ts
+  - packages/adapters/copilot/src/vscode-adapter.ts
+  - packages/adapters/copilot/src/vscode-adapter.spec.ts
+  - packages/protocol/src/events.ts
+  - packages/protocol/src/schemas.spec.ts
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+anchors:
+  vscode-copilot-recoverable-native-failure-preserves-context:
+    vscode-copilot-native-error-classification:
+      action: change
+      reason: Classify native result failure with its bounded response while keeping
+        bridge/protocol exceptions terminal.
+    vscode-copilot-native-error-regression:
+      action: change
+      reason: Prove the extension exposes the latest partial response on an explicit
+        recoverable native stop.
+    vscode-copilot-session-checkpoint:
+      action: change
+      reason: Consume a prompt/partial-response checkpoint once in the exact live
+        session and generation.
+    vscode-copilot-session-checkpoint-regression:
+      action: change
+      reason: Cover failure-to-continue, no tool retry, cross-window isolation,
+        generation loss, and bounded cache use.
+    vscode-copilot-recoverable-finalization:
+      action: change
+      reason: Keep a marked copilot-vscode member available while suppressing failed
+        output and reply fanout.
+    vscode-copilot-recoverable-finalization-regression:
+      action: change
+      reason: Prove availability/drain and preserve failed-run diagnostics without a
+        death message.
+  vscode-copilot-bridge-is-manual-local-and-credential-private:
+    vscode-copilot-discovery-client:
+      action: change
+      reason: Guard the continuation request against a bridge generation change
+        between validation and fetch.
+  vscode-copilot-native-agent-auto-approves-and-streams-evidence:
+    vscode-copilot-native-chat-runtime:
+      action: change
+      reason: Add explicit recoverable native-error metadata without changing native
+        approval or cancellation.
+    vscode-copilot-native-chat-regression:
+      action: change
+      reason: Exercise response snapshot and bounded partial text on native failure.
+    vscode-copilot-adapter-runtime:
+      action: change
+      reason: Consume the additive recoverable event without approval round trips or
+        automatic retry.
+    vscode-copilot-adapter-regression:
+      action: change
+      reason: Cover live history checkpoint, generation guard, isolation, and fatal
+        failure behavior.
+  failed-run-details-never-route-as-replies:
+    failed-run-error-schema:
+      action: change
+      reason: Add the additive recoverable marker to run.completed while preserving
+        ordinary failed fields.
+    failed-run-finalization:
+      action: change
+      reason: Keep ordinary failures dead and unrouted while recognizing only the
+        explicit scoped exception.
+    failed-run-recovery:
+      action: change
+      reason: Boot reconciliation omits the in-memory marker so restart/lost cache
+        fails closed.
+  run-failure-evidence-is-surfaced:
+    interrupted-error-evidence:
+      action: change
+      reason: Preserve error evidence for the failed recoverable classification.
+    run-failure-evidence-regression:
+      action: change
+      reason: Keep the existing evidence regression adjacent to the new failed run
+        behavior.
+  finalized-turn-routes-aggregate-from-terminal-output:
+    finalize-and-route:
+      action: change
+      reason: Do not route an aggregate or mention fanout from a recoverable failed
+        run.
+  group-participant-terminality-commits-with-the-turn:
+    collaboration-finalization-engine:
+      action: change
+      reason: Commit available member state and failed participant terminality
+        atomically.
+  delivery-attempt-wal-reconcile:
+    boot-reconcile:
+      action: change
+      reason: Explicitly drop recoverable metadata during boot because the checkpoint
+        is not durable.
+  copilot-vscode-revive-requires-exact-live-cache:
+    revive-native-session:
+      action: change
+      reason: Retain the exact live-cache boundary next to continuation behavior.
+    revive-session-regression:
+      action: change
+      reason: Cover missing cached session and generation isolation alongside existing
+        revive tests.
+applied:
+  applied_at: 2026-08-04T04:52:39.931Z

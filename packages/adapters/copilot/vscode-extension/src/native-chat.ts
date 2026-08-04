@@ -17,7 +17,13 @@ export type NativeStreamEvent =
   | { type: 'started'; turn_id: string }
   | { type: 'part'; index: number; revision: number; part: unknown; text_delta?: string }
   | { type: 'done'; result: unknown; response: unknown[] }
-  | { type: 'error'; message: string };
+  | {
+      type: 'error';
+      message: string;
+      recoverable?: boolean;
+      response?: unknown[];
+      assistant_text?: string;
+    };
 
 export interface NativeChatHost {
   executeCommand<T = unknown>(command: string, ...args: unknown[]): Promise<T>;
@@ -198,6 +204,7 @@ export class NativeChatRunner {
     const revisions: string[] = [];
     const approvals = new Map<number, ApprovalLifecycle>();
     let boundRequestId: string | undefined;
+    let latestResponse: unknown[] = [];
     let openSettled = false;
     let openError: unknown;
 
@@ -263,6 +270,7 @@ export class NativeChatRunner {
           }
         }
         if (latest !== undefined) {
+          latestResponse = latest.response.slice();
           for (let index = 0; index < latest.response.length; index += 1) {
             const part = latest.response[index];
             const next = JSON.stringify(part);
@@ -286,6 +294,22 @@ export class NativeChatRunner {
             });
           }
           if (latest.result !== undefined) {
+            // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-native-error-classification
+            // VS Code reports a native Agent stop through the exported result.
+            // Preserve the exact bounded response snapshot for the adapter, but
+            // never turn a bridge/protocol exception into a resumable event.
+            const nativeResult = record(latest.result);
+            if (nativeResult?.errorDetails !== undefined || nativeResult?.error !== undefined) {
+              emit({
+                type: 'error',
+                recoverable: true,
+                message: 'VS Code Copilot reported a failed native turn',
+                response: latestResponse,
+                assistant_text: collectResponseText(latestResponse),
+              });
+              return;
+            }
+            // harn:end vscode-copilot-recoverable-native-failure-preserves-context
             emit({ type: 'done', result: latest.result, response: latest.response });
             return;
           }
@@ -359,7 +383,12 @@ export class NativeChatRunner {
       if (controller.signal.aborted) {
         await this.host.executeCommand('workbench.action.chat.cancel').catch(() => undefined);
       }
+      // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-native-error-classification
+      // Export, request binding, cancellation, and bridge failures remain
+      // ordinary terminal failures. Only the explicit native result branch
+      // above is eligible for context continuation.
       emit({ type: 'error', message: cleanError(error) });
+      // harn:end vscode-copilot-recoverable-native-failure-preserves-context
     } finally {
       clearTimeout(timeout);
       outerSignal.removeEventListener('abort', abort);

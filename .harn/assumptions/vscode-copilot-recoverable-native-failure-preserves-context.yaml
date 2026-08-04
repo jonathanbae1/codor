@@ -1,0 +1,23 @@
+id: vscode-copilot-recoverable-native-failure-preserves-context
+hash: a-1ac623dd2741
+title: A live Copilot VS Code native stop may continue once with its bounded
+  in-memory checkpoint
+state: active
+statement: >
+  Only a copilot-vscode turn that emits an explicit recoverable native-stop
+  marker while the exact authenticated bridge generation recorded by that
+  in-memory session is still current may leave its member available and
+  checkpoint the accepted prompt plus bounded latest partial assistant response
+  in that exact session. The next explicit Codor delivery consumes that
+  checkpoint as bounded previousRequests and then clears it; tools are never
+  retried automatically. Bridge loss, reload, authentication or discovery loss,
+  protocol failure, generation change, daemon restart or lost cache, ACP,
+  Copilot CLI, and every other adapter remain terminal and fail closed, with no
+  context or checkpoint mixed across members, windows, sessions, or generations.
+depends_on:
+  - vscode-copilot-native-agent-auto-approves-and-streams-evidence
+  - vscode-copilot-bridge-is-manual-local-and-credential-private
+  - copilot-vscode-revive-requires-exact-live-cache
+  - failed-run-details-never-route-as-replies
+  - one-inflight-turn-per-member
+created_by: copilot-vscode-p2-recoverable-failure

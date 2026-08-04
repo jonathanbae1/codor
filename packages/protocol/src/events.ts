@@ -152,6 +152,8 @@ export const WireEventSchema = z.discriminatedUnion('type', [
     // harn:end continuation-writer-follows-journaled-output-ownership
     // harn:assume failed-run-details-never-route-as-replies ref=failed-run-error-schema
     error: z.string().min(1).optional(),
+    /** An in-memory copilot-vscode native stop that may be continued explicitly. */
+    recoverable: z.literal(true).optional(),
     // harn:end failed-run-details-never-route-as-replies
     // Durable accounting compatibility; normalized telemetry is agent_usage.
     usage: UsageSchema.optional(),

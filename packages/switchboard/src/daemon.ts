@@ -361,6 +361,7 @@ interface TurnCompletion {
   model?: string;
   final_text?: string;
   error?: string;
+  recoverable?: boolean;
   usage?: RunSummary['usage'];
 }
 
@@ -3471,6 +3472,9 @@ export class Daemon {
             model: journalEvent.model,
             final_text: journalEvent.final_text,
             error: journalEvent.error,
+            // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-recoverable-finalization
+            recoverable: journalEvent.recoverable,
+            // harn:end vscode-copilot-recoverable-native-failure-preserves-context
             usage: journalEvent.usage,
           };
           // harn:end failed-run-details-never-route-as-replies
@@ -3860,6 +3864,13 @@ export class Daemon {
     // harn:assume failed-run-details-never-route-as-replies ref=failed-run-finalization
     // harn:assume run-failure-evidence-is-surfaced ref=interrupted-error-evidence
     const failed = completion.status === 'failed';
+    // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-recoverable-finalization
+    // This marker is deliberately narrower than failed: only the explicit
+    // copilot-vscode classification keeps the member available. Its run still
+    // has failed evidence, an empty body, and no reply fanout.
+    const recoverableFailure = this.store.getMember(room, memberId)?.harness === 'copilot-vscode'
+      && completion.recoverable === true;
+    // harn:end vscode-copilot-recoverable-native-failure-preserves-context
     // The `?? completion.final_text` arm is LOAD-BEARING: codex/gemini/opencode/
     // copilot report failure detail in final_text, only claude uses error.
     // An operator interrupt can reclassify failed->interrupted after the
@@ -3976,7 +3987,7 @@ export class Daemon {
       memberId,
       memberPatch: {
         state:
-          completion.status === 'failed'
+          completion.status === 'failed' && !recoverableFailure
             ? 'dead'
             : this.store.getMember(room, memberId)?.state === 'dead'
               ? 'dead'
@@ -4034,7 +4045,8 @@ export class Daemon {
       this.advanceCollaborationRound(room, groupedDelivery.group_id, groupedDelivery.group_round);
     }
     this.runActivity.delete(`${room}:${runMsgId}`);
-    if (completion.status === 'failed') {
+    // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-recoverable-finalization
+    if (completion.status === 'failed' && !recoverableFailure) {
       this.postSystemMessage(
         room,
         completed.member.session_ref
@@ -4042,6 +4054,7 @@ export class Daemon {
           : `@${completed.member.handle} died mid-run (turn #${runMsgId} failed); remove it and spawn a replacement`,
       );
     }
+    // harn:end vscode-copilot-recoverable-native-failure-preserves-context
   }
   // harn:end finalized-turn-routes-aggregate-from-terminal-output
 

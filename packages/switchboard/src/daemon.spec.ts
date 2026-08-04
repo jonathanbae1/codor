@@ -994,6 +994,52 @@ describe('copilot-vscode ephemeral revive', () => {
     }
   });
 
+  it('fails closed when a daemon restart loses the in-memory native session cache', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-copilot-vscode-lost-cache-'));
+    const firstAdapter = Object.assign(new FakeAdapter('copilot-vscode', { resume: false }), {
+      available: () => true,
+      canReviveSession: () => true,
+    });
+    const first = new Daemon({
+      dbPath: join(root, 'switchboard.sqlite'),
+      blobRoot: join(root, 'blobs'),
+      adapters: [firstAdapter],
+      homeDir: root,
+      discoverModels: false,
+    });
+    let memberId: string;
+    try {
+      first.createRoom({ id: 'lost-cache', name: 'Lost cache', owner: { handle: 'owner', display_name: 'Owner' } });
+      const member = first.spawnMember('lost-cache', {
+        harness: 'copilot-vscode', handle: 'copilot', cwd: root,
+      });
+      memberId = member.id;
+      first.killMember('lost-cache', member.id);
+    } finally {
+      await first.close({ force: true });
+    }
+
+    const secondAdapter = Object.assign(new FakeAdapter('copilot-vscode', { resume: false }), {
+      available: () => true,
+      canReviveSession: () => true,
+    });
+    const second = new Daemon({
+      dbPath: join(root, 'switchboard.sqlite'),
+      blobRoot: join(root, 'blobs'),
+      adapters: [secondAdapter],
+      homeDir: root,
+      discoverModels: false,
+    });
+    try {
+      expect(() => second.reviveMember('lost-cache', memberId!)).toThrow(
+        "adapter 'copilot-vscode' cannot revive @copilot after its live session or bridge was lost",
+      );
+    } finally {
+      await second.close({ force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps ACP and other non-resumable adapters on the fail-closed boundary', async () => {
     const make = (id: string) => new FakeAdapter(id, { resume: false });
     for (const adapter of [make('acp'), make('other-ephemeral')]) {
@@ -2910,6 +2956,70 @@ describe('failed turns', () => {
     ).toBe(false);
   });
 });
+
+// harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-recoverable-finalization-regression
+describe('copilot-vscode recoverable native stops', () => {
+  it('keeps the member available and drains a later explicit delivery without retrying the failed turn', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-copilot-vscode-recoverable-'));
+    const adapter = new FakeAdapter('copilot-vscode', { resume: false });
+    let releaseFirst!: () => void;
+    const firstTurn = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let calls = 0;
+    vi.spyOn(adapter, 'deliver').mockImplementation(async function* (_session, _payload, hooks = {}) {
+      hooks.onStarted?.({});
+      calls += 1;
+      if (calls === 1) {
+        await firstTurn;
+        yield {
+          type: 'run.completed',
+          status: 'failed',
+          error: 'native stop after partial response',
+          recoverable: true,
+        };
+        return;
+      }
+      yield { type: 'run.completed', status: 'completed', final_text: 'continued explicitly' };
+    });
+    const registered = Object.assign(adapter, { available: () => true });
+    const local = new Daemon({
+      dbPath: join(root, 'switchboard.sqlite'),
+      blobRoot: join(root, 'blobs'),
+      adapters: [registered],
+      homeDir: root,
+      discoverModels: false,
+    });
+    try {
+      local.createRoom({ id: 'recoverable', name: 'Recoverable', owner: { handle: 'owner', display_name: 'Owner' } });
+      const member = local.spawnMember('recoverable', {
+        harness: 'copilot-vscode', handle: 'copilot', cwd: root,
+      });
+      local.postHumanMessage('recoverable', '@copilot first prompt');
+      await until(() => local.store.getMember('recoverable', member.id)?.state === 'running' ? true : undefined);
+      local.postHumanMessage('recoverable', '@copilot continue explicitly');
+      releaseFirst();
+      await local.settle();
+
+      expect(calls).toBe(2);
+      expect(local.store.getMember('recoverable', member.id)?.state).toBe('idle');
+      const runs = local.store.listRunMessages('recoverable', { author: member.id, limit: 10 });
+      expect(runs).toHaveLength(2);
+      const failedRun = runs.find((run) => run.run?.status === 'failed');
+      const continuedRun = runs.find((run) => run.run?.status === 'completed');
+      expect(failedRun?.run).toMatchObject({
+        status: 'failed', error: 'native stop after partial response',
+      });
+      expect(failedRun?.body).toBe('');
+      expect(continuedRun?.body).toBe('continued explicitly');
+      expect(local.store.listMessages('recoverable', { limit: 100 }).some((message) =>
+        message.kind === 'system' && message.body.includes('died mid-run'),
+      )).toBe(false);
+    } finally {
+      await local.close({ force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+// harn:end vscode-copilot-recoverable-native-failure-preserves-context
 
 describe('Phase 3 usability core', () => {
   it('stops a two-agent reply chain at exact ACK_OK and retains the prior default', async () => {

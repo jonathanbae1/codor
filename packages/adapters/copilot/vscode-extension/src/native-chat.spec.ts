@@ -117,6 +117,39 @@ describe('native VS Code Copilot chat runtime', () => {
     expect(events.at(-1)?.type).toBe('done');
   });
 
+  // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-native-error-regression
+  it('reports a native stop with its latest bounded response for explicit continuation', async () => {
+    const snapshots = [
+      snapshot([{ value: 'partial answer' }], undefined, 'failed prompt', 'failed-1'),
+      snapshot([{ value: 'partial answer' }], { errorDetails: 'native stop' }, 'failed prompt', 'failed-1'),
+    ];
+    const host: NativeChatHost = {
+      executeCommand: async () => undefined,
+      exportSnapshot: async () => snapshots.shift() ?? snapshot(
+        [{ value: 'partial answer' }],
+        { errorDetails: 'native stop' },
+        'failed prompt',
+        'failed-1',
+      ),
+      delay: async () => undefined,
+    };
+    const events: NativeStreamEvent[] = [];
+    await new NativeChatRunner(host, 0).run(
+      { prompt: 'failed prompt' },
+      (event) => events.push(event),
+      new AbortController().signal,
+    );
+
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      recoverable: true,
+      message: 'VS Code Copilot reported a failed native turn',
+      response: [{ value: 'partial answer' }],
+      assistant_text: 'partial answer',
+    });
+  });
+  // harn:end vscode-copilot-recoverable-native-failure-preserves-context
+
   it('allows ordinary, hard-blocked, repeated-identical, pre, and post tool states by part lifecycle', async () => {
     let phase = 0;
     const commands: string[] = [];
@@ -258,6 +291,7 @@ describe('native VS Code Copilot chat runtime', () => {
   it('calls native cancel when the Codor request is aborted', async () => {
     const controller = new AbortController();
     const executeCommand = vi.fn(async () => undefined);
+    const events: NativeStreamEvent[] = [];
     const host: NativeChatHost = {
       executeCommand,
       exportSnapshot: async () => {
@@ -268,10 +302,12 @@ describe('native VS Code Copilot chat runtime', () => {
     };
     await new NativeChatRunner(host, 0).run(
       { prompt: 'test' },
-      () => undefined,
+      (event) => events.push(event),
       controller.signal,
     );
     expect(executeCommand).toHaveBeenCalledWith('workbench.action.chat.cancel');
+    expect(events.at(-1)).toEqual(expect.objectContaining({ type: 'error' }));
+    expect(events.at(-1)).not.toHaveProperty('recoverable');
   });
 });
 // harn:end vscode-copilot-native-agent-auto-approves-and-streams-evidence

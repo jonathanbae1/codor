@@ -9,7 +9,7 @@ import { CopilotVscodeAdapter, vscodeCopilotBridgeAvailable } from './vscode-ada
 
 const roots: string[] = [];
 
-async function fixture(lines: unknown[]): Promise<{
+async function fixture(lines: unknown[] | unknown[][]): Promise<{
   adapter: CopilotVscodeAdapter;
   close(): Promise<void>;
   discovery: string;
@@ -19,6 +19,7 @@ async function fixture(lines: unknown[]): Promise<{
   roots.push(root);
   mkdirSync(root, { recursive: true });
   const requests: Array<{ url: string; authorization?: string; body?: unknown }> = [];
+  const scripted = Array.isArray(lines[0]) ? [...(lines as unknown[][])] : undefined;
   const token = 'a'.repeat(64);
   const server = createServer(async (request, reply) => {
     const chunks: Buffer[] = [];
@@ -43,7 +44,8 @@ async function fixture(lines: unknown[]): Promise<{
     }
     if (request.url === '/v1/turn') {
       reply.setHeader('content-type', 'application/x-ndjson');
-      reply.end(lines.map((line) => JSON.stringify(line)).join('\n'));
+      const responseLines = scripted?.shift() ?? lines as unknown[];
+      reply.end(responseLines.map((line) => JSON.stringify(line)).join('\n'));
       return;
     }
     reply.end(JSON.stringify({ ok: true }));
@@ -139,6 +141,125 @@ describe('VS Code Copilot adapter bridge', () => {
       await bridge.close();
     }
   });
+
+  // harn:assume vscode-copilot-recoverable-native-failure-preserves-context ref=vscode-copilot-session-checkpoint-regression
+  it('checkpoints a native partial failure and includes it in the next explicit delivery without replaying tools', async () => {
+    const bridge = await fixture([
+      [
+        { type: 'started', turn_id: 'failed-turn' },
+        { type: 'part', text_delta: 'partial answer' },
+        {
+          type: 'error', recoverable: true, message: 'native stop',
+          response: [{ value: 'partial answer' }], assistant_text: 'partial answer',
+        },
+      ],
+      [
+        { type: 'started', turn_id: 'continued-turn' },
+        { type: 'done', result: { status: 'complete' }, response: [{ value: 'continued' }] },
+      ],
+    ]);
+    try {
+      const session = bridge.adapter.spawn({ cwd: '/tmp', model: 'gpt-5.6-luna' });
+      const failed = [];
+      for await (const event of bridge.adapter.deliver(session, 'failed prompt')) failed.push(event);
+      expect(failed.at(-1)).toEqual({
+        type: 'run.completed', status: 'failed', error: 'native stop', recoverable: true,
+      });
+      expect((session as unknown as { failure_checkpoint?: unknown }).failure_checkpoint)
+        .toMatchObject({ prompt: 'failed prompt', response: 'partial answer' });
+
+      const continued = [];
+      for await (const event of bridge.adapter.deliver(session, 'continue')) continued.push(event);
+      expect(continued.at(-1)).toEqual({
+        type: 'run.completed', status: 'completed', final_text: 'continued',
+      });
+      expect((session as unknown as { failure_checkpoint?: unknown }).failure_checkpoint).toBeUndefined();
+      const turns = bridge.requests.filter((request) => request.url === '/v1/turn');
+      expect(turns).toHaveLength(2);
+      expect((turns[1]!.body as { history?: unknown[] }).history).toEqual([
+        { role: 'user', text: 'failed prompt' },
+        { role: 'assistant', text: 'partial answer' },
+      ]);
+      expect(bridge.requests.some((request) => request.url.includes('/interaction'))).toBe(false);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('keeps checkpoints isolated across adapter windows and rejects a changed bridge generation', async () => {
+    const bridge = await fixture([
+      [
+        { type: 'started', turn_id: 'failed-a' },
+        { type: 'error', recoverable: true, message: 'A stopped', response: [{ value: 'A partial' }], assistant_text: 'A partial' },
+      ],
+      [
+        { type: 'started', turn_id: 'failed-b' },
+        { type: 'error', recoverable: true, message: 'B stopped', response: [{ value: 'B partial' }], assistant_text: 'B partial' },
+      ],
+      [{ type: 'done', result: { status: 'complete' }, response: [{ value: 'A continued' }] }],
+      [{ type: 'done', result: { status: 'complete' }, response: [{ value: 'B continued' }] }],
+      [
+        { type: 'started', turn_id: 'failed-c' },
+        { type: 'error', recoverable: true, message: 'C stopped', response: [{ value: 'C partial' }], assistant_text: 'C partial' },
+      ],
+    ]);
+    try {
+      const otherWindow = new CopilotVscodeAdapter(bridge.discovery);
+      const sessionA = bridge.adapter.spawn({ cwd: '/tmp' });
+      const sessionB = otherWindow.spawn({ cwd: '/tmp' });
+      for await (const _event of bridge.adapter.deliver(sessionA, 'prompt A')) { /* collect */ }
+      for await (const _event of otherWindow.deliver(sessionB, 'prompt B')) { /* collect */ }
+      for await (const _event of bridge.adapter.deliver(sessionA, 'continue A')) { /* collect */ }
+      for await (const _event of otherWindow.deliver(sessionB, 'continue B')) { /* collect */ }
+      const turns = bridge.requests.filter((request) => request.url === '/v1/turn');
+      expect((turns[2]!.body as { history?: unknown[] }).history).toEqual([
+        { role: 'user', text: 'prompt A' }, { role: 'assistant', text: 'A partial' },
+      ]);
+      expect((turns[3]!.body as { history?: unknown[] }).history).toEqual([
+        { role: 'user', text: 'prompt B' }, { role: 'assistant', text: 'B partial' },
+      ]);
+
+      const sessionC = bridge.adapter.spawn({ cwd: '/tmp' });
+      for await (const _event of bridge.adapter.deliver(sessionC, 'prompt C')) { /* collect */ }
+      const beforeGenerationChange = bridge.requests.length;
+      writeFileSync(bridge.discovery, JSON.stringify({
+        protocol_version: 1,
+        pid: process.pid,
+        port: 1,
+        token: 'b'.repeat(64),
+        started_at: new Date(Date.now() + 1_000).toISOString(),
+      }));
+      const failed = [];
+      for await (const event of bridge.adapter.deliver(sessionC, 'after generation change')) failed.push(event);
+      expect(failed.at(-1)).toEqual(expect.objectContaining({
+        type: 'run.completed', status: 'failed',
+        error: expect.stringContaining('recoverable context was lost'),
+      }));
+      expect(failed.at(-1)).not.toHaveProperty('recoverable');
+      expect(bridge.requests).toHaveLength(beforeGenerationChange);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('keeps an unmarked bridge or protocol error terminal and does not create a checkpoint', async () => {
+    const bridge = await fixture([{
+      type: 'error', message: 'bridge protocol failure', recoverable: false,
+    }]);
+    try {
+      const session = bridge.adapter.spawn({ cwd: '/tmp' });
+      const events = [];
+      for await (const event of bridge.adapter.deliver(session, 'protocol failure')) events.push(event);
+      expect(events.at(-1)).toEqual({
+        type: 'run.completed', status: 'failed', error: 'bridge protocol failure',
+      });
+      expect(events.at(-1)).not.toHaveProperty('recoverable');
+      expect((session as unknown as { failure_checkpoint?: unknown }).failure_checkpoint).toBeUndefined();
+    } finally {
+      await bridge.close();
+    }
+  });
+  // harn:end vscode-copilot-recoverable-native-failure-preserves-context
 
   it('requires the live bridge generation for the explicit cache revive and never attaches a native ref', async () => {
     const bridge = await fixture([]);
