@@ -1,0 +1,145 @@
+id: fastify-static-01010-repack-v2
+title: Patch static serving and replace the uninstalled 0.10.10 candidate
+notes: >
+  Upgrade the switchboard's @fastify/static dependency to the upstream patched
+  10.1.2 release. Strengthen the packed local-TGZ proof so the first npx run
+  uses a fresh cache with npm audit left enabled, matching the WSL failure that
+  exposed npm's remediation lookup of bundled private @codor packages. Richard
+  explicitly confirmed that the transferred 0.10.10 candidate was not installed
+  and authorized replacing it at the same version; record that narrow
+  pre-install withdrawal rule while preserving immutability after install or
+  publication.
+assumptions:
+  reviewed:
+    - id: public-package-bundles-complete-codor-runtime
+      outcome: unchanged
+      reason: The public TGZ still bundles the complete internal @codor runtime
+        closure.
+    - id: public-npx-install-is-primary-install
+      outcome: unchanged
+      reason: The normal npx command remains the primary install path and must work
+        with audit enabled.
+    - id: packed-release-proof-runs-install-runtime
+      outcome: unchanged
+      reason: The existing packed proof remains authoritative and is strengthened with
+        a fresh npm cache.
+    - id: release-candidate-requires-publishable-install-tarball
+      outcome: unchanged
+      reason: The replacement candidate must pass the same complete release gates
+        before distribution.
+    - id: release-audits-enforce-codor-clean-break
+      outcome: unchanged
+      reason: The release audit gains security and npx-proof checks without weakening
+        existing clean-break checks.
+  retire:
+    - id: distributed-release-artifacts-are-version-immutable
+      reason: >
+        Richard explicitly permits withdrawing and replacing a transferred but
+        uninstalled candidate at the same version; the old statement made any
+        transfer irrevocable and no longer matches the approved release policy.
+  create:
+    - id: installed-or-published-release-artifacts-are-version-immutable
+      title: Installed or published release artifacts are version immutable
+      reason: Track the operator-approved boundary for replacing a transferred but
+        uninstalled candidate.
+      statement: >
+        A Codor TGZ or companion VSIX version is immutable once published or
+        installed. An operator may explicitly withdraw and replace a candidate
+        at the same version only after confirming it was not installed or
+        published; every previously transferred copy is then invalid, the
+        corrected files must be resent, and the replacement byte sizes and
+        SHA-256 digests become authoritative, because npm cache identity must
+        never point at competing payloads that have entered use.
+      depends_on:
+        - release-candidate-requires-publishable-install-tarball
+        - public-npx-install-is-primary-install
+      anchors:
+        - ref: replaceable-preinstall-release-record
+          file: MANUAL-VERIFY.md
+        - ref: replaceable-preinstall-release-audit
+          file: scripts/release-audit.mjs
+    - id: switchboard-static-serving-dependency-is-security-patched
+      title: Switchboard static serving uses the upstream security-patched dependency
+      reason: Make the security floor and its deterministic release enforcement
+        explicit.
+      statement: >
+        The switchboard must depend on @fastify/static 10.1.2 or newer within
+        major 10, and the deterministic release audit must reject an older
+        range, because earlier releases are affected by non-canonical-path and
+        path-traversal authorization bypass advisories and also make default npm
+        audit fail while resolving bundled private parent packages.
+      depends_on:
+        - public-package-bundles-complete-codor-runtime
+      anchors:
+        - ref: patched-fastify-static-release-audit
+          file: scripts/release-audit.mjs
+    - id: packed-local-tgz-npx-proof-runs-fresh-default-audit
+      title: Packed local TGZ proof exercises a fresh default-audit npx install
+      reason: Prevent warm caches or audit suppression from hiding pre-execution npx
+        failures.
+      statement: >
+        The packed-install gate must invoke the exact local-TGZ npx path first
+        with an empty dedicated npm cache and without disabling npm audit, then
+        repeat it warm, because a pre-populated cache can hide install-time
+        advisory traversal failures before Codor code starts.
+      depends_on:
+        - packed-release-proof-runs-install-runtime
+        - public-npx-install-is-primary-install
+      anchors:
+        - ref: packed-npx-fresh-default-audit-proof
+          file: scripts/packed-install-test.sh
+        - ref: packed-npx-fresh-default-audit-audit
+          file: scripts/release-audit.mjs
+anchors:
+  distributed-release-artifacts-are-version-immutable:
+    immutable-release-record:
+      action: remove
+      reason: Replace the over-broad transfer-time immutability statement with the
+        approved pre-install withdrawal rule.
+    immutable-release-audit:
+      action: remove
+      reason: Audit the replacement release policy and patched dependency instead.
+  installed-or-published-release-artifacts-are-version-immutable:
+    replaceable-preinstall-release-record:
+      action: change
+      reason: Add the approved pre-install withdrawal boundary to the release record.
+    replaceable-preinstall-release-audit:
+      action: change
+      reason: Enforce the replacement policy deterministically.
+  switchboard-static-serving-dependency-is-security-patched:
+    patched-fastify-static-release-audit:
+      action: change
+      reason: Enforce @fastify/static 10.1.2 or newer within major 10.
+  packed-local-tgz-npx-proof-runs-fresh-default-audit:
+    packed-npx-fresh-default-audit-proof:
+      action: change
+      reason: Exercise the first exact local-TGZ npx run with a dedicated empty cache.
+    packed-npx-fresh-default-audit-audit:
+      action: change
+      reason: Reject proof scripts that suppress audit or omit the fresh-cache path.
+  packed-release-proof-runs-install-runtime:
+    packed-install-script:
+      action: change
+      reason: Add an isolated fresh-cache default-audit npx proof and warm repeat.
+    release-proof-audit:
+      action: change
+      reason: Require the stronger fresh-cache proof and forbid audit suppression.
+files:
+  - .harn/assumptions/distributed-release-artifacts-are-version-immutable.yaml
+  - .harn/assumptions/installed-or-published-release-artifacts-are-version-immutable.yaml
+  - .harn/assumptions/packed-local-tgz-npx-proof-runs-fresh-default-audit.yaml
+  - .harn/assumptions/switchboard-static-serving-dependency-is-security-patched.yaml
+  - MANUAL-VERIFY.md
+  - packages/switchboard/package.json
+  - pnpm-lock.yaml
+  - scripts/packed-install-test.sh
+  - scripts/release-audit.mjs
+verification: >
+  Verify @fastify/static resolves to 10.1.2 and npm audit reports no advisory
+  for it. Run switchboard tests, full serialized workspace tests, full build,
+  release/license audits, all Playwright tests, fresh-install proof, and the
+  packed/Docker proof. Build a clean 0.10.10 TGZ and VSIX from the exact commit;
+  inspect contents and hashes. On WSL-seed with npm 10.9.4, use a fresh cache
+  and the ordinary audit-enabled local-TGZ npx command to run codor --help and
+  install dry-run twice. Replace all earlier transferred 0.10.10 copies before
+  installation. Do not publish to npm or install remotely.
