@@ -1,0 +1,148 @@
+id: copilot-vscode-p2-review-fix-boot-admission-v2
+title: Fail closed before admitting a restarted Copilot VS Code turn without its
+  live cache
+assumptions:
+  create:
+    - id: copilot-vscode-boot-admission-fails-closed-without-live-cache
+      title: Restarted Copilot VS Code members need their exact live cache before
+        admission
+      statement: >
+        A local copilot-vscode member with a persisted session_ref may enter a
+        turn only when this daemon still caches that exact live session and its
+        bridge generation remains current; boot reconciliation and queued-turn
+        admission must otherwise mark the member dead with actionable
+        revive-or-recreate guidance before creating a run or calling
+        attach/deliver, while leaving the queued work untouched. A same-daemon
+        live cache remains usable, and ACP, resumable adapters, and every other
+        non-resumable adapter keep their existing admission behavior.
+      reason: >
+        Copilot VS Code sessions are intentionally in-memory and cannot be
+        safely reconstructed after a daemon restart. The admission gate must
+        prevent a persisted session reference from becoming a new running
+        attempt or silently consuming queued work when that exact native bridge
+        session is gone.
+      depends_on:
+        - copilot-vscode-revive-requires-exact-live-cache
+        - one-inflight-turn-per-member
+        - vscode-copilot-recoverable-native-failure-preserves-context
+  reviewed:
+    - id: copilot-vscode-revive-requires-exact-live-cache
+      outcome: unchanged
+      reason: >
+        Explicit revive keeps the existing exact cached-session and
+        bridge-generation guard; the new boot/turn-admission fence uses the same
+        predicate without changing revive semantics.
+    - id: vscode-copilot-recoverable-native-failure-preserves-context
+      outcome: unchanged
+      reason: >
+        A same-daemon recoverable stop still leaves its exact cached session
+        available for the next explicit delivery; only a missing cache at
+        admission is newly rejected.
+    - id: one-inflight-turn-per-member
+      outcome: unchanged
+      reason: >
+        The new check runs before the existing single-turn pump creates a run
+        and leaves its queue intact; it does not change batching or concurrency
+        rules.
+    - id: delivery-attempt-wal-reconcile
+      outcome: unchanged
+      reason: >
+        Existing delivery-attempt reconciliation remains responsible for already
+        delivering attempts; the new guard prevents a fresh post-restart
+        admission from reaching that WAL path.
+    - id: failed-finalization-reconciles-at-runtime
+      outcome: unchanged
+      reason: >
+        Terminal journal repair remains unchanged; the review fix only fences
+        local Copilot VS Code turn admission before a new run is started.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: >
+        No adapter process supervision changes; the copilot-vscode branch avoids
+        an unsafe attach attempt when its in-memory bridge runtime is absent.
+    - id: brakes-rechecked-at-turn-start
+      outcome: unchanged
+      reason: >
+        The existing brake evaluation remains unchanged; the cache fence only
+        precedes the existing batch selection inside that turn-start region.
+    - id: human-room-read-cursors-are-durable-and-monotonic
+      outcome: unchanged
+      reason: The unrelated room-read projection remains unchanged.
+    - id: room-support-is-bounded-recipient-scoped-state
+      outcome: unchanged
+      reason: The unrelated room-support projection remains unchanged.
+  retire: []
+anchors:
+  copilot-vscode-boot-admission-fails-closed-without-live-cache:
+    copilot-vscode-session-admission:
+      action: change
+      reason: >
+        Add one shared exact-cache/generation predicate that marks an
+        unavailable persisted local Copilot VS Code member dead with actionable
+        recovery guidance.
+    copilot-vscode-boot-reconcile-admission:
+      action: change
+      reason: |
+        Apply the predicate during reconcile before queued delivery draining.
+    copilot-vscode-session-admission-regression:
+      action: change
+      reason: >
+        Prove recoverable stop, daemon restart, queued work, dead-member
+        guidance, and zero attach/deliver or new running-run admission while
+        retaining the explicit revive lost-cache regression.
+  one-inflight-turn-per-member:
+    inflight-guard:
+      action: change
+      reason: >
+        Call the cache admission fence before the existing pump can create its
+        run placeholder or enter runTurn.
+  brakes-rechecked-at-turn-start:
+    turn-start-brake-recheck:
+      action: change
+      reason: >
+        The new cache fence is evaluated immediately before the existing
+        batch/brake path and leaves its brake behavior unchanged.
+  delivery-attempt-wal-reconcile:
+    boot-reconcile:
+      action: change
+      reason: >
+        Reconcile local persisted Copilot VS Code members before the existing
+        delivering-attempt and queued-work recovery passes.
+  copilot-vscode-revive-requires-exact-live-cache:
+    revive-native-session:
+      action: keep
+      reason: Explicit revive remains unchanged and still requires the exact cached
+        live session.
+    revive-session-regression:
+      action: keep
+      reason: Retain the existing explicit lost-cache revive rejection regression
+        unchanged.
+  vscode-copilot-recoverable-native-failure-preserves-context:
+    vscode-copilot-recoverable-finalization:
+      action: keep
+      reason: Recoverable checkpoint and finalization behavior remains unchanged.
+    vscode-copilot-recoverable-finalization-regression:
+      action: keep
+      reason: Existing same-daemon recoverable continuation regression remains
+        unchanged.
+  failed-finalization-reconciles-at-runtime:
+    runtime-finalization-reconcile:
+      action: keep
+      reason: Existing terminal finalization repair remains unchanged.
+  adapter-process-lifecycle-supervised:
+    copilot-cli-process-supervision:
+      action: keep
+      reason: CLI adapter supervision is outside this contained admission fix.
+  human-room-read-cursors-are-durable-and-monotonic:
+    durable-room-read-storage:
+      action: keep
+      reason: The unrelated room-read projection remains unchanged.
+  room-support-is-bounded-recipient-scoped-state:
+    room-support-projection:
+      action: keep
+      reason: The unrelated room-support projection remains unchanged.
+files:
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+applied:
+  applied_at: 2026-08-04T05:15:16.138Z

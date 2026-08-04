@@ -3197,6 +3197,7 @@ export class Daemon {
     const queued = this.store.listDeliveries(room, { recipient: memberId, state: 'queued' })
       .filter((delivery) => !this.steeringDeliveries.has(delivery.id));
     if (queued.length === 0) return;
+    if (!this.ensureCopilotVscodeSessionAdmission(room, member)) return;
     // harn:assume grouped-deliveries-have-an-isolated-batch-class ref=group-batch-pump-integration
     const selected = selectDeliveryBatchPrefix(queued);
     const batch = this.applyTurnStartBrakes(
@@ -4350,6 +4351,13 @@ export class Daemon {
         this.seedContextUsage(room.id, member);
       }
       // harn:end last-agent-usage-is-transient-and-seeded
+      // harn:assume copilot-vscode-boot-admission-fails-closed-without-live-cache ref=copilot-vscode-boot-reconcile-admission
+      for (const member of this.store.listMembers(room.id)) {
+        if (member.kind === 'agent' && !this.isRemoteMember(member)) {
+          this.ensureCopilotVscodeSessionAdmission(room.id, member);
+        }
+      }
+      // harn:end copilot-vscode-boot-admission-fails-closed-without-live-cache
       const delivering = this.store.listDeliveries(room.id, { state: 'delivering' });
       const byRunMsg = new Map<number, Delivery[]>();
       for (const delivery of delivering) {
@@ -4934,6 +4942,47 @@ export class Daemon {
     return this.project(room, this.store.roomSupport(room, memberId));
   }
   // harn:end room-support-is-bounded-recipient-scoped-state
+
+  // harn:assume copilot-vscode-boot-admission-fails-closed-without-live-cache ref=copilot-vscode-session-admission
+  /**
+   * A persisted native Copilot VS Code ref is only useful while this daemon still
+   * owns the exact bridge-backed session that created it. Never let a restart (or
+   * a stale bridge generation) fall through to sessionFor(), whose generic rebuild
+   * path would call the unsupported native attach operation.
+   */
+  private ensureCopilotVscodeSessionAdmission(room: string, member: Member): boolean {
+    if (
+      member.kind !== 'agent' ||
+      member.harness !== 'copilot-vscode' ||
+      member.session_ref === undefined ||
+      this.isRemoteMember(member) ||
+      (member.state !== 'idle' && member.state !== 'queued')
+    ) return true;
+
+    const adapter = this.adapters.get(member.harness);
+    const registered = adapter as RegisteredHarnessAdapter | undefined;
+    const cached = this.staleSessions.has(member.id)
+      ? undefined
+      : this.sessions.get(member.id);
+    const live =
+      cached !== undefined &&
+      cached.harness === 'copilot-vscode' &&
+      cached.session_ref === member.session_ref &&
+      registered?.canReviveSession?.(cached) === true;
+    if (live) return true;
+
+    const current = this.store.getMember(room, member.id);
+    if (current?.state !== 'dead') {
+      const dead = this.store.updateMember(room, member.id, { state: 'dead' });
+      this.emitMember(room, dead);
+      this.postSystemMessage(
+        room,
+        `@${member.handle} lost its live VS Code Copilot session; reload the companion and revive it, or remove and recreate the member`,
+      );
+    }
+    return false;
+  }
+  // harn:end copilot-vscode-boot-admission-fails-closed-without-live-cache
 
   /** Delta-sync straight off the change log, redacted like every fanout. */
   // harn:assume addressed-cold-hydration-is-strict-and-legacy-safe ref=addressed-hydration-contract

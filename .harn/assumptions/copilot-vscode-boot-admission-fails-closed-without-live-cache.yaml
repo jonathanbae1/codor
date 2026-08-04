@@ -1,0 +1,18 @@
+id: copilot-vscode-boot-admission-fails-closed-without-live-cache
+hash: a-da56797468f0
+title: Restarted Copilot VS Code members need their exact live cache before admission
+state: active
+statement: >
+  A local copilot-vscode member with a persisted session_ref may enter a turn
+  only when this daemon still caches that exact live session and its bridge
+  generation remains current; boot reconciliation and queued-turn admission must
+  otherwise mark the member dead with actionable revive-or-recreate guidance
+  before creating a run or calling attach/deliver, while leaving the queued work
+  untouched. A same-daemon live cache remains usable, and ACP, resumable
+  adapters, and every other non-resumable adapter keep their existing admission
+  behavior.
+depends_on:
+  - copilot-vscode-revive-requires-exact-live-cache
+  - one-inflight-turn-per-member
+  - vscode-copilot-recoverable-native-failure-preserves-context
+created_by: copilot-vscode-p2-review-fix-boot-admission-v2

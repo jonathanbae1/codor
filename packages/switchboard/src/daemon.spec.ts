@@ -3021,6 +3021,102 @@ describe('copilot-vscode recoverable native stops', () => {
 });
 // harn:end vscode-copilot-recoverable-native-failure-preserves-context
 
+// harn:assume copilot-vscode-boot-admission-fails-closed-without-live-cache ref=copilot-vscode-session-admission-regression
+it('fails closed before a restarted Copilot VS Code member can consume queued work without its live cache', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codor-copilot-vscode-boot-admission-'));
+  const firstAdapter = Object.assign(new FakeAdapter('copilot-vscode', { resume: false }), {
+    available: () => true,
+    canReviveSession: () => true,
+  });
+  let firstCalls = 0;
+  vi.spyOn(firstAdapter, 'deliver').mockImplementation(async function* (session, _payload, hooks = {}) {
+    session.session_ref ??= 'native-session';
+    hooks.onStarted?.({});
+    hooks.onSessionRef?.(session.session_ref);
+    firstCalls += 1;
+    yield firstCalls === 1
+      ? {
+          type: 'run.completed',
+          status: 'failed',
+          error: 'native stop after partial response',
+          recoverable: true,
+        }
+      : { type: 'run.completed', status: 'completed', final_text: 'same daemon still works' };
+  });
+  const first = new Daemon({
+    dbPath: join(root, 'switchboard.sqlite'),
+    blobRoot: join(root, 'blobs'),
+    adapters: [firstAdapter],
+    homeDir: root,
+    discoverModels: false,
+  });
+  let firstClosed = false;
+
+  try {
+    first.createRoom({ id: 'restart', name: 'Restart', owner: { handle: 'owner', display_name: 'Owner' } });
+    const member = first.spawnMember('restart', {
+      harness: 'copilot-vscode', handle: 'copilot', cwd: root,
+    });
+    first.postHumanMessage('restart', '@copilot first prompt');
+    await first.settle();
+    expect(first.store.getMember('restart', member.id)).toMatchObject({
+      state: 'idle', session_ref: 'native-session',
+    });
+
+    first.postHumanMessage('restart', '@copilot same daemon continuation');
+    await first.settle();
+    expect(firstCalls).toBe(2);
+    expect(first.store.getMember('restart', member.id)?.state).toBe('idle');
+    const previousRuns = first.store.listRunMessages('restart', { author: member.id, limit: 10 }).length;
+    await first.close({ force: true });
+    firstClosed = true;
+
+    const secondAdapter = Object.assign(new FakeAdapter('copilot-vscode', { resume: false }), {
+      available: () => true,
+      canReviveSession: () => true,
+    });
+    const attach = vi.spyOn(secondAdapter, 'attach');
+    const deliver = vi.spyOn(secondAdapter, 'deliver');
+    const second = new Daemon({
+      dbPath: join(root, 'switchboard.sqlite'),
+      blobRoot: join(root, 'blobs'),
+      adapters: [secondAdapter],
+      homeDir: root,
+      discoverModels: false,
+    });
+    try {
+      const prompt = second.postHumanMessage('restart', '@copilot after daemon restart');
+      await second.settle();
+      const queued = second.store.listDeliveries('restart', {
+        recipient: member.id,
+        state: 'queued',
+      }).find((delivery) => delivery.message_id === prompt.id);
+      expect(queued).toBeDefined();
+
+      await second.reconcile();
+      await second.settle();
+
+      expect(attach).not.toHaveBeenCalled();
+      expect(deliver).not.toHaveBeenCalled();
+      expect(second.store.listRunMessages('restart', { author: member.id, limit: 10 })).toHaveLength(previousRuns);
+      expect(second.store.listRunMessages('restart', { author: member.id, limit: 10 }))
+        .not.toContainEqual(expect.objectContaining({ run: expect.objectContaining({ status: 'running' }) }));
+      expect(second.store.listDeliveries('restart', { recipient: member.id, state: 'delivering' })).toHaveLength(0);
+      expect(second.store.getMember('restart', member.id)?.state).toBe('dead');
+      const notice = second.store.listMessages('restart', { limit: 100 }).find((message) =>
+        message.kind === 'system' && message.body.includes('lost its live VS Code Copilot session'));
+      expect(notice?.body).toContain('revive');
+      expect(notice?.body).toContain('recreate');
+    } finally {
+      await second.close({ force: true });
+    }
+  } finally {
+    if (!firstClosed) await first.close({ force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+// harn:end copilot-vscode-boot-admission-fails-closed-without-live-cache
+
 describe('Phase 3 usability core', () => {
   it('stops a two-agent reply chain at exact ACK_OK and retains the prior default', async () => {
     const alpha = spawnAgent('alpha');
