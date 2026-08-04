@@ -1,7 +1,7 @@
-import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, openSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -134,6 +134,7 @@ describe('VS Code Copilot adapter bridge', () => {
       expect(bridge.requests.some((request) => request.url.includes('/interaction'))).toBe(false);
       expect(bridge.requests.every((request) => request.authorization === `Bearer ${'a'.repeat(64)}`))
         .toBe(true);
+      expect(JSON.stringify(events)).not.toContain('a'.repeat(64));
     } finally {
       await bridge.close();
     }
@@ -154,6 +155,37 @@ describe('VS Code Copilot adapter bridge', () => {
       }));
       expect(bridge.adapter.canReviveSession(session)).toBe(false);
     } finally {
+      await bridge.close();
+    }
+  });
+
+  it('rejects non-private, symlinked, oversized, and malformed discovery records', async () => {
+    const bridge = await fixture([]);
+    const link = join(dirname(bridge.discovery), 'bridge-link.json');
+    try {
+      if (process.platform !== 'win32') {
+        chmodSync(bridge.discovery, 0o644);
+        expect(vscodeCopilotBridgeAvailable(bridge.discovery)).toBe(false);
+        chmodSync(bridge.discovery, 0o600);
+
+        symlinkSync(bridge.discovery, link);
+        expect(vscodeCopilotBridgeAvailable(link)).toBe(false);
+        rmSync(link, { force: true });
+      }
+
+      writeFileSync(bridge.discovery, 'x'.repeat(4097));
+      expect(vscodeCopilotBridgeAvailable(bridge.discovery)).toBe(false);
+
+      writeFileSync(bridge.discovery, JSON.stringify({
+        protocol_version: 1,
+        pid: process.pid,
+        port: 1,
+        token: 'not-a-token',
+        started_at: new Date().toISOString(),
+      }));
+      expect(vscodeCopilotBridgeAvailable(bridge.discovery)).toBe(false);
+    } finally {
+      rmSync(link, { force: true });
       await bridge.close();
     }
   });

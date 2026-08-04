@@ -20,6 +20,12 @@ approval setting is changed.
 The extension must be installed in the workspace extension host. In WSL or
 another remote workspace, install it on that remote side.
 
+The pinned VS Code command surface does not expose a `sessionResource`, so
+export and native Allow operate on the active/focused chat. Keep the
+Codor-created chat focused while a turn runs; the bridge verifies its exact
+prompt and exported request id before each action and fails closed if focus
+changes.
+
 Codor never installs, updates, or publishes this extension automatically. The
 bridge listens only on `127.0.0.1`, uses a random local bearer token, and never
 reads or exports GitHub/VS Code credentials.

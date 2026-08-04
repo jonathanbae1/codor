@@ -5,6 +5,7 @@ export const MAX_EXPORT_CHARS = 4 * 1024 * 1024;
 export const DEFAULT_POLL_MS = 200;
 export const DEFAULT_TURN_MS = 30 * 60_000;
 export const MAX_APPROVAL_ATTEMPTS = 3;
+export const MAX_REQUEST_BIND_POLLS = 10;
 
 export interface NativeTurnRequest {
   prompt: string;
@@ -25,6 +26,8 @@ export interface NativeChatHost {
 }
 
 interface ExportedRequest {
+  requestId?: string;
+  prompt?: string;
   response: unknown[];
   result?: unknown;
 }
@@ -46,21 +49,75 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function latestRequest(snapshot: unknown): ExportedRequest | undefined {
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+function nestedString(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (source === undefined) return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    const direct = stringValue(value);
+    if (direct !== undefined) return direct;
+    const nested = nestedString(record(value), ['prompt', 'query', 'message', 'text', 'value']);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
+}
+
+function exportedRequestId(candidate: Record<string, unknown>): string | undefined {
+  const direct = stringValue(candidate.requestId) ?? stringValue(candidate.request_id);
+  if (direct !== undefined) return direct;
+  return nestedString(record(candidate.request), ['requestId', 'request_id', 'id']);
+}
+
+function exportedPrompt(candidate: Record<string, unknown>): string | undefined {
+  return nestedString(candidate, ['request', 'prompt', 'query', 'message']);
+}
+
+function responseOf(candidate: Record<string, unknown>): unknown[] {
+  const responseValue = record(candidate.response)?.entireResponse;
+  if (Array.isArray(record(responseValue)?.value)) return record(responseValue)!.value as unknown[];
+  return Array.isArray(candidate.response) ? candidate.response : [];
+}
+
+function exportedRequests(snapshot: unknown): ExportedRequest[] {
   const root = record(snapshot);
   const requests = Array.isArray(root?.requests) ? root.requests : [];
-  const candidate = record(requests.at(-1));
-  if (candidate === undefined) return undefined;
-  const responseValue = record(candidate.response)?.entireResponse;
-  const response = Array.isArray(record(responseValue)?.value)
-    ? record(responseValue)!.value as unknown[]
-    : Array.isArray(candidate.response)
-      ? candidate.response
-      : [];
-  return {
-    response,
-    ...('result' in candidate && candidate.result !== undefined && { result: candidate.result }),
-  };
+  return requests.flatMap((value) => {
+    const candidate = record(value);
+    if (candidate === undefined) return [];
+    const requestId = exportedRequestId(candidate);
+    const prompt = exportedPrompt(candidate);
+    return [{
+      ...(requestId !== undefined && { requestId }),
+      ...(prompt !== undefined && { prompt }),
+      response: responseOf(candidate),
+      ...('result' in candidate && candidate.result !== undefined && { result: candidate.result }),
+    }];
+  });
+}
+
+function latestMatchingRequest(requests: ExportedRequest[], prompt: string): ExportedRequest | undefined {
+  for (let index = requests.length - 1; index >= 0; index -= 1) {
+    const candidate = requests[index];
+    if (candidate.prompt === prompt && candidate.requestId !== undefined) return candidate;
+  }
+  return undefined;
+}
+
+function requestBindingError(): Error {
+  return new Error(
+    'VS Code Copilot active chat no longer matches the bridge-created request; '
+    + 'focus the Codor-created chat or reload the companion extension',
+  );
+}
+
+function missingRequestIdError(): Error {
+  return new Error(
+    'VS Code Copilot did not expose a stable request id for the bridge-created prompt; '
+    + 'focus the Codor-created chat or reload the companion extension',
+  );
 }
 
 function textOf(part: unknown): string | undefined {
@@ -139,17 +196,24 @@ export class NativeChatRunner {
     outerSignal.addEventListener('abort', abort, { once: true });
     const revisions: string[] = [];
     const approvals = new Map<number, ApprovalLifecycle>();
+    let boundRequestId: string | undefined;
+    let bindPolls = 0;
     let openSettled = false;
     let openError: unknown;
 
     try {
       if (controller.signal.aborted) throw controller.signal.reason;
       await this.host.executeCommand('workbench.action.chat.newChat');
-      emit({ type: 'started', turn_id: turnId });
       // /autoApprove is scoped to this newly-created chat. It is deliberately
-      // part of the request rather than a user setting or a global command.
+      // issued as its own silent slash command rather than being concatenated
+      // with the real prompt (VS Code executes only the slash command text).
+      await this.host.executeCommand('workbench.action.chat.open', { query: '/autoApprove' });
+      emit({ type: 'started', turn_id: turnId });
+      // The real prompt is a separate request so the exported request id can
+      // identify it independently from the /autoApprove command. blockOnResponse
+      // is intentionally tracked, not awaited, so export polling can stream.
       void this.host.executeCommand('workbench.action.chat.open', {
-        query: `/autoApprove\n${request.prompt}`,
+        query: request.prompt,
         mode: 'agent',
         ...(request.model !== undefined && {
           modelSelector: { vendor: 'copilot', id: request.model },
@@ -170,7 +234,31 @@ export class NativeChatRunner {
         const encoded = JSON.stringify(snapshot);
         if (encoded.length > MAX_EXPORT_CHARS) throw new Error('Copilot export exceeded its bound');
         if (openSettled && openError !== undefined) throw openError;
-        const latest = latestRequest(snapshot);
+        const requests = exportedRequests(snapshot);
+        let latest: ExportedRequest | undefined;
+        if (boundRequestId !== undefined) {
+          latest = requests.find((candidate) =>
+            candidate.requestId === boundRequestId && candidate.prompt === request.prompt);
+          if (latest === undefined) throw requestBindingError();
+        } else {
+          latest = latestMatchingRequest(requests, request.prompt);
+          if (latest !== undefined) {
+            boundRequestId = latest.requestId;
+          } else {
+            if (requests.some((candidate) =>
+              candidate.prompt === request.prompt && candidate.requestId === undefined)) {
+              throw missingRequestIdError();
+            }
+            const unrelatedPending = requests.some((candidate) =>
+              candidate.prompt !== undefined
+              && candidate.prompt !== request.prompt
+              && candidate.prompt !== '/autoApprove'
+              && candidate.response.some((part, index) => waitingPart(part, index) !== undefined));
+            if (unrelatedPending) throw requestBindingError();
+            bindPolls += 1;
+            if (bindPolls >= MAX_REQUEST_BIND_POLLS) throw requestBindingError();
+          }
+        }
         if (latest !== undefined) {
           for (let index = 0; index < latest.response.length; index += 1) {
             const part = latest.response[index];
@@ -226,17 +314,39 @@ export class NativeChatRunner {
             const lifecycle = approvals.get(index)!;
             if (lifecycle.attempts >= MAX_APPROVAL_ATTEMPTS) throw noOpApprovalError(index);
             pending = current;
-            lifecycle.attempts += 1;
             break;
           }
           if (pending !== undefined) {
-            try {
-              await this.host.executeCommand('workbench.action.chat.acceptTool');
-            } catch (error) {
-              throw new Error(
-                `VS Code Copilot Allow failed for native tool part ${String(pending.index)}; `
-                + `reload the companion extension or inspect the VS Code chat: ${cleanError(error)}`,
-              );
+            // chat.export and chat.acceptTool both follow VS Code's focused
+            // widget when no sessionResource can be supplied. Re-export the
+            // exact request immediately before Allow so a changed chat fails
+            // closed instead of approving an unrelated pending tool.
+            const revalidatedSnapshot = await this.host.exportSnapshot(turnId);
+            const revalidatedEncoded = JSON.stringify(revalidatedSnapshot);
+            if (revalidatedEncoded.length > MAX_EXPORT_CHARS) {
+              throw new Error('Copilot export exceeded its bound');
+            }
+            const revalidated = exportedRequests(revalidatedSnapshot).find((candidate) =>
+              candidate.requestId === boundRequestId && candidate.prompt === request.prompt);
+            if (revalidated === undefined) throw requestBindingError();
+            const revalidatedPending = revalidated.response
+              .map((part, index) => waitingPart(part, index))
+              .find((value): value is WaitingPart => value !== undefined);
+            if (
+              revalidatedPending?.index === pending.index
+              && revalidatedPending.stateKey === pending.stateKey
+            ) {
+              const lifecycle = approvals.get(pending.index)!;
+              if (lifecycle.attempts >= MAX_APPROVAL_ATTEMPTS) throw noOpApprovalError(pending.index);
+              lifecycle.attempts += 1;
+              try {
+                await this.host.executeCommand('workbench.action.chat.acceptTool');
+              } catch (error) {
+                throw new Error(
+                  `VS Code Copilot Allow failed for native tool part ${String(pending.index)}; `
+                  + `reload the companion extension or inspect the VS Code chat: ${cleanError(error)}`,
+                );
+              }
             }
           }
         }

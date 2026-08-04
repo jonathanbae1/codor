@@ -1,0 +1,77 @@
+id: copilot-vscode-p1-review-fixes-v2
+title: Correct native prompt dispatch, active-chat binding, and discovery regressions
+notes: >
+  Correct the contained Phase 1 review findings without expanding into Phase 2:
+  send the native /autoApprove slash command separately from the real prompt,
+  bind exported polling and native Allow actions to the exact bridge-created
+  request, and make the bridge discovery regressions cover the security bounds
+  already promised by the existing assumptions. The internal VS Code command
+  surface has no sessionResource parameter here, so the documentation must state
+  the active-chat limitation while the runtime fails closed on identity drift.
+  Preserve the existing adapter, registry, revive, and credential-free
+  contracts.
+assumptions:
+  create: []
+  retire: []
+  reviewed:
+    - id: vscode-copilot-native-agent-auto-approves-and-streams-evidence
+      outcome: unchanged
+      reason: >
+        Native Agent execution, separate per-chat /autoApprove activation, exact
+        prompt dispatch, request-bound export polling, local native Allow,
+        repeated state tracking, and bounded failure remain the same native
+        execution contract; this pass corrects its command sequencing, chat
+        identity enforcement, and adapter regression coverage without changing
+        the adapter boundary.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: >
+        The bridge remains explicitly installed, loopback-only, bearer
+        authenticated, bounded, and credential-private. The added discovery
+        regressions enforce the existing non-private, symlink, size, and token
+        validation rather than changing that contract.
+anchors:
+  vscode-copilot-native-agent-auto-approves-and-streams-evidence:
+    vscode-copilot-native-chat-runtime:
+      action: change
+      reason: >
+        Issue and await an exact /autoApprove chat.open, then open the exact
+        real prompt separately; bind exported response polling and every
+        acceptance revalidation to its exact prompt and stable exported
+        requestId, failing closed when the active chat changes.
+    vscode-copilot-native-chat-regression:
+      action: change
+      reason: >
+        Prove ordered two-call dispatch, exact prompt selection, request-id
+        binding, and that an unrelated pending chat never receives Allow.
+    vscode-copilot-adapter-regression:
+      action: change
+      reason: >
+        Retain the authenticated bridge stream's credential-free event shape
+        while adding discovery-boundary regressions in the shared adapter test.
+  vscode-copilot-bridge-is-manual-local-and-credential-private:
+    vscode-copilot-bridge-regression:
+      action: change
+      reason: >
+        Add discovery regressions for non-private, symlinked, oversized, and
+        malformed-token records while retaining authenticated requests and
+        credential-free event shapes.
+    vscode-copilot-manual-install-doc:
+      action: change
+      reason: >
+        Document that the current internal command surface can only operate on
+        the active/focused native chat and that identity drift fails closed.
+files:
+  - .harn/plans/copilot-vscode-p1-review-fixes-v2.yaml
+  - packages/adapters/copilot/vscode-extension/src/native-chat.ts
+  - packages/adapters/copilot/vscode-extension/src/native-chat.spec.ts
+  - packages/adapters/copilot/src/vscode-adapter.spec.ts
+  - packages/adapters/copilot/vscode-extension/README.md
+verification: >
+  Run focused native-chat, adapter/bridge, registry, and revive tests; build the
+  affected Copilot packages and workspace extension; run the full workspace
+  build and serialized workspace tests; run Harn check, apply, and staged
+  validation; run git diff --check and leave the dedicated worktree clean. No
+  Phase 2 work, artifact delivery, push, merge, or deploy is in scope.
+applied:
+  applied_at: 2026-08-04T04:16:21.906Z

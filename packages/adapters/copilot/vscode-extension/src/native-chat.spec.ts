@@ -6,17 +6,37 @@ import {
   type NativeStreamEvent,
 } from './native-chat';
 
-function snapshot(parts: unknown[], result?: unknown): unknown {
+function snapshot(
+  parts: unknown[],
+  result?: unknown,
+  request = 'work',
+  requestId = 'request-1',
+): unknown {
   return {
     requests: [{
+      request,
+      requestId,
       response: { entireResponse: { value: parts } },
       ...(result !== undefined && { result }),
     }],
   };
 }
 
-function textSnapshot(text: string, done = false): unknown {
-  return snapshot([{ value: text }], done ? { status: 'complete' } : undefined);
+function snapshotRequests(
+  requests: Array<{ request: string; requestId: string; parts: unknown[]; result?: unknown }>,
+): unknown {
+  return {
+    requests: requests.map(({ request, requestId, parts, result }) => ({
+      request,
+      requestId,
+      response: { entireResponse: { value: parts } },
+      ...(result !== undefined && { result }),
+    })),
+  };
+}
+
+function textSnapshot(text: string, done = false, request = 'work', requestId = 'request-1'): unknown {
+  return snapshot([{ value: text }], done ? { status: 'complete' } : undefined, request, requestId);
 }
 
 function tool(state: string, toolId = 'terminal', extra: Record<string, unknown> = {}): unknown {
@@ -33,13 +53,20 @@ function tool(state: string, toolId = 'terminal', extra: Record<string, unknown>
 describe('native VS Code Copilot chat runtime', () => {
   it('opens the exact native agent with chat-local /autoApprove and emits accumulated text deltas', async () => {
     const commands: Array<{ command: string; args: unknown[] }> = [];
-    const snapshots = [textSnapshot('Hel'), textSnapshot('Hello', true)];
+    const snapshots = [
+      snapshotRequests([
+        { request: '/autoApprove', requestId: 'auto-1', parts: [] },
+        { request: 'unrelated history', requestId: 'old-1', parts: [{ value: 'ignore me' }] },
+        { request: 'work', requestId: 'work-1', parts: [{ value: 'Hel' }] },
+      ]),
+      textSnapshot('Hello', true, 'work', 'work-1'),
+    ];
     const host: NativeChatHost = {
       async executeCommand(command, ...args) {
         commands.push({ command, args });
         return undefined;
       },
-      exportSnapshot: async () => snapshots.shift() ?? textSnapshot('Hello', true),
+      exportSnapshot: async () => snapshots.shift() ?? textSnapshot('Hello', true, 'work', 'work-1'),
       delay: async () => undefined,
     };
     const events: NativeStreamEvent[] = [];
@@ -53,16 +80,17 @@ describe('native VS Code Copilot chat runtime', () => {
       new AbortController().signal,
     );
 
-    expect(commands[1]).toEqual({
-      command: 'workbench.action.chat.open',
-      args: [expect.objectContaining({
-        query: '/autoApprove\nwork',
+    expect(commands.slice(0, 3)).toEqual([
+      { command: 'workbench.action.chat.newChat', args: [] },
+      { command: 'workbench.action.chat.open', args: [{ query: '/autoApprove' }] },
+      { command: 'workbench.action.chat.open', args: [expect.objectContaining({
+        query: 'work',
         mode: 'agent',
         modelSelector: { vendor: 'copilot', id: 'gpt-5.6-luna' },
         previousRequests: [{ request: 'before', response: 'after' }],
         blockOnResponse: true,
-      })],
-    });
+      })] },
+    ]);
     expect(events.filter((event) => event.type === 'part').map((event) =>
       event.type === 'part' ? event.text_delta : undefined)).toEqual(['Hel', 'lo']);
     expect(events.at(-1)?.type).toBe('done');
@@ -78,23 +106,30 @@ describe('native VS Code Copilot chat runtime', () => {
         return undefined;
       },
       exportSnapshot: async () => {
-        if (phase === 0) return snapshot([tool('WaitingForConfirmation', 'terminal', { preExecution: true })]);
+        if (phase === 0) {
+          return snapshot(
+            [tool('WaitingForConfirmation', 'terminal', { preExecution: true })],
+            undefined,
+            'run the repeated command',
+            'run-1',
+          );
+        }
         if (phase === 1) {
           return snapshot([
             tool('completed', 'terminal'),
             tool('WaitingForConfirmation', 'terminal', { hardBlocked: true }),
-          ]);
+          ], undefined, 'run the repeated command', 'run-1');
         }
         if (phase === 2) {
           return snapshot([
             tool('completed', 'terminal'),
             tool('WaitingForPostApproval', 'terminal'),
-          ]);
+          ], undefined, 'run the repeated command', 'run-1');
         }
         return snapshot([
           tool('completed', 'terminal'),
           tool('completed', 'terminal'),
-        ], { status: 'complete' });
+        ], { status: 'complete' }, 'run the repeated command', 'run-1');
       },
       delay: async () => undefined,
     };
@@ -116,7 +151,7 @@ describe('native VS Code Copilot chat runtime', () => {
         if (command === 'workbench.action.chat.acceptTool') await accept();
         return undefined;
       },
-      exportSnapshot: async () => snapshot([tool('WaitingForConfirmation')]),
+      exportSnapshot: async () => snapshot([tool('WaitingForConfirmation')], undefined, 'blocked', 'blocked-1'),
       delay: async () => undefined,
     };
     const events: NativeStreamEvent[] = [];
@@ -136,6 +171,39 @@ describe('native VS Code Copilot chat runtime', () => {
     }));
   });
 
+  it('fails closed when the focused chat changes before Allow', async () => {
+    const accept = vi.fn(async () => undefined);
+    let exports = 0;
+    const host: NativeChatHost = {
+      async executeCommand(command) {
+        if (command === 'workbench.action.chat.acceptTool') await accept();
+        return undefined;
+      },
+      exportSnapshot: async () => {
+        exports += 1;
+        if (exports === 1) {
+          return snapshot([tool('WaitingForConfirmation')], undefined, 'work', 'work-1');
+        }
+        return snapshotRequests([
+          { request: 'unrelated chat', requestId: 'other-1', parts: [tool('WaitingForConfirmation')] },
+        ]);
+      },
+      delay: async () => undefined,
+    };
+    const events: NativeStreamEvent[] = [];
+    await new NativeChatRunner(host, 0).run(
+      { prompt: 'work' },
+      (event) => events.push(event),
+      new AbortController().signal,
+    );
+
+    expect(accept).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      type: 'error',
+      message: expect.stringContaining('active chat no longer matches'),
+    }));
+  });
+
   it('calls native cancel when the Codor request is aborted', async () => {
     const controller = new AbortController();
     const executeCommand = vi.fn(async () => undefined);
@@ -143,7 +211,7 @@ describe('native VS Code Copilot chat runtime', () => {
       executeCommand,
       exportSnapshot: async () => {
         controller.abort(new Error('stop'));
-        return snapshot([]);
+        return snapshot([], undefined, 'test', 'test-1');
       },
       delay: async () => undefined,
     };
