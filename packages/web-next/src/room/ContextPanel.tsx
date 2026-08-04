@@ -45,7 +45,7 @@ import { presentRunEvents, type RunRow } from '@runtime/run-presenter.js';
 import type { Connection } from '@runtime/ws.js';
 
 import { roomSlice, sortedMessages, useClientStore } from '../app/store.js';
-import { clockTime, compactCount, memberAccent } from '../primitives/identity.js';
+import { clockTime, compactCount, memberAccent, usd } from '../primitives/identity.js';
 import { Button, Chip, Eyebrow, IconButton, Modal, Segmented } from '../primitives/primitives.js';
 import { useAdapterCatalog, useMemberDetails } from '../app/session.js';
 import { ContextWindowMeter } from './ContextWindowMeter.js';
@@ -62,7 +62,7 @@ import {
   type GitHistoryPage,
   type GitWorkingState,
 } from './git-diff.js';
-import { costProvenanceLabel } from './spend-label.js';
+import { costProvenanceLabel, type CostProvenance } from './spend-label.js';
 import { DiffViewer } from './DiffViewer.js';
 import { harnessLabel, harnessMark } from './harness-marks.js';
 
@@ -333,11 +333,22 @@ function memberStateLabel(state: Member['state']): string {
   return 'Idle';
 }
 
+function compactCostLabel(value: CostProvenance): string {
+  const estimate = value.estimated_cost_usd ?? 0;
+  const unknown = value.uncosted_tokens ?? 0;
+  const parts: string[] = [];
+  if (value.cost_usd > 0 || (estimate === 0 && unknown === 0)) parts.push(usd(value.cost_usd));
+  if (estimate > 0) parts.push(`~${usd(estimate)}`);
+  if (unknown > 0) parts.push(compactCount(unknown));
+  return parts.join(' + ');
+}
+
 function MemberMetric(props: {
   icon: typeof FileText;
   label: string;
   value: string;
   title?: string;
+  accessibleLabel?: string;
   testId?: string;
 }) {
   const Icon = props.icon;
@@ -345,12 +356,12 @@ function MemberMetric(props: {
     <span
       className="nx-member-metric"
       role="img"
-      aria-label={`${props.label}: ${props.value}`}
+      aria-label={props.accessibleLabel ?? `${props.label}: ${props.value}`}
       title={props.title ?? `${props.label}: ${props.value}`}
       data-testid={props.testId}
     >
-      <Icon size={12} aria-hidden="true" />
       <span>{props.value}</span>
+      <Icon size={12} aria-hidden="true" />
     </span>
   );
 }
@@ -471,7 +482,13 @@ function MemberCard(props: {
             {member.kind === 'agent' && spend !== undefined && (
               <span className="nx-member-usage-metrics" data-testid={`member-${member.handle}-usage`}>
                 <MemberMetric icon={FileText} label="Tokens" value={compactCount(tokens ?? 0)} />
-                <MemberMetric icon={CircleDollarSign} label="Cost" value={costProvenanceLabel(spend)} />
+                <MemberMetric
+                  icon={CircleDollarSign}
+                  label="Cost"
+                  value={compactCostLabel(spend)}
+                  title={`Cost: ${costProvenanceLabel(spend)}`}
+                  accessibleLabel={`Cost: ${costProvenanceLabel(spend)}`}
+                />
                 <MemberMetric icon={RotateCcw} label="Turns" value={String(spend.turns)} />
               </span>
             )}

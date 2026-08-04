@@ -317,6 +317,23 @@ test.describe('member card responsive presentation', () => {
       await expect(card.getByTestId('member-fable-compact')).toHaveAccessibleName("Compact @fable's context");
       await expect(card.getByTestId('member-fable-clear-context')).toHaveAccessibleName("Clear @fable's context");
 
+      const usageMetrics = card.getByTestId('member-fable-usage').locator('.nx-member-metric');
+      await expect(usageMetrics).toHaveCount(3);
+      await expect(usageMetrics.nth(0)).toHaveText(/^\d+(?:\.\d+)?[KMB]?$/);
+      await expect(usageMetrics.nth(1)).toHaveText(/^[~$\d.,KMB+ ]+$/);
+      await expect(usageMetrics.nth(2)).toHaveText(/^\d+$/);
+      const costTitle = await usageMetrics.nth(1).getAttribute('title');
+      expect(costTitle).toMatch(/^Cost: /);
+      await expect(usageMetrics.nth(1)).toHaveAccessibleName(costTitle!);
+      await expect(usageMetrics.nth(1)).not.toContainText(/est\.|exact|unpriced tokens/i);
+      for (let index = 0; index < 3; index += 1) {
+        await expect(usageMetrics.nth(index).locator(':scope > span')).toHaveCount(1);
+        await expect(usageMetrics.nth(index).locator(':scope > svg')).toHaveCount(1);
+        expect(await usageMetrics.nth(index).evaluate((metric) =>
+          Array.from(metric.children).map((child) => child.tagName.toLowerCase()),
+        )).toEqual(['span', 'svg']);
+      }
+
       const cardBox = (await card.boundingBox())!;
       const headerBox = (await header.boundingBox())!;
       const primaryBox = (await primary.boundingBox())!;

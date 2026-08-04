@@ -1,0 +1,53 @@
+id: npx-member-ui-0-10-10-review-fix-metric-pills
+title: Restore number-first compact member metric pills
+notes: >
+  Contained review correction for the unpublished 0.10.10 member-card release.
+  Render Row 1's compact token, cost, and turn metrics as number followed by the
+  existing icon, and keep the visible cost label numeric/symbol-only while
+  retaining complete spend provenance in the title and accessible name. The
+  two-row layout, 5h/7d indicators, spend-label semantics elsewhere, release
+  version, and runtime behavior remain unchanged.
+assumptions:
+  reviewed:
+    - id: agent-member-card-composes-two-compact-rows
+      outcome: unchanged
+      reason: >
+        The existing contract already requires number-plus-icon Row 1 pills, no
+        visible provenance words, and complete provenance in accessible
+        metadata; this correction makes the implementation match that truth.
+    - id: member-context-window-meter-derived-from-last-usage
+      outcome: unchanged
+      reason: The context ring and its usage-derived semantics are untouched.
+    - id: agent-usage-limits-reported-not-guessed
+      outcome: unchanged
+      reason: The existing 5h and 7d reported limit indicators remain unchanged.
+    - id: web-room-targets-meet-minimum-hit-size
+      outcome: unchanged
+      reason: The metric correction does not alter action targets or geometry.
+    - id: controls-fit-the-surface-they-sit-on
+      outcome: unchanged
+      reason: Responsive row rails and fixed trailing actions are untouched.
+    - id: release-candidate-requires-publishable-install-tarball
+      outcome: unchanged
+      reason: The release remains the same unpublished 0.10.10 candidate.
+anchors:
+  agent-member-card-composes-two-compact-rows:
+    member-card-compact-rows:
+      action: change
+      reason: Correct Row 1 metric markup and visible cost presentation.
+    member-card-compact-rows-regression:
+      action: change
+      reason: Assert number-before-icon order and absence of visible provenance words.
+files:
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+verification: >
+  Run the focused Room 3 browser regression for metric order,
+  numeric/symbol-only cost, preserved accessible/title provenance, and unchanged
+  5h/7d indicators; run all web-next units, the relevant E2E coverage, full web
+  build, and release audits. Rebuild and inspect both unpublished 0.10.10 TGZ
+  and VSIX artifacts, recording paths, byte sizes, and SHA-256 values. Run Harn
+  plan check/lock, diff check, staged check, and apply. Do not push, deploy,
+  publish, Taildrop, or install remotely.
+applied:
+  applied_at: 2026-08-04T10:34:24.506Z
