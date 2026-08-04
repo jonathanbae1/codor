@@ -1,0 +1,83 @@
+id: release-0-10-9-copilot-vscode
+title: Release the reviewed Copilot VS Code bridge as 0.10.9
+notes: >
+  Advance the existing repository release set from 0.10.8 to 0.10.9 and align
+  the companion codor-copilot-bridge VSIX identity. Update the ACP initialize
+  client identity to the same release version. Build, inspect, and smoke the
+  public TGZ and matching VSIX without publishing, tagging, pushing, deploying,
+  Taildropping, or installing on remote targets.
+assumptions:
+  reviewed:
+    - id: public-package-bundles-complete-codor-runtime
+      outcome: unchanged
+      reason: >
+        The public artifact continues to bundle the exact runtime closure and
+        resolve every staged workspace dependency to the release versions.
+    - id: public-package-readme-renders-on-npm
+      outcome: unchanged
+      reason: The npm-safe README and install command remain unchanged.
+    - id: acp-v1-events-and-capabilities-are-negotiated
+      outcome: unchanged
+      reason: >
+        Only the ACP initialize clientInfo release identity advances; protocol
+        negotiation, capabilities, and normalized runtime behavior remain
+        unchanged.
+    - id: artifact-build-runs-from-clean-source
+      outcome: unchanged
+      reason: >
+        The artifact builder and its clean-source build contract remain
+        unchanged; this plan only advances release identities.
+    - id: release-audits-enforce-codor-clean-break
+      outcome: unchanged
+      reason: Existing release and license audits continue to enforce repository
+        identity.
+    - id: release-candidate-requires-publishable-install-tarball
+      outcome: unchanged
+      reason: >
+        The candidate still requires the existing deterministic gates and exact
+        packed-install evidence before any later publication decision.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: >
+        The companion remains manually installed, loopback-only, and credential
+        private; only its package version changes.
+    - id: workspace-gates-cover-all-buildable-projects
+      outcome: unchanged
+      reason: Recursive build/test project coverage remains unchanged.
+anchors:
+  acp-v1-events-and-capabilities-are-negotiated:
+    acp-adapter-runtime:
+      action: change
+      reason: Advance the ACP initialize clientInfo version from 0.10.5 to 0.10.9.
+files:
+  - package.json
+  - packages/adapters/acp/package.json
+  - packages/adapters/acp/src/adapter.ts
+  - packages/adapters/antigravity/package.json
+  - packages/adapters/claude-code/package.json
+  - packages/adapters/codex/package.json
+  - packages/adapters/copilot/package.json
+  - packages/adapters/copilot/vscode-extension/package.json
+  - packages/adapters/cursor/package.json
+  - packages/adapters/gemini/package.json
+  - packages/adapters/opencode/package.json
+  - packages/bridges/core/package.json
+  - packages/bridges/slack/package.json
+  - packages/bridges/telegram/package.json
+  - packages/cli/package.json
+  - packages/protocol/package.json
+  - packages/switchboard/package.json
+  - packages/web-next/package.json
+  - relay/package.json
+  - website/package.json
+verification: >
+  Every manifest in the existing 0.10.8 release set plus the companion extension
+  reports 0.10.9, and the ACP client identity reports 0.10.9. Focused extension,
+  adapter, and ACP tests/builds pass; the full workspace build and serialized
+  tests, release/license audits, fresh and packed install proofs, and final
+  TGZ/VSIX content and SHA-256 inspection pass. Safe real VS Code smoke evidence
+  is recorded when the pinned native bridge is available, with any unsafe or
+  unavailable failure mode reported honestly. Do not publish, tag, push, deploy,
+  Taildrop, or install on remote targets.
+applied:
+  applied_at: 2026-08-04T05:38:04.872Z
