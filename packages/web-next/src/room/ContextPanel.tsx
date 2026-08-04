@@ -1,5 +1,23 @@
 import type { AgentLimit, AgentTaskList, AgentTaskStatus, Member, Policy, Room, ThinkingLevel, WireEvent } from '@codor/protocol';
-import { Bot, ChevronRight, FileText, LoaderCircle, MoreVertical, Plus, RefreshCw, RotateCcw, Square, X } from 'lucide-react';
+import {
+  Bot,
+  ChevronRight,
+  CircleDollarSign,
+  Eraser,
+  FileText,
+  List,
+  LoaderCircle,
+  Lock,
+  Minimize2,
+  MoreVertical,
+  PencilLine,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Square,
+  X,
+  Zap,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactUrl, fetchArtifacts, fetchRunEvents, refreshUsage, type AdapterRegistration, type ArtifactFeed, type MemberDetail } from '@runtime/api.js';
@@ -28,7 +46,7 @@ import type { Connection } from '@runtime/ws.js';
 
 import { roomSlice, sortedMessages, useClientStore } from '../app/store.js';
 import { clockTime, compactCount, memberAccent } from '../primitives/identity.js';
-import { Button, Chip, Eyebrow, IconButton, Modal, Segmented, StatusPill } from '../primitives/primitives.js';
+import { Button, Chip, Eyebrow, IconButton, Modal, Segmented } from '../primitives/primitives.js';
 import { useAdapterCatalog, useMemberDetails } from '../app/session.js';
 import { ContextWindowMeter } from './ContextWindowMeter.js';
 import {
@@ -46,6 +64,7 @@ import {
 } from './git-diff.js';
 import { costProvenanceLabel } from './spend-label.js';
 import { DiffViewer } from './DiffViewer.js';
+import { harnessLabel, harnessMark } from './harness-marks.js';
 
 type Tab = 'members' | 'diff' | 'preview';
 
@@ -232,7 +251,7 @@ function MembersTab(props: { room: string; token: () => string; connection: Conn
   );
 }
 
-// harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-ui
+// harn:assume people-and-agents-shows-small-task-status-icons ref=small-member-task-list-ui
 const TASK_STATUS_LABEL: Record<AgentTaskStatus, string> = {
   pending: 'Pending',
   in_progress: 'In progress',
@@ -292,7 +311,49 @@ function MemberTaskList(props: { handle: string; tasks: AgentTaskList }) {
     </div>
   );
 }
-// harn:end people-and-agents-shows-actionable-compact-task-lists
+// harn:end people-and-agents-shows-small-task-status-icons
+
+const POLICY_ICON: Record<Policy, typeof Lock> = {
+  'read-only': Lock,
+  'workspace-write': PencilLine,
+  'full-access': Zap,
+};
+const POLICY_LABEL: Record<Policy, string> = {
+  'read-only': 'Read only',
+  'workspace-write': 'Workspace write',
+  'full-access': 'Full access',
+};
+
+function memberStateLabel(state: Member['state']): string {
+  if (state === 'running' || state === 'queued') return 'Working';
+  if (state === 'dead') return 'Dead';
+  if (state === 'awaiting_input') return 'Waiting for input';
+  if (state === 'unreachable') return 'Unavailable';
+  if (state === 'custody_uncertain') return 'Connection uncertain';
+  return 'Idle';
+}
+
+function MemberMetric(props: {
+  icon: typeof FileText;
+  label: string;
+  value: string;
+  title?: string;
+  testId?: string;
+}) {
+  const Icon = props.icon;
+  return (
+    <span
+      className="nx-member-metric"
+      role="img"
+      aria-label={`${props.label}: ${props.value}`}
+      title={props.title ?? `${props.label}: ${props.value}`}
+      data-testid={props.testId}
+    >
+      <Icon size={12} aria-hidden="true" />
+      <span>{props.value}</span>
+    </span>
+  );
+}
 
 function MemberCard(props: {
   member: Member;
@@ -385,161 +446,199 @@ function MemberCard(props: {
     }
   }, [reviving, errorCount, member]);
 
-  const metadata = member.kind === 'human'
-    ? [member.display_name].filter((value): value is string => Boolean(value))
-    : [member.harness, member.model, member.policy].filter((value): value is string => Boolean(value));
+  const policy = asPolicy(member.policy);
+  const PolicyIcon = policy === '' ? undefined : POLICY_ICON[policy];
+  const policyLabel = policy === '' ? undefined : POLICY_LABEL[policy];
+  const stateLabel = memberStateLabel(member.state);
 
-  // harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-layout
+  // harn:assume agent-member-card-composes-two-compact-rows ref=member-card-compact-rows
   return (
     <li className="nx-member" data-testid={`member-${member.handle}`}>
-      <div className="nx-member-identity">
+      <div className={`nx-member-header${member.kind === 'human' ? ' is-human' : ''}`} data-testid={`member-${member.handle}-header`}>
         <Chip name={member.handle} accent={memberAccent(member)} size={32} />
-        <span className="nx-member-id">
-          <strong>@{member.handle}</strong>
-          <span className="nx-member-sub" data-testid={`member-${member.handle}-metadata`}>
-            {metadata.length > 0 ? metadata.map((value, index) => (
-              <span key={`${value}-${index}`} className="nx-member-meta-item">
-                {index > 0 && ' · '}{value}
+        <div className="nx-member-header-body">
+          <div className="nx-member-row nx-member-row-primary" data-testid={`member-${member.handle}-row-primary`}>
+            <strong className="nx-member-handle">@{member.handle}</strong>
+            <span
+              className={`nx-member-state-mark is-${member.state}`}
+              role="img"
+              aria-label={`${stateLabel} @${member.handle}`}
+              title={`${stateLabel} @${member.handle}`}
+            />
+            {member.kind === 'human' && member.display_name !== '' && (
+              <span className="nx-member-display-name">{member.display_name}</span>
+            )}
+            {member.kind === 'agent' && spend !== undefined && (
+              <span className="nx-member-usage-metrics" data-testid={`member-${member.handle}-usage`}>
+                <MemberMetric icon={FileText} label="Tokens" value={compactCount(tokens ?? 0)} />
+                <MemberMetric icon={CircleDollarSign} label="Cost" value={costProvenanceLabel(spend)} />
+                <MemberMetric icon={RotateCcw} label="Turns" value={String(spend.turns)} />
               </span>
-            )) : 'agent'}
-          </span>
-        </span>
-        <span className="nx-member-state">
-          {member.kind === 'human'
-            ? <Eyebrow>{member.role ?? 'human'}</Eyebrow>
-            : <MemberStateWord state={member.state} />}
-        </span>
-      </div>
-      {member.kind === 'agent' && (
-        <div className="nx-member-context-row" data-testid={`member-${member.handle}-context-actions`}>
-          {/* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-wiring */}
-          <ContextWindowMeter
-            usage={member.lastUsage}
-            pending={member.state === 'running'}
-            testId={`member-${member.handle}-context-window`}
-          />
-          {/* harn:end member-context-window-meter-derived-from-last-usage */}
-          {/* harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-lifecycle-controls */}
-          {props.canManage && member.state !== 'dead' && (
-            // Beside the ring, because the ring is what makes an operator want it.
-            // Never hidden while running — hiding it would read as "not available
-            // here"; disabled with the reason keeps the lever discoverable. A dead
-            // agent is the one exception: Compact gives way to Revive below.
-            <button
-              type="button"
-              className="nx-member-compact"
-              aria-label={`Compact @${member.handle}'s context`}
-              data-testid={`member-${member.handle}-compact`}
-              disabled={member.state !== 'idle' || compacting}
-              title={running
-                ? 'Stop the run first — compacting mid-turn would race the engine'
-                : member.state !== 'idle'
-                  ? `Only an idle agent can be compacted — @${member.handle} is ${member.state}`
-                  : compacting
-                    ? 'Compacting this agent\u2019s engine session…'
-                    : 'Compact this agent\u2019s engine session'}
-              data-compacting={compacting ? 'true' : undefined}
-              onClick={() => {
-                startedAt.current = { errors: errorCount, member };
-                setCompacting(true);
-                props.connection.act({ act: 'compact_member', member_id: member.id });
-              }}
-            >
-              {compacting && <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />}
-              <span>Compact</span>
-            </button>
-          )}
-          {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
-          {props.canManage && member.state !== 'dead' && member.session_ref !== undefined && (
-            <button
-              type="button"
-              className="nx-member-clear"
-              aria-label={`Clear @${member.handle}'s context`}
-              data-testid={`member-${member.handle}-clear-context`}
-              disabled={member.state !== 'idle' || clearing}
-              title={member.state !== 'idle'
-                ? `Only an idle agent context can be cleared — @${member.handle} is ${member.state}`
-                : clearing
-                  ? `Clearing @${member.handle}'s native context…`
-                  : `Clear @${member.handle}'s native context`}
-              onClick={() => setConfirmClear(true)}
-            >
-              Clear context
-            </button>
-          )}
-          {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
-          <span className="nx-member-action-spacer" aria-hidden="true" />
-          {props.canManage && member.state === 'dead' && (
-            // A dead agent's prominent slot is Revive, not a permanently-disabled
-            // Compact. Guarded against a double-dispatch while the revival is pending.
-            <button
-              type="button"
-              className="nx-member-revive"
-              data-testid={`member-${member.handle}-revive`}
-              disabled={reviving}
-              title={reviving ? 'Reviving…' : `Revive @${member.handle} from its saved session`}
-              aria-label={`Revive @${member.handle}`}
-              onClick={() => {
-                if (reviving) return;
-                revivedAt.current = { errors: errorCount, member };
-                setReviving(true);
-                props.connection.act({ act: 'revive', member_id: member.id });
-              }}
-            >
-              {reviving
-                ? <LoaderCircle size={13} className="nx-spin" aria-hidden="true" />
-                : <RotateCcw size={13} aria-hidden="true" />}
-              <span>Revive</span>
-            </button>
-          )}
-          {running && props.canStop && (
-            <button
-              type="button"
-              className="nx-member-stop"
-              aria-label={`Stop @${member.handle}`}
-              data-testid={`member-${member.handle}-stop`}
-              title="Stop this run (the agent stays alive)"
-              onClick={() => props.connection.act({ act: 'interrupt', member_id: member.id })}
-            >
-              <Square size={13} aria-hidden="true" />
-            </button>
-          )}
-          {props.canManage && (
-            <div className="nx-member-menu" ref={menuRef}>
-              <IconButton
-                icon={MoreVertical}
-                label={`Actions for @${member.handle}`}
-                size="sm"
-                variant="quiet"
-                data-testid={`member-${member.handle}-menu`}
-                onClick={() => setMenu((v) => !v)}
+            )}
+            {member.kind === 'agent' && detail !== undefined && detail.queued_count > 0 && (
+              <MemberMetric
+                icon={List}
+                label="Queue"
+                value={String(detail.queued_count)}
+                testId={`member-${member.handle}-queue`}
               />
-              {menu && (
-                <div className="nx-menu" role="menu" aria-label={`@${member.handle} actions`}>
-                  <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename…</button>
-                  <button role="menuitem" onClick={() => { setMenu(false); setConfiguring(true); }}>Configure…</button>
-                  {member.state !== 'dead' && (
-                    <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('kill'); }}>
-                      Kill…
-                    </button>
+            )}
+          </div>
+          {member.kind === 'agent' && (
+            <div className="nx-member-row nx-member-row-secondary" data-testid={`member-${member.handle}-row-secondary`}>
+              <div className="nx-member-meta-rail" data-testid={`member-${member.handle}-metadata`}>
+                <div className="nx-member-meta-content">
+                  {member.harness !== undefined && (
+                    <span
+                      className="nx-member-harness-mark"
+                      role="img"
+                      aria-label={`${harnessLabel(member.harness)} harness`}
+                      title={`${harnessLabel(member.harness)} harness`}
+                    >
+                      {harnessMark(member.harness, 16)}
+                    </span>
                   )}
-                  <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('remove'); }}>
-                    Remove…
-                  </button>
+                  {member.model !== undefined && (
+                    <span className="nx-member-model-pill" title={`Model: ${member.model}`}>
+                      {member.model}
+                    </span>
+                  )}
+                  {PolicyIcon !== undefined && policyLabel !== undefined && (
+                    <span
+                      className="nx-member-policy-mark"
+                      role="img"
+                      aria-label={`Policy: ${policyLabel}`}
+                      title={`Policy: ${policyLabel}`}
+                    >
+                      <PolicyIcon size={14} aria-hidden="true" />
+                    </span>
+                  )}
                 </div>
-              )}
+              </div>
+              <span className="nx-member-action-spacer" aria-hidden="true" />
+              <div className="nx-member-actions" data-testid={`member-${member.handle}-context-actions`}>
+                {/* harn:assume member-context-window-meter-derived-from-last-usage ref=context-window-meter-wiring */}
+                {(member.lastUsage !== undefined || member.state === 'running') && (
+                  <span className="nx-member-context-ring">
+                    <ContextWindowMeter
+                      usage={member.lastUsage}
+                      pending={member.state === 'running'}
+                      testId={`member-${member.handle}-context-window`}
+                    />
+                  </span>
+                )}
+                {/* harn:end member-context-window-meter-derived-from-last-usage */}
+                {/* harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-lifecycle-controls */}
+                {props.canManage && member.state !== 'dead' && (
+                  <button
+                    type="button"
+                    className="nx-member-compact"
+                    aria-label={`Compact @${member.handle}'s context`}
+                    data-testid={`member-${member.handle}-compact`}
+                    disabled={member.state !== 'idle' || compacting}
+                    title={running
+                      ? 'Stop the run first — compacting mid-turn would race the engine'
+                      : member.state !== 'idle'
+                        ? `Only an idle agent can be compacted — @${member.handle} is ${member.state}`
+                        : compacting
+                          ? 'Compacting this agent\u2019s engine session…'
+                          : 'Compact this agent\u2019s engine session'}
+                    data-compacting={compacting ? 'true' : undefined}
+                    onClick={() => {
+                      startedAt.current = { errors: errorCount, member };
+                      setCompacting(true);
+                      props.connection.act({ act: 'compact_member', member_id: member.id });
+                    }}
+                  >
+                    {compacting
+                      ? <LoaderCircle size={15} className="nx-spin" aria-hidden="true" />
+                      : <Minimize2 size={15} aria-hidden="true" />}
+                  </button>
+                )}
+                {/* harn:assume member-context-reset-is-authorized-atomic-and-lazy ref=clear-context-web-control */}
+                {props.canManage && member.state !== 'dead' && member.session_ref !== undefined && (
+                  <button
+                    type="button"
+                    className="nx-member-clear"
+                    aria-label={`Clear @${member.handle}'s context`}
+                    data-testid={`member-${member.handle}-clear-context`}
+                    disabled={member.state !== 'idle' || clearing}
+                    title={member.state !== 'idle'
+                      ? `Only an idle agent context can be cleared — @${member.handle} is ${member.state}`
+                      : clearing
+                        ? `Clearing @${member.handle}'s native context…`
+                        : `Clear @${member.handle}'s native context`}
+                    onClick={() => setConfirmClear(true)}
+                  >
+                    <Eraser size={15} aria-hidden="true" />
+                  </button>
+                )}
+                {/* harn:end member-context-reset-is-authorized-atomic-and-lazy */}
+                {props.canManage && member.state === 'dead' && (
+                  <button
+                    type="button"
+                    className="nx-member-revive"
+                    data-testid={`member-${member.handle}-revive`}
+                    disabled={reviving}
+                    title={reviving ? 'Reviving…' : `Revive @${member.handle} from its saved session`}
+                    aria-label={`Revive @${member.handle}`}
+                    onClick={() => {
+                      if (reviving) return;
+                      revivedAt.current = { errors: errorCount, member };
+                      setReviving(true);
+                      props.connection.act({ act: 'revive', member_id: member.id });
+                    }}
+                  >
+                    {reviving
+                      ? <LoaderCircle size={15} className="nx-spin" aria-hidden="true" />
+                      : <RotateCcw size={15} aria-hidden="true" />}
+                  </button>
+                )}
+                {running && props.canStop && (
+                  <button
+                    type="button"
+                    className="nx-member-stop"
+                    aria-label={`Stop @${member.handle}`}
+                    data-testid={`member-${member.handle}-stop`}
+                    title="Stop this run (the agent stays alive)"
+                    onClick={() => props.connection.act({ act: 'interrupt', member_id: member.id })}
+                  >
+                    <Square size={13} aria-hidden="true" />
+                  </button>
+                )}
+                {props.canManage && (
+                  <div className="nx-member-menu" ref={menuRef}>
+                    <IconButton
+                      icon={MoreVertical}
+                      label={`Actions for @${member.handle}`}
+                      size="sm"
+                      variant="quiet"
+                      data-testid={`member-${member.handle}-menu`}
+                      onClick={() => setMenu((v) => !v)}
+                    />
+                    {menu && (
+                      <div className="nx-menu" role="menu" aria-label={`@${member.handle} actions`}>
+                        <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename…</button>
+                        <button role="menuitem" onClick={() => { setMenu(false); setConfiguring(true); }}>Configure…</button>
+                        {member.state !== 'dead' && (
+                          <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('kill'); }}>
+                            Kill…
+                          </button>
+                        )}
+                        <button role="menuitem" className="is-danger" onClick={() => { setMenu(false); setConfirming('remove'); }}>
+                          Remove…
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* harn:end dead-agent-surfaces-revive-in-its-action-area */}
+              </div>
             </div>
           )}
-          {/* harn:end dead-agent-surfaces-revive-in-its-action-area */}
         </div>
-      )}
-      {member.kind === 'agent' && (spend !== undefined || (detail?.queued_count ?? 0) > 0) && (
-        <p className="nx-member-meter">
-          {tokens !== undefined ? `${compactCount(tokens)} tokens` : ''}
-          {spend !== undefined ? ` · ${costProvenanceLabel(spend)} · ${spend.turns} turns` : ''}
-          {(detail?.queued_count ?? 0) > 0 ? ` · ${detail?.queued_count} queued` : ''}
-        </p>
-      )}
+      </div>
+      {/* harn:end agent-member-card-composes-two-compact-rows */}
       {member.limits !== undefined && member.limits.length > 0 && (
         <p className="nx-member-limits" data-testid={`member-${member.handle}-limits`}>
           {member.limits.map((limit) =>
@@ -557,7 +656,6 @@ function MemberCard(props: {
       {member.kind === 'agent' && member.tasks !== undefined && member.tasks.items.some((task) => task.status !== 'completed') && (
         <MemberTaskList handle={member.handle} tasks={member.tasks} />
       )}
-      {/* harn:end agent-member-card-separates-context-actions-from-usage */}
 
       {confirming !== undefined && (
         <Modal
@@ -680,22 +778,6 @@ function LimitGauge(props: { limit: AgentLimit }) {
       <span className="nx-gauge-value">{left}% left</span>
     </span>
   );
-}
-
-function MemberStateWord(props: { state: Member['state'] }) {
-  const tone = props.state === 'running' || props.state === 'queued'
-    ? 'live'
-    : props.state === 'dead'
-      ? 'error'
-      : 'neutral';
-  const word = props.state === 'running' || props.state === 'queued'
-    ? 'Working'
-    : props.state === 'dead'
-      ? 'Dead'
-      : props.state === 'awaiting_input'
-        ? 'Waiting'
-        : 'Idle';
-  return <StatusPill tone={tone}>{word}</StatusPill>;
 }
 
 function RenameDialog(props: {

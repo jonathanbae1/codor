@@ -1,0 +1,30 @@
+id: agent-member-card-composes-two-compact-rows
+hash: a-b52bc0952145
+title: Agent cards compose identity, usage, context, and actions in two compact rows
+state: active
+statement: >
+  A People and agents card renders an avatar spanning two non-wrapping compact
+  rows. Row 1 contains the full handle, a tiny accessible state dot, and
+  number-plus-icon pills for available reported token total, cost, turns, and
+  nonzero queue depth. Row 2's left rail contains the shared harness artwork,
+  the complete model as the only text pill, and the policy icon; flexible empty
+  space then pins the circular context meter, labelled icon-only Compact and
+  Clear context, applicable Stop or Revive, and overflow menu at the trailing
+  edge. Harness, policy, state, token, cost, and turn words are not repeated
+  visibly; accessible names and tooltips retain full meaning, exact/estimated
+  provenance, and status. The existing reported 5h and 7d indicators remain
+  below the grid with their labels, tracks, percentage-left values, colors,
+  reset detail, order, wrapping, and absence semantics unchanged. Existing
+  visibility, authorization, confirmation, disabled, pending, error, and
+  one-dispatch gates remain authoritative. At narrow installed-phone widths only
+  Row 2's left rail may scroll; the actions remain fixed, targets are at least
+  44x44 without overlap, and neither the card nor page overflows.
+depends_on:
+  - member-context-window-meter-derived-from-last-usage
+  - member-context-reset-is-authorized-atomic-and-lazy
+  - manual-compaction-is-an-operator-act
+  - dead-agent-surfaces-revive-in-its-action-area
+  - agent-usage-limits-reported-not-guessed
+  - web-room-targets-meet-minimum-hit-size
+  - controls-fit-the-surface-they-sit-on
+created_by: npx-member-ui-0-10-10

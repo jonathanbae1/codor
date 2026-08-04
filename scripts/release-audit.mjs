@@ -145,6 +145,30 @@ const setupGuide = await readFile(new URL('../docs/SETUP.md', import.meta.url), 
 const rootManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const workspaceManifest = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
 
+// harn:assume distributed-release-artifacts-are-version-immutable ref=immutable-release-audit
+assert.match(manual, /Versioned release artifact immutability/);
+assert.match(manual, /source commit, versioned filename,\s*byte size, and SHA-256 digest/s);
+assert.match(manual, /filename and payload bytes are immutable/);
+assert.match(manual, /advance the\s*release version before rebuilding or sending it/);
+assert.equal(rootManifest.version, '0.10.10', 'the release candidate must advance to 0.10.10');
+const legacyPackageVersions = new Set([
+  'packages/adapters/grok/package.json',
+  'packages/tunnel/package.json',
+  'relay-worker/package.json',
+]);
+for (const path of tracked.filter((candidate) => candidate.endsWith('package.json'))) {
+  if (legacyPackageVersions.has(path)) continue;
+  const manifestPath = new URL(`../${path}`, import.meta.url);
+  if (!existsSync(manifestPath)) continue;
+  const manifestBody = JSON.parse(await readFile(manifestPath, 'utf8'));
+  if (typeof manifestBody.version === 'string') {
+    assert.equal(manifestBody.version, rootManifest.version, `${path} must share the release version`);
+  }
+}
+const acpAdapterSource = await readFile(new URL('../packages/adapters/acp/src/adapter.ts', import.meta.url), 'utf8');
+assert.match(acpAdapterSource, /clientInfo:\s*\{\s*name: 'Codor', version: '0\.10\.10'/);
+// harn:end distributed-release-artifacts-are-version-immutable
+
 // harn:assume pnpm-build-approvals-span-pinned-and-current-config ref=pnpm-build-approval-equivalence-audit
 const requiredBuildApprovals = ['better-sqlite3', 'esbuild', 'sodium-native', 'udx-native'];
 const legacyBuildApprovals = [...(rootManifest.pnpm?.onlyBuiltDependencies ?? [])].sort();

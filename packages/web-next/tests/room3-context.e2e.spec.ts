@@ -76,8 +76,10 @@ test.describe('spawn dialog', () => {
     await dialog.getByTestId('spawn-folder-typed').fill('/tmp');
     await expect(dialog.getByTestId('spawn-go')).toBeEnabled();
     await dialog.getByTestId('spawn-go').click();
-    await expect(page.getByTestId('member-nova')).toBeVisible();
-    await expect(page.getByTestId('member-nova')).toContainText('Idle');
+    const nova = page.getByTestId('member-nova');
+    await expect(nova).toBeVisible();
+    await expect(nova.getByTestId('member-nova-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @nova');
   });
 
   // harn:assume acp-v1-events-and-capabilities-are-negotiated ref=acp-browser-regression
@@ -241,45 +243,62 @@ test.describe('context window meter', () => {
     await expect(page.getByTestId('member-hydrate-context-window')).toHaveCount(0);
   });
 
-  test('keeps identity, labelled context actions, and usage in a readable order', async ({ page }) => {
+  test('keeps two compact rows, labelled icon actions, and usage in a readable order', async ({ page }) => {
     await openRoom(page, '/?room=context-reset&token=next-e2e-token');
     const card = page.getByTestId('member-eraser');
-    const identity = card.locator('.nx-member-identity');
+    const header = page.getByTestId('member-eraser-header');
+    const primary = page.getByTestId('member-eraser-row-primary');
+    const secondary = page.getByTestId('member-eraser-row-secondary');
     const metadata = page.getByTestId('member-eraser-metadata');
     const actions = page.getByTestId('member-eraser-context-actions');
-    await expect(metadata).toContainText('fake');
     await expect(metadata).toContainText('kept-model');
-    await expect(metadata).toContainText('workspace-write');
-    await expect(actions.getByTestId('member-eraser-compact')).toContainText('Compact');
-    await expect(actions.getByTestId('member-eraser-clear-context')).toContainText('Clear context');
+    await expect(metadata.getByRole('img', { name: 'fake harness' })).toBeVisible();
+    await expect(metadata.getByRole('img', { name: 'Policy: Workspace write' })).toBeVisible();
+    await expect(metadata).not.toContainText('workspace-write');
+    await expect(actions.getByTestId('member-eraser-compact')).toHaveText('');
+    await expect(actions.getByTestId('member-eraser-clear-context')).toHaveText('');
+    await expect(actions.getByTestId('member-eraser-compact'))
+      .toHaveAccessibleName("Compact @eraser's context");
+    await expect(actions.getByTestId('member-eraser-clear-context'))
+      .toHaveAccessibleName("Clear @eraser's context");
     await expect(actions.getByTestId('member-eraser-menu')).toBeVisible();
 
-    const identityBox = (await identity.boundingBox())!;
+    const headerBox = (await header.boundingBox())!;
+    const primaryBox = (await primary.boundingBox())!;
+    const secondaryBox = (await secondary.boundingBox())!;
     const actionBox = (await actions.boundingBox())!;
-    expect(actionBox.y).toBeGreaterThanOrEqual(identityBox.y + identityBox.height);
+    expect(secondaryBox.y).toBeGreaterThan(primaryBox.y);
+    expect(secondaryBox.y + secondaryBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height);
+    expect(actionBox.x).toBeGreaterThanOrEqual(secondaryBox.x);
+    expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(secondaryBox.x + secondaryBox.width);
 
     await openRoom(page);
+    const fableHeader = page.getByTestId('member-fable-header');
     const fableActions = page.getByTestId('member-fable-context-actions');
     const ring = page.getByTestId('member-fable-context-window');
     const limits = page.getByTestId('member-fable-limits');
     await expect(ring).toHaveAttribute('title', /tokens/);
     await expect(fableActions).not.toContainText('tokens');
-    const fableActionBox = (await fableActions.boundingBox())!;
+    const fableHeaderBox = (await fableHeader.boundingBox())!;
     const limitsBox = (await limits.boundingBox())!;
-    expect(fableActionBox.y).toBeLessThan(limitsBox.y);
+    expect(limitsBox.y).toBeGreaterThanOrEqual(fableHeaderBox.y + fableHeaderBox.height);
   });
 });
 // harn:end member-context-window-meter-derived-from-last-usage
 
-// harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-regression
+// harn:assume agent-member-card-composes-two-compact-rows ref=member-card-compact-rows-regression
 test.describe('member card responsive presentation', () => {
   // harn:assume controls-fit-the-surface-they-sit-on ref=control-fits-narrow-surface
   // harn:assume web-room-targets-meet-minimum-hit-size ref=room-target-size-sweep
-  test('keeps context controls on one line, labelled per member, at desktop and phone widths', async ({ page }) => {
+  test('keeps two single-line rows and fixed icon actions at desktop and phone widths', async ({ page }) => {
     const assertControlRow = async (card: Locator, phone: boolean): Promise<void> => {
+      const header = card.getByTestId('member-fable-header');
+      const primary = card.getByTestId('member-fable-row-primary');
+      const secondary = card.getByTestId('member-fable-row-secondary');
+      const metadata = card.getByTestId('member-fable-metadata');
       const actions = card.getByTestId('member-fable-context-actions');
       const targets = [
-        card.getByTestId('member-fable-context-window'),
+        card.locator('.nx-member-context-ring'),
         card.getByTestId('member-fable-compact'),
         card.getByTestId('member-fable-clear-context'),
         card.getByTestId('member-fable-menu'),
@@ -292,17 +311,26 @@ test.describe('member card responsive presentation', () => {
       const centers = boxes.map((box) => box.y + box.height / 2);
       expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 
-      await expect(card.getByTestId('member-fable-compact')).toContainText('Compact');
-      await expect(card.getByTestId('member-fable-clear-context')).toContainText('Clear context');
+      await expect(metadata.getByRole('img', { name: /harness$/ })).toBeVisible();
+      await expect(card.getByTestId('member-fable-compact')).toHaveText('');
+      await expect(card.getByTestId('member-fable-clear-context')).toHaveText('');
       await expect(card.getByTestId('member-fable-compact')).toHaveAccessibleName("Compact @fable's context");
       await expect(card.getByTestId('member-fable-clear-context')).toHaveAccessibleName("Clear @fable's context");
 
       const cardBox = (await card.boundingBox())!;
+      const headerBox = (await header.boundingBox())!;
+      const primaryBox = (await primary.boundingBox())!;
+      const secondaryBox = (await secondary.boundingBox())!;
       const actionsBox = (await actions.boundingBox())!;
+      expect(primaryBox.y).toBeLessThan(secondaryBox.y);
+      expect(secondaryBox.y + secondaryBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height);
+      expect(actionsBox.y).toBeGreaterThanOrEqual(secondaryBox.y);
+      expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(secondaryBox.y + secondaryBox.height);
       expect(actionsBox.x).toBeGreaterThanOrEqual(cardBox.x);
       expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
       if (phone) {
-        for (const box of boxes.slice(1, 4)) {
+        await expect(metadata).toHaveCSS('overflow-x', 'auto');
+        for (const box of boxes) {
           expect(box.width).toBeGreaterThanOrEqual(44);
           expect(box.height).toBeGreaterThanOrEqual(44);
           expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
@@ -332,7 +360,7 @@ test.describe('member card responsive presentation', () => {
 });
 // harn:end web-room-targets-meet-minimum-hit-size
 // harn:end controls-fit-the-surface-they-sit-on
-// harn:end agent-member-card-separates-context-actions-from-usage
+// harn:end agent-member-card-composes-two-compact-rows
 
 test.describe('manual compaction', () => {
   const CONTROL = `http://127.0.0.1:${process.env.CODOR_NEXT_E2E_CONTROL_PORT ?? '28138'}`;
@@ -385,7 +413,8 @@ test.describe('manual compaction', () => {
     await openRoom(page);
     await page.getByTestId('composer-input').fill('@fable hold this turn open');
     await page.getByTestId('composer-send').click();
-    await expect(page.getByTestId('member-fable')).toContainText('Working', { timeout: 15_000 });
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Working @fable', { timeout: 15_000 });
 
     const compact = page.getByTestId('member-fable-compact');
     await expect(compact).toBeDisabled();
@@ -395,7 +424,8 @@ test.describe('manual compaction', () => {
 
     // Leave the room as found: stop the run and let fable settle back to idle.
     await page.getByTestId('member-fable-stop').click();
-    await expect(page.getByTestId('member-fable')).toContainText('Idle', { timeout: 15_000 });
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable', { timeout: 15_000 });
   });
 
   test('a non-privileged member is not offered the lever at all', async ({ page }) => {
@@ -500,7 +530,8 @@ test.describe('member lifecycle', () => {
   test('a dead agent swaps the disabled Compact for a direct Revive that brings it back', async ({ page }) => {
     await openRoom(page);
     const fable = page.getByTestId('member-fable');
-    await expect(fable).toContainText('Idle');
+    await expect(fable.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable');
     // Alive: Compact is present in the action area; Revive is not.
     await expect(page.getByTestId('member-fable-compact')).toBeVisible();
     await expect(page.getByTestId('member-fable-revive')).toHaveCount(0);
@@ -509,7 +540,8 @@ test.describe('member lifecycle', () => {
     await page.getByTestId('member-fable-menu').click();
     await page.locator('.nx-menu button', { hasText: 'Kill…' }).click();
     await page.getByTestId('member-confirm-go').click();
-    await expect(fable).toContainText('Dead');
+    await expect(fable.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Dead @fable');
 
     // Dead: the disabled Compact is gone, replaced by a direct Revive in the
     // action area — no overflow menu needed.
@@ -526,7 +558,8 @@ test.describe('member lifecycle', () => {
     }
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await revive.click();
-    await expect(fable).toContainText('Idle', { timeout: 10_000 });
+    await expect(fable.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable', { timeout: 10_000 });
 
     // Back alive: Compact returns and Revive is gone again.
     await expect(page.getByTestId('member-fable-compact')).toBeVisible();

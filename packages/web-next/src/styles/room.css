@@ -1285,35 +1285,6 @@
   border-radius: var(--r-card);
 }
 .nx-member:hover { background: var(--c-muted); }
-.nx-member-identity {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  min-width: 0;
-}
-.nx-member-id {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.nx-member-id strong { font: var(--t-ui-strong); }
-.nx-member-sub {
-  display: flex;
-  flex-wrap: wrap;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  line-height: 1.35;
-  font: var(--t-caption);
-  color: var(--c-faded);
-}
-.nx-member-meta-item { overflow-wrap: anywhere; }
-.nx-member-state { flex: none; margin-left: auto; }
-.nx-member-meter {
-  margin: var(--sp-1) 0 0 calc(32px + var(--sp-3));
-  font: var(--t-caption);
-  color: var(--c-secondary);
-}
 .nx-member-limits {
   display: flex;
   flex-wrap: wrap;
@@ -1322,39 +1293,186 @@
 }
 /* harn:end web-room-visual-hierarchy-matches-soft-editorial-reference */
 
-/* harn:assume agent-member-card-separates-context-actions-from-usage ref=member-card-context-action-style */
-.nx-member-context-row {
+/* harn:assume agent-member-card-composes-two-compact-rows ref=member-card-compact-rows-style */
+.nx-member-header {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: var(--sp-3);
+  align-items: stretch;
+  min-width: 0;
+}
+.nx-member-header > .nx-chip {
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+.nx-member-header-body {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto;
+  row-gap: 3px;
+}
+.nx-member-header.is-human .nx-member-header-body { grid-template-rows: auto; }
+.nx-member-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
+  gap: 6px;
   min-width: 0;
-  max-width: 100%;
-  margin: var(--sp-2) 0 0 calc(32px + var(--sp-3));
+  min-height: 28px;
+  white-space: nowrap;
 }
-.nx-member-context-row .nx-member-compact,
-.nx-member-context-row .nx-member-clear,
-.nx-member-context-row .nx-member-revive,
-.nx-member-context-row .nx-member-stop,
-.nx-member-context-row .nx-member-menu .nx-iconbtn {
+.nx-member-row-primary { overflow: hidden; }
+.nx-member-handle {
+  flex: none;
+  font: var(--t-ui-strong);
+}
+.nx-member-display-name {
   min-width: 0;
-  min-height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--c-faded);
+  font: var(--t-caption);
 }
-.nx-member-context-row .nx-member-stop {
-  width: 32px;
-  height: 32px;
+.nx-member-state-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--c-mark-faint);
+  box-shadow: 0 0 0 2px var(--c-surface);
+}
+.nx-member-state-mark.is-running,
+.nx-member-state-mark.is-queued { background: var(--c-live); }
+.nx-member-state-mark.is-dead { background: var(--c-error); }
+.nx-member-state-mark.is-awaiting_input { background: var(--c-warn); }
+.nx-member-state-mark.is-unreachable,
+.nx-member-state-mark.is-custody_uncertain { background: var(--c-error); }
+.nx-member-usage-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.nx-member-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  min-height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  color: var(--c-secondary);
+  font: var(--t-mono-small);
+  line-height: 1;
+}
+.nx-member-metric svg { color: var(--c-faded); }
+.nx-member-row-secondary {
+  overflow: hidden;
+}
+.nx-member-meta-rail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.nx-member-meta-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.nx-member-harness-mark,
+.nx-member-policy-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--c-secondary);
+}
+.nx-member-model-pill {
+  flex: none;
+  max-width: min(18rem, 45vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  color: var(--c-secondary);
+  font: var(--t-caption-strong);
 }
 .nx-member-action-spacer {
   flex: 1 1 var(--sp-3);
-  min-width: var(--sp-1);
+  min-width: 0;
 }
-.nx-member-context-row .nx-member-menu .nx-iconbtn {
+.nx-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  white-space: nowrap;
+}
+.nx-member-context-ring {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
   width: 32px;
   height: 32px;
 }
-/* harn:end agent-member-card-separates-context-actions-from-usage */
+.nx-member-actions .nx-member-compact,
+.nx-member-actions .nx-member-clear,
+.nx-member-actions .nx-member-revive,
+.nx-member-actions .nx-member-stop,
+.nx-member-actions .nx-member-menu .nx-iconbtn {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0;
+}
+.nx-member-actions .nx-member-compact,
+.nx-member-actions .nx-member-clear,
+.nx-member-actions .nx-member-revive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+}
+.nx-member-actions .nx-member-compact {
+  color: var(--c-text-muted);
+  transition: background-color var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
+}
+.nx-member-actions .nx-member-compact:hover:not(:disabled) {
+  background: var(--c-surface-active);
+  color: var(--c-text);
+}
+.nx-member-actions .nx-member-clear { color: var(--c-error-text); }
+.nx-member-actions .nx-member-clear:hover:not(:disabled) { background: var(--c-error-tint); }
+.nx-member-actions .nx-member-revive {
+  border: 1px solid var(--c-line);
+  background: var(--c-raised);
+  color: var(--c-ink);
+}
+.nx-member-actions .nx-member-revive:hover:not(:disabled) { background: var(--c-muted); }
+.nx-member-actions .nx-member-compact:disabled,
+.nx-member-actions .nx-member-clear:disabled,
+.nx-member-actions .nx-member-revive:disabled { opacity: 0.45; cursor: not-allowed; }
+.nx-member-actions .nx-member-menu { position: relative; flex: none; }
+/* harn:end agent-member-card-composes-two-compact-rows */
 
-/* harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-style */
+/* harn:assume dead-agent-surfaces-revive-in-its-action-area ref=member-lifecycle-controls */
+.nx-member-actions .nx-member-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* harn:end dead-agent-surfaces-revive-in-its-action-area */
+
+/* harn:assume people-and-agents-shows-small-task-status-icons ref=small-member-task-list-style */
 .nx-member-tasks {
   margin: var(--sp-2) 0 0 calc(32px + var(--sp-3));
 }
@@ -1377,36 +1495,37 @@
 }
 .nx-task {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   font: var(--t-caption);
   color: var(--c-ink);
 }
 .nx-task-mark {
-  width: 20px;
-  height: 20px;
+  width: 12px;
+  height: 12px;
   display: inline-grid;
   place-items: center;
   justify-self: center;
   color: var(--c-secondary);
-  font: var(--t-ui-strong);
+  font: 700 10px/1 var(--f-sans);
   line-height: 1;
 }
 .nx-task-mark.is-pending {
-  border: 1px solid var(--c-secondary);
+  border: 1px solid var(--c-faded);
   border-radius: var(--r-full);
   color: transparent;
 }
 .nx-task-mark.is-completed { color: var(--c-secondary); }
 .nx-task-progress {
-  width: 28px;
-  height: 5px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
   justify-self: center;
+  border: 2px solid var(--c-muted);
+  border-top-color: var(--c-link);
   border-radius: var(--r-full);
-  background: linear-gradient(90deg, var(--c-link) 0 28%, var(--c-muted) 28% 58%, var(--c-link) 58% 86%, var(--c-muted) 86%);
-  background-size: 220% 100%;
-  animation: nx-task-progress 1.25s var(--m-ease, ease-in-out) infinite;
+  animation: nx-task-progress 0.8s linear infinite;
 }
 .nx-task-text { min-width: 0; overflow-wrap: anywhere; }
 .nx-task.is-completed .nx-task-text {
@@ -1424,10 +1543,9 @@
 }
 .nx-tasklist-toggle:hover { text-decoration: underline; }
 @keyframes nx-task-progress {
-  from { background-position: 100% 0; }
-  to { background-position: 0 0; }
+  to { transform: rotate(360deg); }
 }
-/* harn:end people-and-agents-shows-actionable-compact-task-lists */
+/* harn:end people-and-agents-shows-small-task-status-icons */
 .nx-limit {
   font: var(--t-caption);
   color: var(--c-secondary);
@@ -2074,9 +2192,9 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .nx-dotgrid::after { animation: none; opacity: 0; }
-  /* harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-list-style */
+  /* harn:assume people-and-agents-shows-small-task-status-icons ref=small-member-task-list-style */
   .nx-task-progress { animation: none; }
-  /* harn:end people-and-agents-shows-actionable-compact-task-lists */
+  /* harn:end people-and-agents-shows-small-task-status-icons */
 }
 
 
@@ -2396,19 +2514,32 @@
     background: var(--c-surface);
   }
   .nx-mobile-context .nx-context { display: flex; flex: 1; min-height: 0; }
-  .nx-member-context-row .nx-member-compact,
-  .nx-member-context-row .nx-member-clear,
-  .nx-member-context-row .nx-member-revive,
-  .nx-member-context-row .nx-member-stop,
-  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+  .nx-member-row-secondary { min-width: 0; }
+  .nx-member-row-secondary .nx-member-meta-rail {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+  .nx-member-row-secondary .nx-member-meta-content {
+    width: max-content;
+    min-width: 100%;
+    overflow: visible;
+  }
+  .nx-member-actions { gap: 0; }
+  .nx-member-actions .nx-member-context-ring,
+  .nx-member-actions .nx-member-compact,
+  .nx-member-actions .nx-member-clear,
+  .nx-member-actions .nx-member-revive,
+  .nx-member-actions .nx-member-stop,
+  .nx-member-actions .nx-member-menu .nx-iconbtn {
     min-width: 44px;
     min-height: 44px;
     height: 44px;
   }
-  .nx-member-context-row .nx-member-stop {
+  .nx-member-actions .nx-member-stop {
     width: 44px;
   }
-  .nx-member-context-row .nx-member-menu .nx-iconbtn {
+  .nx-member-actions .nx-member-menu .nx-iconbtn {
     width: 44px;
   }
   .nx-mobile-context-close {

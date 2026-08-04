@@ -1,7 +1,7 @@
 id: people-and-agents-shows-actionable-compact-task-lists
 hash: a-05d709ced939
 title: People and agents renders bounded actionable task lists with compact status
-state: active
+state: retired
 statement: >
   An agent card renders a task section only while its durable member task
   projection contains at least one non-completed item; an empty or all-completed
@@ -18,3 +18,4 @@ statement: >
 depends_on:
   - member-task-projection-is-durable-and-session-scoped
 created_by: relay-ux-followups-p4-member-ui
+retired_by: npx-member-ui-0-10-10

@@ -1,0 +1,17 @@
+id: distributed-release-artifacts-are-version-immutable
+hash: a-c72a3825dd2e
+title: A distributed release version identifies one immutable artifact payload
+state: active
+statement: >
+  Once a versioned Codor TGZ or companion VSIX has been distributed, published,
+  or deployed, that version, filename, source commit, and payload bytes are
+  immutable. Any later change that alters either artifact must advance the
+  release version before rebuilding or sending; a release record keeps the exact
+  commit, filename, byte size, and SHA-256 together. The same versioned path
+  must never be overwritten with different bytes, because npx caches local
+  package specs by identity and cannot safely reconcile a mutable tarball before
+  Codor code starts.
+depends_on:
+  - release-candidate-requires-publishable-install-tarball
+  - public-npx-install-is-primary-install
+created_by: npx-member-ui-0-10-10

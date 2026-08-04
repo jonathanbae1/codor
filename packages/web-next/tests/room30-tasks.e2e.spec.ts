@@ -19,7 +19,7 @@ async function openTasks(page: Page): Promise<void> {
   await expect(page.getByTestId('connection')).toHaveText(/Connected/);
 }
 
-// harn:assume people-and-agents-shows-actionable-compact-task-lists ref=compact-member-task-browser-regression
+// harn:assume people-and-agents-shows-small-task-status-icons ref=small-member-task-browser-regression
 test.describe('member task checklist', () => {
   test.beforeEach(async () => {
     await control('/tasks-reset');
@@ -41,6 +41,11 @@ test.describe('member task checklist', () => {
     await expect(tasks).toContainText('Wiring the refresh TTL config'); // in-progress active form
     await expect(tasks.locator('.nx-task.is-completed .nx-task-text')).toHaveCSS('text-decoration-line', 'line-through');
     await expect(tasks.locator('.nx-tasklist-note')).toHaveText('Shipping the auth refactor');
+    for (const mark of await tasks.locator('.nx-task-mark, .nx-task-progress').all()) {
+      await expect(mark).toHaveCSS('width', '12px');
+      await expect(mark).toHaveCSS('height', '12px');
+    }
+    await expect(tasks.locator('.nx-task-progress')).toHaveClass(/nx-task-progress/);
   });
 
   test('collapses to five rows with a bounded, scrollable expansion', async ({ page }) => {
@@ -134,4 +139,4 @@ test.describe('member task checklist', () => {
     await expect(page.getByTestId('member-planner-tasks')).toHaveCount(0);
   });
 });
-// harn:end people-and-agents-shows-actionable-compact-task-lists
+// harn:end people-and-agents-shows-small-task-status-icons

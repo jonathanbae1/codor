@@ -1,7 +1,7 @@
 id: agent-member-card-separates-context-actions-from-usage
 hash: a-046aca4bc23e
 title: Agent cards put context actions above usage without crowding identity
-state: active
+state: retired
 statement: >
   A People and agents card keeps avatar, handle, truthful harness/model/policy
   metadata, and member state in an identity header whose metadata wraps inside
@@ -25,3 +25,4 @@ depends_on:
   - web-room-targets-meet-minimum-hit-size
   - controls-fit-the-surface-they-sit-on
 created_by: relay-ux-followups-p4-member-ui
+retired_by: npx-member-ui-0-10-10

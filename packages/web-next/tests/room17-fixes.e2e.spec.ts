@@ -27,7 +27,8 @@ test.describe('typing bar — all working agents', () => {
     await expect(input).toHaveValue(/@\w+ /);
     await input.fill('@fable keep working while scout runs');
     await input.press('Enter');
-    await expect(page.getByTestId('member-fable')).toContainText('Working');
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Working @fable');
 
     // Both working agents show, each with its own stop control.
     await expect(page.getByTestId('typing-scout')).toBeVisible();
@@ -38,7 +39,8 @@ test.describe('typing bar — all working agents', () => {
     // Stop fable so it leaves the bar and later specs see it idle again.
     await page.getByTestId('typing-stop-fable').click();
     await expect(page.getByTestId('typing-fable')).toHaveCount(0);
-    await expect(page.getByTestId('member-fable')).toContainText('Idle');
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable');
   });
 });
 

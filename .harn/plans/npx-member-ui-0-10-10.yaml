@@ -1,0 +1,312 @@
+id: npx-member-ui-0-10-10
+title: Compose two compact member rows and immutable 0.10.10 release artifacts
+notes: >
+  One combined implementation phase for the investigated npx/member-UI
+  follow-up. Replace the current member identity, action, spend, and limit
+  stacks with a two-row compact grid whose avatar spans both rows. Row 1 holds
+  identity and reported numeric activity; Row 2 holds harness/model/policy and
+  an invisible flexible spacer followed by fixed trailing actions. Keep the
+  existing 5h and 7d usage indicators below the grid completely unchanged.
+  Replace the task list's oversized marker and progress treatment with small
+  accessible status icons. Advance the complete release set and companion VS
+  Code extension from 0.10.9 to 0.10.10, and add the invariant that a
+  distributed versioned TGZ or VSIX is never reissued with different bytes.
+  Preserve all runtime, protocol, persistence, confirmation, authorization,
+  calculation, install, adapter, and extension semantics. No push, deployment,
+  publishing, Taildrop, or remote install is in scope.
+assumptions:
+  retire:
+    - id: agent-member-card-separates-context-actions-from-usage
+      reason: >
+        The approved design composes identity/session summary and
+        runtime/actions into two compact rows rather than separate identity,
+        action, spend, and limit sections.
+    - id: people-and-agents-shows-actionable-compact-task-lists
+      reason: >
+        The current truth requires a horizontal progress bar; the approved
+        presentation replaces it with a small spinning status icon.
+  create:
+    - id: agent-member-card-composes-two-compact-rows
+      title: Agent cards compose identity, usage, context, and actions in two compact
+        rows
+      statement: >
+        A People and agents card renders an avatar spanning two non-wrapping
+        compact rows. Row 1 contains the full handle, a tiny accessible state
+        dot, and number-plus-icon pills for available reported token total,
+        cost, turns, and nonzero queue depth. Row 2's left rail contains the
+        shared harness artwork, the complete model as the only text pill, and
+        the policy icon; flexible empty space then pins the circular context
+        meter, labelled icon-only Compact and Clear context, applicable Stop or
+        Revive, and overflow menu at the trailing edge. Harness, policy, state,
+        token, cost, and turn words are not repeated visibly; accessible names
+        and tooltips retain full meaning, exact/estimated provenance, and
+        status. The existing reported 5h and 7d indicators remain below the grid
+        with their labels, tracks, percentage-left values, colors, reset detail,
+        order, wrapping, and absence semantics unchanged. Existing visibility,
+        authorization, confirmation, disabled, pending, error, and one-dispatch
+        gates remain authoritative. At narrow installed-phone widths only Row
+        2's left rail may scroll; the actions remain fixed, targets are at least
+        44x44 without overlap, and neither the card nor page overflows.
+      reason: >
+        Identity/session truth and runtime/actions should scan as two clean
+        compact lines while operational actions remain stable at the edge.
+      depends_on:
+        - member-context-window-meter-derived-from-last-usage
+        - member-context-reset-is-authorized-atomic-and-lazy
+        - manual-compaction-is-an-operator-act
+        - dead-agent-surfaces-revive-in-its-action-area
+        - agent-usage-limits-reported-not-guessed
+        - web-room-targets-meet-minimum-hit-size
+        - controls-fit-the-surface-they-sit-on
+    - id: people-and-agents-shows-small-task-status-icons
+      title: People and agents renders bounded actionable tasks with small status
+        icons
+      statement: >
+        An agent card renders a task section only while its durable member task
+        projection contains at least one non-completed item; an empty or
+        all-completed projection renders no task section without mutating
+        durable state. Pending rows use a small hollow dot, completed rows use a
+        small check, and in-progress rows use a small indeterminate spinning
+        loader; each mark carries an accessible status name while visible
+        Pending, In progress, and Completed words remain omitted. In-progress
+        text may use native active_form and completed content in a mixed list
+        remains muted and struck. At most five rows are initially visible, Show
+        all and Show fewer control the remainder, the expanded list scrolls
+        inside a 240px bound, and optional explanation is subdued context.
+        Member frames update the existing store live with no polling, client
+        task cache, or write-back.
+      reason: The requested spinner and smaller marks communicate state without
+        dominating task text.
+      depends_on:
+        - member-task-projection-is-durable-and-session-scoped
+    - id: distributed-release-artifacts-are-version-immutable
+      title: A distributed release version identifies one immutable artifact payload
+      statement: >
+        Once a versioned Codor TGZ or companion VSIX has been distributed,
+        published, or deployed, that version, filename, source commit, and
+        payload bytes are immutable. Any later change that alters either
+        artifact must advance the release version before rebuilding or sending;
+        a release record keeps the exact commit, filename, byte size, and
+        SHA-256 together. The same versioned path must never be overwritten with
+        different bytes, because npx caches local package specs by identity and
+        cannot safely reconcile a mutable tarball before Codor code starts.
+      reason: >
+        Two different 0.10.9 tarballs were sent under one identity, leaving the
+        operator's npx cache inconsistent even though the final tarball was
+        valid.
+      depends_on:
+        - release-candidate-requires-publishable-install-tarball
+        - public-npx-install-is-primary-install
+  reviewed:
+    - id: member-context-window-meter-derived-from-last-usage
+      outcome: unchanged
+      reason: The same derived ring, thresholds, pending state, and detailed tooltip
+        move into Row 2.
+    - id: member-context-reset-is-authorized-atomic-and-lazy
+      outcome: unchanged
+      reason: Only the reset control's visual treatment changes; all guarded behavior
+        remains intact.
+    - id: manual-compaction-is-an-operator-act
+      outcome: unchanged
+      reason: Only the compaction control's visual treatment changes; all native
+        behavior remains intact.
+    - id: dead-agent-surfaces-revive-in-its-action-area
+      outcome: unchanged
+      reason: Revive and Stop retain their guarded lifecycle roles in Row 2's trailing
+        group.
+    - id: agent-usage-limits-reported-not-guessed
+      outcome: unchanged
+      reason: The existing 5h/7d indicators remain below the rows unchanged; no limit
+        is invented, aged, or discarded.
+    - id: member-task-projection-is-durable-and-session-scoped
+      outcome: unchanged
+      reason: Task storage, live frames, ordering, idempotence, and session clearing
+        are untouched.
+    - id: web-room-targets-meet-minimum-hit-size
+      outcome: unchanged
+      reason: Small visible marks retain non-overlapping 44px phone action targets.
+    - id: controls-fit-the-surface-they-sit-on
+      outcome: unchanged
+      reason: Row 2's metadata rail yields or scrolls locally while fixed actions
+        remain inside the card.
+    - id: release-candidate-requires-publishable-install-tarball
+      outcome: unchanged
+      reason: The same exact-commit, packed-proof, reviewed-candidate, signed-version,
+        and non-secret release record remains authoritative.
+    - id: public-package-bundles-complete-codor-runtime
+      outcome: unchanged
+      reason: The artifact continues to bundle the exact workspace closure and exact
+        dependency manifests; no packaging workaround is introduced.
+    - id: packed-release-proof-runs-install-runtime
+      outcome: unchanged
+      reason: The existing clean-clone proof still executes the exact local-TGZ npx
+        command twice against unchanged bytes.
+    - id: public-npx-install-is-primary-install
+      outcome: unchanged
+      reason: The same npx install command remains primary; only the versioned local
+        TGZ filename advances.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: The VSIX remains manual, loopback-only, and credential-private; only its
+        version advances.
+    - id: workspace-gates-cover-all-buildable-projects
+      outcome: unchanged
+      reason: Recursive build and serialized test coverage remains unchanged and
+        mandatory.
+    - id: acp-v1-events-and-capabilities-are-negotiated
+      outcome: unchanged
+      reason: The ACP wire contract remains unchanged; only its existing client
+        identity version advances with the release.
+anchors:
+  agent-member-card-separates-context-actions-from-usage:
+    member-card-context-action-layout:
+      action: remove
+      reason: Replace separate identity, action, spend, and limit sections with two
+        rows.
+    member-card-context-action-style:
+      action: remove
+      reason: Replace wrapping labelled rows with the two-row grid and fixed trailing
+        actions.
+    member-card-context-action-regression:
+      action: remove
+      reason: Replace separate-row and visible-label assertions with the two-row
+        contract.
+  agent-member-card-composes-two-compact-rows:
+    member-card-compact-rows:
+      action: change
+      reason: Reuse shared harness artwork and compose the exact two-row grid while
+        leaving 5h/7d below it.
+    member-card-compact-rows-style:
+      action: change
+      reason: Implement avatar spanning, two single-line rails, fixed actions, and
+        safe phone targets.
+    member-card-compact-rows-regression:
+      action: change
+      reason: Prove row order, artwork, numeric truth, unchanged below-row 5h/7d,
+        spacer/action order, geometry, tooltips, and Axe.
+  people-and-agents-shows-actionable-compact-task-lists:
+    compact-member-task-list-ui:
+      action: remove
+      reason: Replace the horizontal in-progress bar and large glyphs with small icons.
+    compact-member-task-list-style:
+      action: remove
+      reason: Replace the marker column and progress-bar animation.
+    compact-member-task-browser-regression:
+      action: remove
+      reason: Replace progress-bar assertions with small icon and spinner assertions.
+  people-and-agents-shows-small-task-status-icons:
+    small-member-task-list-ui:
+      action: change
+      reason: Render accessible pending, completed, and spinning in-progress icons.
+    small-member-task-list-style:
+      action: change
+      reason: Keep visual marks compact while retaining reduced-motion treatment.
+    small-member-task-browser-regression:
+      action: change
+      reason: Prove marker bounds, spinner state, task lifecycle, fit, and
+        accessibility.
+  member-context-window-meter-derived-from-last-usage:
+    context-window-meter-wiring:
+      action: change
+      reason: Move the unchanged ring into Row 2's fixed trailing group.
+    context-window-meter-style:
+      action: change
+      reason: Size the unchanged ring for the compact row.
+    context-window-meter-browser-smoke:
+      action: change
+      reason: Preserve derivation and tooltip proofs at the new position.
+  member-context-reset-is-authorized-atomic-and-lazy:
+    clear-context-web-control:
+      action: change
+      reason: Render the existing guarded reset action as an Eraser icon.
+    clear-context-browser-regression:
+      action: change
+      reason: Preserve confirmation, dispatch, race, and error coverage through the
+        icon.
+  dead-agent-surfaces-revive-in-its-action-area:
+    member-lifecycle-controls:
+      action: change
+      reason: Keep Stop/Revive in Row 2's fixed trailing group without behavioral
+        change.
+    member-revive-regression:
+      action: change
+      reason: Preserve pending, error, and recovery proof in the new row.
+  web-room-targets-meet-minimum-hit-size:
+    room-target-size-sweep:
+      action: change
+      reason: Re-prove non-overlapping 44px phone action targets.
+  controls-fit-the-surface-they-sit-on:
+    control-fits-narrow-surface:
+      action: change
+      reason: Prove Row 2 local scrolling and fixed actions never overflow the
+        card/page.
+  web-room-visual-hierarchy-matches-soft-editorial-reference:
+    soft-editorial-room-style:
+      action: change
+      reason: Recompose only the member card's internal hierarchy as two rows using
+        existing tokens.
+  release-candidate-requires-publishable-install-tarball:
+    final-release-verification-record:
+      action: change
+      reason: Require a new version after any distributed artifact's bytes change.
+  distributed-release-artifacts-are-version-immutable:
+    immutable-release-record:
+      action: change
+      reason: Record the version, source commit, filename, byte size, and SHA-256 as
+        one identity.
+    immutable-release-audit:
+      action: change
+      reason: Keep the no-reissue rule present in the final release checklist and
+        audit.
+  acp-v1-events-and-capabilities-are-negotiated:
+    acp-adapter-runtime:
+      action: change
+      reason: Advance only the ACP initialize clientInfo version to 0.10.10.
+files:
+  - packages/web-next/src/room/ContextPanel.tsx
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+  - packages/web-next/tests/room30-tasks.e2e.spec.ts
+  - packages/web-next/tests/room10-dialogs.e2e.spec.ts
+  - packages/web-next/tests/room13-stop.e2e.spec.ts
+  - packages/web-next/tests/room17-fixes.e2e.spec.ts
+  - MANUAL-VERIFY.md
+  - package.json
+  - packages/adapters/acp/package.json
+  - packages/adapters/acp/src/adapter.ts
+  - packages/adapters/antigravity/package.json
+  - packages/adapters/claude-code/package.json
+  - packages/adapters/codex/package.json
+  - packages/adapters/copilot/package.json
+  - packages/adapters/copilot/vscode-extension/package.json
+  - packages/adapters/cursor/package.json
+  - packages/adapters/gemini/package.json
+  - packages/adapters/opencode/package.json
+  - packages/bridges/core/package.json
+  - packages/bridges/slack/package.json
+  - packages/bridges/telegram/package.json
+  - packages/cli/package.json
+  - packages/protocol/package.json
+  - packages/switchboard/package.json
+  - packages/web-next/package.json
+  - relay/package.json
+  - scripts/release-audit.mjs
+  - website/package.json
+verification: >
+  Focused Room 3 and Room 30 Playwright suites prove avatar spanning, Row 1
+  identity/session pills, Row 2 shared harness mark, full model pill, icon-only
+  policy and actions, unchanged below-row 5h/7d indicators/tooltips, invisible
+  flexible spacer, fixed action order, guarded reset/compaction/lifecycle
+  dispatch, two-row narrow geometry, Row-2-local metadata overflow,
+  non-overlapping 44px phone targets, small task marks, spinner behavior,
+  all-completed disappearance, and Axe. Run the complete web-next Playwright
+  suite, all web-next units, full serialized workspace tests, full workspace
+  builds, license and release audits, and fresh and packed/Docker install
+  proofs. Prove the exact local-TGZ npx command from a fresh cache and again
+  from the same warm cache against unchanged 0.10.10 bytes. Build and inspect
+  the final TGZ and VSIX for versions, expected contents, no source/tests/
+  secrets, byte sizes, and SHA-256 values. Run Harn check, apply, staged
+  validation, and git diff checks. No external action occurs before investigator
+  review.
+applied:
+  applied_at: 2026-08-04T10:03:00.997Z

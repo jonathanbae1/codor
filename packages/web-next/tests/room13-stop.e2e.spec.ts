@@ -27,7 +27,8 @@ async function startFableWorking(page: Page): Promise<void> {
   await expect(input).toHaveValue(/@\w+ /);
   await input.fill('@fable keep working until I stop you');
   await input.press('Enter');
-  await expect(page.getByTestId('member-fable')).toContainText('Working');
+  await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+    .toHaveAccessibleName('Working @fable');
 }
 
 test.describe('agent stop control', () => {
@@ -40,7 +41,8 @@ test.describe('agent stop control', () => {
     await expect(stop).toBeVisible();
     await stop.click();
 
-    await expect(page.getByTestId('member-fable')).toContainText('Idle');
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable');
     await expect(page.getByTestId('member-fable-stop')).toHaveCount(0);
     await expect(page.locator('[data-run-status="interrupted"]')).toHaveCount(1);
   });
@@ -55,7 +57,8 @@ test.describe('agent stop control', () => {
     await chipStop.click();
     // fable left the chip; it falls back to the still-running scout.
     await expect(page.locator('[aria-label="@fable is working"]')).toHaveCount(0);
-    await expect(page.getByTestId('member-fable')).toContainText('Idle');
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable');
   });
 
   test('a non-privileged member sees no stop controls', async ({ page }) => {
@@ -76,6 +79,7 @@ test.describe('agent stop control', () => {
     expect(violations.map((v) => `${v.id}: ${v.nodes[0]?.target[0]}`)).toEqual([]);
 
     await page.getByTestId('member-fable-stop').click(); // finalize so later specs see fable idle
-    await expect(page.getByTestId('member-fable')).toContainText('Idle');
+    await expect(page.getByTestId('member-fable-row-primary').locator('.nx-member-state-mark'))
+      .toHaveAccessibleName('Idle @fable');
   });
 });

@@ -39,9 +39,11 @@ test.describe('Tier-1: spawn payload', () => {
     await dialog.getByTestId('spawn-go').click();
 
     // The member is the observable proof the payload was accepted.
-    await expect(page.getByTestId('member-policyprobe')).toBeVisible({ timeout: 15_000 });
-    // read-only is the default the dialog never sent before.
-    await expect(page.getByTestId('member-policyprobe')).toContainText('read-only');
+    const policyMember = page.getByTestId('member-policyprobe');
+    await expect(policyMember).toBeVisible({ timeout: 15_000 });
+    // The policy is now an icon-only card affordance; its accessible name keeps
+    // the exact reported value without restoring visible policy prose.
+    await expect(policyMember.getByRole('img', { name: 'Policy: Read only' })).toBeVisible();
   });
 
   test('Enter submits from a field, without reaching for the button', async ({ page }) => {
@@ -208,8 +210,9 @@ test.describe('Tier-1: the create dialog seeds a fully configured agent', () => 
     await dialog.getByTestId('create-folder-alpha-project').click();
     await dialog.getByTestId('create-go').click();
     await expect(page.locator('.nx-chat-title h1')).toHaveText('seeded', { timeout: 15_000 });
-    await expect(page.getByTestId('member-restored')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('member-restored')).toContainText('full-access');
+    const restored = page.getByTestId('member-restored');
+    await expect(restored).toBeVisible({ timeout: 15_000 });
+    await expect(restored.getByRole('img', { name: 'Policy: Full access' })).toBeVisible();
   });
 });
 

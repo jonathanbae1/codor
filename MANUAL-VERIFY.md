@@ -99,6 +99,17 @@ This records-only disposition commit was explicitly authorized after approval; a
 must reopen the full review before release.
 <!-- harn:end release-candidate-requires-publishable-install-tarball -->
 
+<!-- harn:assume distributed-release-artifacts-are-version-immutable ref=immutable-release-record -->
+## Versioned release artifact immutability
+
+Before any Codor TGZ or companion VSIX is distributed, published, or deployed, retain one
+release record for the exact version. The record must keep the source commit, versioned filename,
+byte size, and SHA-256 digest together for each artifact. Once that version has left the build
+checkout, its filename and payload bytes are immutable: if either artifact changes, advance the
+release version before rebuilding or sending it. Never overwrite a versioned path with different
+bytes, including a local TGZ used to prove the `npx` install path.
+<!-- harn:end distributed-release-artifacts-are-version-immutable -->
+
 ## Launch-sweep live acceptance record
 
 Status on 2026-07-11: **both one-shot live re-runs completed but did not satisfy their exact chain
