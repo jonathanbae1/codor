@@ -1,0 +1,53 @@
+id: copilot-vscode-p1-review-fixes-v3
+title: Finish native slash-command sequencing and bounded request startup
+notes: >
+  Correct the remaining Phase 1 review race without expanding into Phase 2: wait
+  for VS Code's executeImmediately /autoApprove command to complete, exercise
+  the pinned chat export shape directly, and bound the initial request identity
+  wait to a modest window inside the turn timeout. Preserve the request-bound
+  polling, immediate Allow revalidation, active-chat limitation, and all
+  existing native approval behavior.
+assumptions:
+  create: []
+  retire: []
+  reviewed:
+    - id: vscode-copilot-native-agent-auto-approves-and-streams-evidence
+      outcome: unchanged
+      reason: >
+        Native Agent execution still uses a separate per-chat /autoApprove
+        directive followed by the exact real prompt, streams the active native
+        response, binds it by prompt and stable request id, and handles native
+        Allow locally. This pass only closes the slash-command completion race,
+        validates the pinned export shape, and widens the bounded startup wait.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: >
+        The bridge remains local, bearer-authenticated, explicitly installed,
+        bounded, and credential-private; no transport or discovery behavior is
+        changed by this native-chat-only correction.
+anchors:
+  vscode-copilot-native-agent-auto-approves-and-streams-evidence:
+    vscode-copilot-native-chat-runtime:
+      action: change
+      reason: >
+        Await /autoApprove with blockOnResponse, then dispatch the exact real
+        prompt and bound its exported request identity within a roughly
+        30-second startup window that cannot exceed the configured turn timeout.
+    vscode-copilot-native-chat-regression:
+      action: change
+      reason: >
+        Assert the exact ordered slash-command option, exercise direct
+        requestId/message.text/response export data, and prove bounded missing
+        request failure without sleeping.
+files:
+  - .harn/plans/copilot-vscode-p1-review-fixes-v3.yaml
+  - packages/adapters/copilot/vscode-extension/src/native-chat.ts
+  - packages/adapters/copilot/vscode-extension/src/native-chat.spec.ts
+verification: >
+  Run focused native-chat and adapter tests, build the Copilot adapter and
+  extension, run the full workspace build and serialized workspace tests, run
+  Harn check/apply/staged validation, run git diff --check, and leave the
+  dedicated worktree clean. No Phase 2 work, push, merge, deploy, or artifact
+  delivery is in scope.
+applied:
+  applied_at: 2026-08-04T04:25:55.119Z

@@ -5,7 +5,7 @@ export const MAX_EXPORT_CHARS = 4 * 1024 * 1024;
 export const DEFAULT_POLL_MS = 200;
 export const DEFAULT_TURN_MS = 30 * 60_000;
 export const MAX_APPROVAL_ATTEMPTS = 3;
-export const MAX_REQUEST_BIND_POLLS = 10;
+export const MAX_REQUEST_BIND_MS = 30_000;
 
 export interface NativeTurnRequest {
   prompt: string;
@@ -182,6 +182,7 @@ export class NativeChatRunner {
     private readonly host: NativeChatHost,
     private readonly pollMs = DEFAULT_POLL_MS,
     private readonly turnMs = DEFAULT_TURN_MS,
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   async run(
@@ -197,7 +198,6 @@ export class NativeChatRunner {
     const revisions: string[] = [];
     const approvals = new Map<number, ApprovalLifecycle>();
     let boundRequestId: string | undefined;
-    let bindPolls = 0;
     let openSettled = false;
     let openError: unknown;
 
@@ -207,8 +207,12 @@ export class NativeChatRunner {
       // /autoApprove is scoped to this newly-created chat. It is deliberately
       // issued as its own silent slash command rather than being concatenated
       // with the real prompt (VS Code executes only the slash command text).
-      await this.host.executeCommand('workbench.action.chat.open', { query: '/autoApprove' });
+      await this.host.executeCommand('workbench.action.chat.open', {
+        query: '/autoApprove',
+        blockOnResponse: true,
+      });
       emit({ type: 'started', turn_id: turnId });
+      const bindDeadline = this.now() + Math.min(MAX_REQUEST_BIND_MS, this.turnMs);
       // The real prompt is a separate request so the exported request id can
       // identify it independently from the /autoApprove command. blockOnResponse
       // is intentionally tracked, not awaited, so export polling can stream.
@@ -241,6 +245,7 @@ export class NativeChatRunner {
             candidate.requestId === boundRequestId && candidate.prompt === request.prompt);
           if (latest === undefined) throw requestBindingError();
         } else {
+          if (this.now() >= bindDeadline) throw requestBindingError();
           latest = latestMatchingRequest(requests, request.prompt);
           if (latest !== undefined) {
             boundRequestId = latest.requestId;
@@ -255,8 +260,6 @@ export class NativeChatRunner {
               && candidate.prompt !== '/autoApprove'
               && candidate.response.some((part, index) => waitingPart(part, index) !== undefined));
             if (unrelatedPending) throw requestBindingError();
-            bindPolls += 1;
-            if (bindPolls >= MAX_REQUEST_BIND_POLLS) throw requestBindingError();
           }
         }
         if (latest !== undefined) {

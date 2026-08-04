@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  MAX_REQUEST_BIND_MS,
   NativeChatRunner,
   type NativeChatHost,
   type NativeStreamEvent,
@@ -35,6 +36,19 @@ function snapshotRequests(
   };
 }
 
+function realSnapshotRequests(
+  requests: Array<{ request: string; requestId: string; parts: unknown[]; result?: unknown }>,
+): unknown {
+  return {
+    requests: requests.map(({ request, requestId, parts, result }) => ({
+      message: { text: request, parts: [] },
+      requestId,
+      response: parts,
+      ...(result !== undefined && { result }),
+    })),
+  };
+}
+
 function textSnapshot(text: string, done = false, request = 'work', requestId = 'request-1'): unknown {
   return snapshot([{ value: text }], done ? { status: 'complete' } : undefined, request, requestId);
 }
@@ -54,19 +68,23 @@ describe('native VS Code Copilot chat runtime', () => {
   it('opens the exact native agent with chat-local /autoApprove and emits accumulated text deltas', async () => {
     const commands: Array<{ command: string; args: unknown[] }> = [];
     const snapshots = [
-      snapshotRequests([
+      realSnapshotRequests([
         { request: '/autoApprove', requestId: 'auto-1', parts: [] },
         { request: 'unrelated history', requestId: 'old-1', parts: [{ value: 'ignore me' }] },
         { request: 'work', requestId: 'work-1', parts: [{ value: 'Hel' }] },
       ]),
-      textSnapshot('Hello', true, 'work', 'work-1'),
+      realSnapshotRequests([
+        { request: 'work', requestId: 'work-1', parts: [{ value: 'Hello' }], result: { status: 'complete' } },
+      ]),
     ];
     const host: NativeChatHost = {
       async executeCommand(command, ...args) {
         commands.push({ command, args });
         return undefined;
       },
-      exportSnapshot: async () => snapshots.shift() ?? textSnapshot('Hello', true, 'work', 'work-1'),
+      exportSnapshot: async () => snapshots.shift() ?? realSnapshotRequests([
+        { request: 'work', requestId: 'work-1', parts: [{ value: 'Hello' }], result: { status: 'complete' } },
+      ]),
       delay: async () => undefined,
     };
     const events: NativeStreamEvent[] = [];
@@ -82,7 +100,10 @@ describe('native VS Code Copilot chat runtime', () => {
 
     expect(commands.slice(0, 3)).toEqual([
       { command: 'workbench.action.chat.newChat', args: [] },
-      { command: 'workbench.action.chat.open', args: [{ query: '/autoApprove' }] },
+      {
+        command: 'workbench.action.chat.open',
+        args: [{ query: '/autoApprove', blockOnResponse: true }],
+      },
       { command: 'workbench.action.chat.open', args: [expect.objectContaining({
         query: 'work',
         mode: 'agent',
@@ -198,6 +219,36 @@ describe('native VS Code Copilot chat runtime', () => {
     );
 
     expect(accept).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      type: 'error',
+      message: expect.stringContaining('active chat no longer matches'),
+    }));
+  });
+
+  it('fails boundedly when the real request never appears without sleeping', async () => {
+    let now = 0;
+    let exports = 0;
+    const delay = vi.fn(async () => undefined);
+    const host: NativeChatHost = {
+      async executeCommand() {
+        return undefined;
+      },
+      exportSnapshot: async () => {
+        exports += 1;
+        now = MAX_REQUEST_BIND_MS + 1;
+        return { requests: [] };
+      },
+      delay,
+    };
+    const events: NativeStreamEvent[] = [];
+    await new NativeChatRunner(host, 0, MAX_REQUEST_BIND_MS * 2, () => now).run(
+      { prompt: 'never exported' },
+      (event) => events.push(event),
+      new AbortController().signal,
+    );
+
+    expect(exports).toBe(1);
+    expect(delay).not.toHaveBeenCalled();
     expect(events.at(-1)).toEqual(expect.objectContaining({
       type: 'error',
       message: expect.stringContaining('active chat no longer matches'),
