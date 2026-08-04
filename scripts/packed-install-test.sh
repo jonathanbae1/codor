@@ -62,9 +62,20 @@ docker run --rm \
     # its third-party and native dependencies resolve from the registry here just
     # as they do on the operator machine.
     cd /proof
+    # harn:assume packed-local-tgz-npx-proof-runs-fresh-default-audit ref=packed-npx-fresh-default-audit-proof
+    # Keep this cache distinct from the earlier npm install. The first exact
+    # local-TGZ npx invocation must therefore perform its normal install-time
+    # audit instead of inheriting registry/advisory state from a warm proof.
+    NPX_PROOF_CACHE=/proof/npx-audit-cache
+    test ! -e "$NPX_PROOF_CACHE"
+    mkdir -p "$NPX_PROOF_CACHE"
+    export npm_config_cache="$NPX_PROOF_CACHE"
     PACKAGED_DRY_RUN="$(npx --yes --package="$TARBALL" codor install --dry-run)"
     grep -Fq "access localhost; skip Tailscale Serve" <<<"$PACKAGED_DRY_RUN"
     grep -Fq "[dry-run] wait for Codor pairing status" <<<"$PACKAGED_DRY_RUN"
+    PACKAGED_WARM_DRY_RUN="$(npx --yes --package="$TARBALL" codor install --dry-run)"
+    [[ "$PACKAGED_WARM_DRY_RUN" == "$PACKAGED_DRY_RUN" ]]
+    # harn:end packed-local-tgz-npx-proof-runs-fresh-default-audit
     # Durability: the install copies a durable runtime, and the rendered service
     # ExecStart references that ~/.codor/runtime copy, never the ephemeral npx
     # cache the CLI is invoked from.

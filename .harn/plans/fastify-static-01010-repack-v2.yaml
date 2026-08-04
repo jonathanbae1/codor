@@ -143,3 +143,5 @@ verification: >
   and the ordinary audit-enabled local-TGZ npx command to run codor --help and
   install dry-run twice. Replace all earlier transferred 0.10.10 copies before
   installation. Do not publish to npm or install remotely.
+applied:
+  applied_at: 2026-08-04T15:56:15.999Z

@@ -1,0 +1,16 @@
+id: installed-or-published-release-artifacts-are-version-immutable
+hash: a-dea04c70e206
+title: Installed or published release artifacts are version immutable
+state: active
+statement: >
+  A Codor TGZ or companion VSIX version is immutable once published or
+  installed. An operator may explicitly withdraw and replace a candidate at the
+  same version only after confirming it was not installed or published; every
+  previously transferred copy is then invalid, the corrected files must be
+  resent, and the replacement byte sizes and SHA-256 digests become
+  authoritative, because npm cache identity must never point at competing
+  payloads that have entered use.
+depends_on:
+  - release-candidate-requires-publishable-install-tarball
+  - public-npx-install-is-primary-install
+created_by: fastify-static-01010-repack-v2

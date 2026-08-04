@@ -1,0 +1,13 @@
+id: switchboard-static-serving-dependency-is-security-patched
+hash: a-e68daa33b674
+title: Switchboard static serving uses the upstream security-patched dependency
+state: active
+statement: >
+  The switchboard must depend on @fastify/static 10.1.2 or newer within major
+  10, and the deterministic release audit must reject an older range, because
+  earlier releases are affected by non-canonical-path and path-traversal
+  authorization bypass advisories and also make default npm audit fail while
+  resolving bundled private parent packages.
+depends_on:
+  - public-package-bundles-complete-codor-runtime
+created_by: fastify-static-01010-repack-v2

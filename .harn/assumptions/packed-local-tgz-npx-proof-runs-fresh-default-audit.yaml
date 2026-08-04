@@ -1,0 +1,13 @@
+id: packed-local-tgz-npx-proof-runs-fresh-default-audit
+hash: a-0d9d0ea1f8f2
+title: Packed local TGZ proof exercises a fresh default-audit npx install
+state: active
+statement: >
+  The packed-install gate must invoke the exact local-TGZ npx path first with an
+  empty dedicated npm cache and without disabling npm audit, then repeat it
+  warm, because a pre-populated cache can hide install-time advisory traversal
+  failures before Codor code starts.
+depends_on:
+  - packed-release-proof-runs-install-runtime
+  - public-npx-install-is-primary-install
+created_by: fastify-static-01010-repack-v2

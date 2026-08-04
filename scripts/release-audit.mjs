@@ -143,13 +143,16 @@ assert.equal((firstChannelSource.match(/headingLevel=\{2\}/g) ?? []).length, 2);
 const selfHost = await readFile(new URL('../docs/SELF-HOST.md', import.meta.url), 'utf8');
 const setupGuide = await readFile(new URL('../docs/SETUP.md', import.meta.url), 'utf8');
 const rootManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const switchboardManifest = JSON.parse(await readFile(new URL('../packages/switchboard/package.json', import.meta.url), 'utf8'));
 const workspaceManifest = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
 
-// harn:assume distributed-release-artifacts-are-version-immutable ref=immutable-release-audit
+// harn:assume installed-or-published-release-artifacts-are-version-immutable ref=replaceable-preinstall-release-audit
 assert.match(manual, /Versioned release artifact immutability/);
 assert.match(manual, /source commit, versioned filename,\s*byte size, and SHA-256 digest/s);
-assert.match(manual, /filename and payload bytes are immutable/);
+assert.match(manual, /Once that version is published or\s*installed, its filename and payload bytes are immutable/);
 assert.match(manual, /advance the\s*release version before rebuilding or sending it/);
+assert.match(manual, /explicitly withdraw and replace a candidate at the same version only after\s*confirming it was not published or installed/);
+assert.match(manual, /Treat every previously transferred copy as invalid/);
 assert.equal(rootManifest.version, '0.10.10', 'the release candidate must advance to 0.10.10');
 const legacyPackageVersions = new Set([
   'packages/adapters/grok/package.json',
@@ -167,7 +170,18 @@ for (const path of tracked.filter((candidate) => candidate.endsWith('package.jso
 }
 const acpAdapterSource = await readFile(new URL('../packages/adapters/acp/src/adapter.ts', import.meta.url), 'utf8');
 assert.match(acpAdapterSource, /clientInfo:\s*\{\s*name: 'Codor', version: '0\.10\.10'/);
-// harn:end distributed-release-artifacts-are-version-immutable
+// harn:end installed-or-published-release-artifacts-are-version-immutable
+
+// harn:assume switchboard-static-serving-dependency-is-security-patched ref=patched-fastify-static-release-audit
+const staticRange = switchboardManifest.dependencies?.['@fastify/static'];
+assert.match(staticRange ?? '', /^\^10\.\d+\.\d+$/, 'switchboard must use @fastify/static major 10');
+const [staticMajor, staticMinor, staticPatch] = staticRange.slice(1).split('.').map(Number);
+assert.equal(staticMajor, 10);
+assert.ok(
+  staticMinor > 1 || (staticMinor === 1 && staticPatch >= 2),
+  'switchboard must use security-patched @fastify/static >=10.1.2 within major 10',
+);
+// harn:end switchboard-static-serving-dependency-is-security-patched
 
 // harn:assume pnpm-build-approvals-span-pinned-and-current-config ref=pnpm-build-approval-equivalence-audit
 const requiredBuildApprovals = ['better-sqlite3', 'esbuild', 'sodium-native', 'udx-native'];
@@ -209,6 +223,12 @@ assert.match(packedProof, /--network none/);
 assert.match(packedProof, /--package="\$TARBALL" codor install --dry-run/);
 assert.match(packedProof, /\/sw\.js/);
 assert.match(packedProof, /third-party-adapter\.mjs/);
+// harn:assume packed-local-tgz-npx-proof-runs-fresh-default-audit ref=packed-npx-fresh-default-audit-audit
+assert.match(packedProof, /test ! -e "\$NPX_PROOF_CACHE"/);
+assert.match(packedProof, /export npm_config_cache="\$NPX_PROOF_CACHE"/);
+assert.match(packedProof, /PACKAGED_WARM_DRY_RUN=.*npx --yes --package="\$TARBALL"/);
+assert.doesNotMatch(packedProof, /npm_config_audit|--no-audit/);
+// harn:end packed-local-tgz-npx-proof-runs-fresh-default-audit
 // harn:end packed-release-proof-runs-install-runtime
 
 process.stdout.write('release audit passed: pre-tag gates, rename, relay disclosure, and acceptance provenance\n');

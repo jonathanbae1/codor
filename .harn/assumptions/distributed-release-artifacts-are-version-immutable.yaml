@@ -1,7 +1,7 @@
 id: distributed-release-artifacts-are-version-immutable
 hash: a-c72a3825dd2e
 title: A distributed release version identifies one immutable artifact payload
-state: active
+state: retired
 statement: >
   Once a versioned Codor TGZ or companion VSIX has been distributed, published,
   or deployed, that version, filename, source commit, and payload bytes are
@@ -15,3 +15,4 @@ depends_on:
   - release-candidate-requires-publishable-install-tarball
   - public-npx-install-is-primary-install
 created_by: npx-member-ui-0-10-10
+retired_by: fastify-static-01010-repack-v2
