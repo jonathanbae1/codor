@@ -41,13 +41,18 @@ test.describe('run inspector', () => {
     await expect(inspector).toBeHidden();
   });
 
-  test('a diff chip routes to the Diff tab, noting no current changes when clean', async ({ page }) => {
+  test('a diff chip opens the stored run diff without reading the current tree', async ({ page }) => {
     await openRoom(page, FIXTURES);
     const batch = page.getByTestId('tool-batch');
     await batch.locator('.nx-batch-line').click();
     await batch.locator('.nx-tool', { hasText: 'session.ts' }).click();
-    // The chip opens the live Diff tab focused on that file; eng's tree is clean.
-    await expect(page.getByTestId('diff-no-current')).toContainText('session.ts');
+    const dialog = page.getByTestId('historical-diff-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Saved with this run');
+    await expect(dialog.getByRole('navigation', { name: 'Stored diff files' }))
+      .toContainText('src/auth/session.ts');
+    await expect(dialog.getByTestId('diff-view')).toContainText('refreshTtlSeconds');
+    await expect(page.getByTestId('diff-files')).toHaveCount(0);
   });
 });
 

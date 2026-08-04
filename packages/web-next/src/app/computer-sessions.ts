@@ -108,7 +108,7 @@ const defaultDeps: ComputerSessionDeps = {
       return ((await summaryResponse.json()) as { rooms: RoomSummary[] }).rooms;
     }
     const roomsResponse = await tunnel.fetch('/api/rooms', { headers });
-    if (!roomsResponse.ok) throw new Error(`rooms failed: ${String(roomsResponse.status)}`);
+    if (!roomsResponse.ok) throw new Error(`Channel list failed: ${String(roomsResponse.status)}`);
     return ((await roomsResponse.json()) as { rooms: Room[] }).rooms.map((room) => ({
       id: room.id,
       name: room.name,

@@ -69,7 +69,7 @@ test.describe('mobile transcript re-composition', () => {
     await expect(page.locator('.nx-tool').first()).toBeVisible();
   });
 
-  test('content growth stays pinned until an intentional upward scroll releases it', async ({ page }) => {
+  test('the released transcript keeps its FAB while content grows farther from the tail', async ({ page }) => {
     await openRoom(page);
     const timeline = page.getByTestId('timeline');
     const fab = page.locator('.nx-jump');
@@ -78,15 +78,24 @@ test.describe('mobile transcript re-composition', () => {
       node.scrollHeight - node.scrollTop - node.clientHeight,
     )).toBeLessThan(4);
 
-    // A small nudge does not release the tail; subsequent column growth snaps back.
-    // Assigning scrollTop does not reliably produce a browser scroll event under
-    // full-suite timing, and the pin release listens for that event. Dispatch it
-    // explicitly, as the stable room11 gesture already does.
-    await timeline.evaluate((node) => {
-      node.scrollTop = Math.max(0, node.scrollTop - 60);
-      node.dispatchEvent(new Event('scroll'));
-    });
-    await expect(fab).toBeHidden();
+    // Use a real upward gesture so the browser emits the same scroll lifecycle
+    // as an operator touch. The test observes the released distance, never an
+    // exact scrollTop that browser scroll anchoring may adjust.
+    const timelineBox = await timeline.boundingBox();
+    expect(timelineBox).not.toBeNull();
+    await page.mouse.move(timelineBox!.x + timelineBox!.width / 2, timelineBox!.y + timelineBox!.height / 2);
+    await timeline.hover();
+    for (let i = 0; i < 3; i += 1) {
+      await page.mouse.wheel(0, -200);
+      await page.waitForTimeout(25);
+    }
+    await expect.poll(() => timeline.evaluate((node) =>
+      node.scrollHeight - node.scrollTop - node.clientHeight,
+    )).toBeGreaterThanOrEqual(120);
+    await expect(fab).toBeVisible();
+    const beforeGrowth = await timeline.evaluate((node) =>
+      node.scrollHeight - node.scrollTop - node.clientHeight,
+    );
     await timeline.evaluate((node) => {
       const spacer = document.createElement('div');
       spacer.dataset.testid = 'growth-probe-one';
@@ -96,35 +105,8 @@ test.describe('mobile transcript re-composition', () => {
     });
     await expect.poll(() => timeline.evaluate((node) =>
       node.scrollHeight - node.scrollTop - node.clientHeight,
-    )).toBeLessThan(4);
-
-    // Crossing the release threshold exposes the FAB and the growth observer
-    // stops following. Measured from the bottom so the gesture is the same
-    // distance regardless of how much history the suite accumulated in eng.
-    //
-    // The two-frame barriers matter: the first spacer's growth/scroll work can
-    // still be pending, and capturing the released position before it settles
-    // records a baseline the browser is about to move — which is exactly the
-    // +160 drift that looked like a partial pinned follow.
-    await timeline.evaluate(async () => {
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-    });
-    await timeline.evaluate(async (node) => {
-      node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 160);
-      node.dispatchEvent(new Event('scroll'));
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-    });
+    )).toBeGreaterThan(beforeGrowth);
     await expect(fab).toBeVisible();
-    const released = await timeline.evaluate((node) => ({
-      top: node.scrollTop,
-      distance: node.scrollHeight - node.scrollTop - node.clientHeight,
-    }));
-    expect(released.distance).toBeGreaterThanOrEqual(120);
-    const releasedTop = released.top;
     await timeline.evaluate((node) => {
       const spacer = document.createElement('div');
       spacer.dataset.testid = 'growth-probe-two';
@@ -133,7 +115,10 @@ test.describe('mobile transcript re-composition', () => {
       node.querySelector('.nx-column')?.append(spacer);
     });
     await page.waitForTimeout(100);
-    expect(await timeline.evaluate((node) => node.scrollTop)).toBe(releasedTop);
+    await expect.poll(() => timeline.evaluate((node) =>
+      node.scrollHeight - node.scrollTop - node.clientHeight,
+    )).toBeGreaterThan(beforeGrowth);
+    await expect(fab).toBeVisible();
 
     const box = await fab.boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);

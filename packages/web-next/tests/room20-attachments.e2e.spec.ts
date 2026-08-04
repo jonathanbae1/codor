@@ -4,8 +4,8 @@ import { expect, test, type Page } from '@playwright/test';
 // allowed) and seeded with a message carrying a rendered image + a download chip.
 const FILES = '/?room=files&token=next-e2e-token';
 
-async function openRoom(page: Page): Promise<void> {
-  await page.goto(FILES);
+async function openRoom(page: Page, room = 'files'): Promise<void> {
+  await page.goto(`/?room=${room}&token=next-e2e-token`);
   await expect(page.getByTestId('timeline')).toBeVisible();
   await expect(page.getByTestId('connection')).toHaveText(/Connected/);
 }
@@ -48,8 +48,34 @@ test.describe('message attachments', () => {
     expect(Buffer.concat(chunks)).toEqual(Buffer.from('build log\nmore lines\n'));
   });
 
+  test('a deleted uploaded message shows a tombstone with no attachments', async ({ page }, testInfo) => {
+    // This runs before the other Empty History upload, so the new message owns
+    // its header and delete action instead of grouping under a recent message.
+    await openRoom(page, 'empty-history');
+    const filename = `delete-me-${String(testInfo.repeatEachIndex)}-${String(testInfo.retry)}.txt`;
+    await page.setInputFiles('[data-testid="composer-file"]', {
+      name: filename,
+      mimeType: 'text/plain',
+      buffer: Buffer.from('delete me\n'),
+    });
+    await page.getByTestId('composer-send').click();
+
+    // Own the message being deleted so the shared seeded notes attachment stays
+    // available to room28's preview and download journey.
+    const turn = page.locator('article.nx-turn', { hasText: filename });
+    await expect(turn.getByTestId('message-attachments')).toBeVisible();
+    const id = (await turn.getAttribute('data-testid'))!.replace('msg-', '');
+
+    await turn.hover();
+    await page.getByTestId(`msg-${id}-delete`).click();
+    await page.getByTestId('delete-confirm-go').click();
+
+    await expect(page.getByTestId(`msg-${id}-deleted`)).toHaveText('[deleted]');
+    await expect(page.getByTestId(`msg-${id}`).getByTestId('message-attachments')).toHaveCount(0);
+  });
+
   test('attaching files in the composer and sending renders them in the transcript', async ({ page }) => {
-    await openRoom(page);
+    await openRoom(page, 'empty-history');
     await page.setInputFiles('[data-testid="composer-file"]', [
       { name: 'shot.png', mimeType: 'image/png', buffer: PNG },
       { name: 'log.txt', mimeType: 'text/plain', buffer: Buffer.from('composer upload line\n') },
@@ -72,20 +98,5 @@ test.describe('message attachments', () => {
     const { default: AxeBuilder } = await import('@axe-core/playwright');
     const { violations } = await new AxeBuilder({ page }).analyze();
     expect(violations.map((v) => `${v.id}: ${v.nodes[0]?.target[0]}`)).toEqual([]);
-  });
-
-  test('a deleted message shows a tombstone with no attachments', async ({ page }) => {
-    await openRoom(page);
-    // The seeded message (owner is the operator viewing here) can be deleted.
-    const turn = page.locator('article.nx-turn', { hasText: 'here are the files' });
-    await expect(turn.getByTestId('message-attachments')).toBeVisible();
-    const id = (await turn.getAttribute('data-testid'))!.replace('msg-', '');
-
-    await turn.hover();
-    await page.getByTestId(`msg-${id}-delete`).click();
-    await page.getByTestId('delete-confirm-go').click();
-
-    await expect(page.getByTestId(`msg-${id}-deleted`)).toHaveText('[deleted]');
-    await expect(page.getByTestId(`msg-${id}`).getByTestId('message-attachments')).toHaveCount(0);
   });
 });

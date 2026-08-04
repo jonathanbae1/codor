@@ -52,10 +52,16 @@ test.describe('one-line tool rows', () => {
     const delColor = await edit.locator('.nx-stat-del').evaluate((n) => getComputedStyle(n).color);
     expect(addColor).not.toBe(delColor);
 
-    // A diff row routes to the live Diff tab focused on its file, not the
-    // inspector; eng's tree is clean, so it reports no current changes.
+    // A diff row opens the immutable Stored run diff, not the live Diff panel or
+    // inspector; the fixture tree is irrelevant to this historical evidence.
     await edit.click();
-    await expect(page.getByTestId('diff-no-current')).toContainText('session.ts');
+    const dialog = page.getByTestId('historical-diff-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Saved with this run');
+    await expect(dialog.getByRole('navigation', { name: 'Stored diff files' }))
+      .toContainText('src/auth/session.ts');
+    await expect(dialog.getByTestId('diff-view')).toContainText('refreshTtlSeconds');
+    await expect(page.getByTestId('diff-files')).toHaveCount(0);
     await expect(page.getByTestId('run-inspector')).toHaveCount(0);
   });
 

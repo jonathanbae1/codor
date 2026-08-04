@@ -78,11 +78,25 @@ const visibleRoomPatterns = [
   /\b(?:throw new Error|setNotice)\(\s*["'`][^"'`]*\brooms?\b/i,
   /\breturn\s+["'`](?![^"'`]*(?:\?|room:|\/api\/))[^"'`]*\brooms?\b/i,
 ];
+const approvedGenericRoomCopy = new Map([
+  ['packages/web-next/src/room/RoomPage.tsx', ["throw new Error('RoomPage requires a room connector')"]],
+  ['packages/web-next/src/surfaces/SettingsPage.tsx', ["throw new Error('Settings requires a room connector')"]],
+  ['packages/web-next/src/surfaces/LandingPage.tsx', [
+    'doing so beside the daemon would fork the room.',
+    'title="Voice control that stays in the room."',
+  ]],
+]);
 for (const path of existingTracked.filter((candidate) =>
   candidate.startsWith('packages/web-next/src/') &&
   /\.(?:ts|tsx)$/.test(candidate) &&
   !/\.spec\.(?:ts|tsx)$/.test(candidate))) {
-  const body = await readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  let body = await readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  // These exact strings use "room" generically or in internal invariant errors;
+  // they are not product-facing names for Channels. Keep the exception exact so
+  // any additional legacy UI terminology still fails this audit.
+  for (const approved of approvedGenericRoomCopy.get(path) ?? []) {
+    body = body.replace(approved, '');
+  }
   for (const pattern of visibleRoomPatterns) {
     assert.doesNotMatch(body, pattern, `${path} contains operator-visible room wording`);
   }
@@ -100,19 +114,18 @@ assert.match(landingSource, /localhost/);
 assert.match(landingSource, /Tailscale/);
 // The blind relay is implemented, so the landing must name the hosted third
 // access path (browser at codor.app -> self-hosted switchboard) AND describe the
-// relay's limits truthfully per PLAN §2.2: it holds no keys and cannot read
-// channel content, forwarding encrypted payloads and only routing metadata. The
+// relay's limits truthfully per PLAN §2.2: it never receives channel keys and
+// sees ciphertext only. The
 // paired asserts fail if the honest explanation is deleted while a codor.app link survives.
 assert.match(landingSource, /codor\.app/, 'landing must name the hosted codor.app access path');
-assert.match(landingSource, /holds no keys/, 'landing must state the relay holds no keys');
-assert.match(landingSource, /cannot read/, 'landing must state the relay cannot read channel content');
+assert.match(landingSource, /never receives your channel keys/, 'landing must state the relay never receives channel keys');
+assert.match(landingSource, /Relay sees ciphertext only/, 'landing must state the relay sees ciphertext only');
 // harn:end unpaired-root-explains-local-and-hosted-access
 
-// harn:assume landing-demo-plays-once-and-settles ref=landing-motion-release-audit
+// harn:assume landing-demo-settles-without-playback-controls ref=landing-motion-release-audit
 assert.match(landingSource, /prefers-reduced-motion: reduce/);
-assert.match(landingSource, /Pause demo/);
 assert.match(landingSource, /phase >= FINAL_PHASE/);
-// harn:end landing-demo-plays-once-and-settles
+// harn:end landing-demo-settles-without-playback-controls
 
 // harn:assume paired-empty-state-creates-first-channel ref=first-channel-onboarding-audit
 assert.match(firstChannelSource, /createRoom\(/);

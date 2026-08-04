@@ -1,0 +1,112 @@
+id: release-0-10-9-codor-gate-cleanup
+title: Clear the 0.10.9 release gates without changing the landing page
+notes: >
+  Reconcile stale release assertions with the approved one-shot, no-controls
+  landing behavior and its current security copy, then apply only the contained
+  test-isolation and terminology gate fixes. LandingPage source, styles,
+  animation, copy, and runtime behavior are explicitly unchanged. The room-word
+  audit may exempt only the four exact existing generic/internal strings; every
+  additional operator-visible legacy term must still fail.
+assumptions:
+  retire:
+    - id: landing-demo-plays-once-and-settles
+      reason: The old assumption incorrectly requires a Pause/Resume control; Richard
+        confirmed the current one-shot landing demo intentionally has no
+        playback controls and must remain unchanged.
+  create:
+    - id: landing-demo-settles-without-playback-controls
+      title: The landing collaboration demo plays once and settles without controls
+      statement: The landing collaboration demo must start once when it enters the
+        viewport, advance through its approved conversation once, settle
+        permanently at FINAL_PHASE, render the final static state for reduced
+        motion, and intentionally expose no playback controls, because the
+        current information-bearing landing composition is final and a repeated
+        or operator-controlled animation is not part of the approved surface.
+      reason: Replace the stale Pause/Resume requirement with the behavior Richard
+        approved while retaining the reduced-motion and one-shot guarantees.
+      depends_on:
+        - web-motion-is-purposeful-and-reduced-motion-safe-v5
+  reviewed:
+    - id: release-audits-enforce-codor-clean-break
+      outcome: unchanged
+      reason: The release audit remains authoritative. Its room-word scan gains exact
+        exceptions only for two generic landing phrases and two internal
+        invariant errors, so all additional legacy product terminology still
+        fails.
+    - id: human-facing-surfaces-call-rooms-channels
+      outcome: unchanged
+      reason: The remaining exact exceptions do not name the product entity in
+        operator navigation or controls; protocol and implementation room
+        identifiers remain untouched.
+    - id: unpaired-root-explains-local-and-hosted-access
+      outcome: unchanged
+      reason: >
+        The current approved copy states the same security guarantees as the
+        stale literals: the relay never receives channel keys and sees
+        ciphertext only.
+    - id: web-motion-is-purposeful-and-reduced-motion-safe-v5
+      outcome: unchanged
+      reason: Landing source, styles, animation, and behavior remain unchanged; only
+        the stale audit assumption is replaced.
+    - id: hosted-app-keeps-all-paired-computers-live
+      outcome: unchanged
+      reason: The computer-session manager and transport behavior remain untouched.
+    - id: transcript-diffs-use-immutable-run-evidence
+      outcome: unchanged
+      reason: Browser assertions are aligned with the existing stored run-diff dialog
+        and do not alter its behavior.
+    - id: attachments-are-capped-files-served-inert
+      outcome: unchanged
+      reason: Attachment storage, serving, authorization, and cleanup remain
+        unchanged; browser fixtures are isolated to preserve shared seeded data.
+    - id: deleted-messages-purge-rows-and-files
+      outcome: unchanged
+      reason: The deletion regression still proves an owned upload becomes a tombstone
+        and loses its attachment.
+anchors:
+  landing-demo-plays-once-and-settles:
+    landing-motion-release-audit:
+      action: remove
+      reason: Retire the stale anchor with the assumption that required Pause demo.
+  landing-demo-settles-without-playback-controls:
+    landing-motion-release-audit:
+      action: change
+      reason: Keep reduced-motion and FINAL_PHASE audit coverage while making the
+        no-playback-controls behavior truthful.
+  release-audits-enforce-codor-clean-break:
+    rename-release-audit:
+      action: change
+      reason: Preserve the clean-break scan while narrowly exempting the four exact
+        approved generic/internal strings.
+  unpaired-root-explains-local-and-hosted-access:
+    landing-access-truth-audit:
+      action: change
+      reason: Assert the current equivalent key-privacy and ciphertext-only copy.
+  hosted-app-keeps-all-paired-computers-live:
+    computer-session-lifecycle:
+      action: change
+      reason: Replace the operator-visible fallback error's legacy room wording with
+        Channel terminology without changing session behavior.
+  transcript-diffs-use-immutable-run-evidence:
+    historical-diff-dialog:
+      action: change
+      reason: The browser regressions prove the immutable stored dialog and its
+        session.ts patch rather than the live Diff panel.
+    historical-diff-browser-regression:
+      action: change
+      reason: Keep the focused room3/room11 regressions tied to stored run evidence.
+files:
+  - scripts/release-audit.mjs
+  - packages/web-next/src/app/computer-sessions.ts
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+  - packages/web-next/tests/room11-batch-b.e2e.spec.ts
+  - packages/web-next/tests/room20-attachments.e2e.spec.ts
+  - packages/web-next/tests/room5-mobile.e2e.spec.ts
+verification: >
+  The affected Playwright specs and complete browser suite pass, audit:license
+  and audit:release pass, serialized workspace tests and the full build pass,
+  fresh and Docker packed-install proofs pass, and Harn check/apply/staged
+  validation succeeds. Rebuild and inspect both 0.10.9 artifacts with fresh
+  size, hash, and content evidence.
+applied:
+  applied_at: 2026-08-04T07:35:31.272Z

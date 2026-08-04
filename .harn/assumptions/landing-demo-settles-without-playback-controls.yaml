@@ -1,0 +1,13 @@
+id: landing-demo-settles-without-playback-controls
+hash: a-e57f12a857fc
+title: The landing collaboration demo plays once and settles without controls
+state: active
+statement: The landing collaboration demo must start once when it enters the
+  viewport, advance through its approved conversation once, settle permanently
+  at FINAL_PHASE, render the final static state for reduced motion, and
+  intentionally expose no playback controls, because the current
+  information-bearing landing composition is final and a repeated or
+  operator-controlled animation is not part of the approved surface.
+depends_on:
+  - web-motion-is-purposeful-and-reduced-motion-safe-v5
+created_by: release-0-10-9-codor-gate-cleanup
