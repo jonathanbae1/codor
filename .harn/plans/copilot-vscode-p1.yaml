@@ -1,0 +1,307 @@
+id: copilot-vscode-p1
+title: Add the native VS Code Copilot bridge and exact live-session revive
+notes: >
+  Port only the copilot-vscode adapter and its manually installed workspace
+  extension onto current main. The official VS Code Copilot Agent owns
+  authentication, context, models, tools, edits, and the agent loop. The bridge
+  is local and bearer-authenticated; native tool approval is handled entirely
+  inside each bridge-created chat. Preserve the existing copilot CLI, ACP, all
+  other adapters, and all unrelated branch history. This is Phase 1 only: no
+  release/version change, artifact delivery, automatic install, Marketplace
+  publication, voice, relay/site, or Phase 2 work.
+assumptions:
+  retire:
+    - id: revive-via-session-ref
+      reason: >
+        The universal attach-only statement does not permit the explicitly gated
+        copilot-vscode exception. Resumable adapters retain exact native attach,
+        while only copilot-vscode may revive its exact live cached session when
+        its bridge generation is still current.
+  create:
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      title: The VS Code Copilot bridge is manual, local, and credential-private
+      statement: >
+        The copilot-vscode companion must be installed explicitly by the
+        operator, run in the VS Code workspace extension host, bind only
+        127.0.0.1, authenticate every bounded request with a random bearer token
+        published through one atomic user-private discovery record, and remove
+        that record on clean shutdown. It must use the already-installed
+        official Copilot extension and VS Code-owned authentication without
+        inspecting, copying, logging, returning, or transmitting GitHub or VS
+        Code credentials. Codor setup and runtime must never install, update, or
+        publish the extension automatically.
+      reason: >
+        The operator wants the existing authenticated VS Code Copilot profile,
+        while the bridge must remain a narrow local transport and an explicit
+        installation action.
+      depends_on:
+        - adapter-registry-sole-harness-source
+        - adapter-catalog-distinguishes-installed-and-configurable
+    - id: vscode-copilot-native-agent-auto-approves-and-streams-evidence
+      title: The native VS Code Copilot Agent owns execution and native approval
+      statement: >
+        A copilot-vscode turn must invoke workbench.action.chat.open in native
+        Agent mode with the exact selected Copilot model, the per-chat
+        /autoApprove directive, and bounded prior text history, never vscode.lm
+        for execution or a Codor-owned tool loop. The companion must repeatedly
+        export the active native chat, diff only newly accumulated response
+        parts into normalized Codor evidence, treat the final export as
+        authoritative, and stop on a populated result, bounded failure,
+        cancellation, or timeout. For every response part whose native state
+        enters WaitingForConfirmation or WaitingForPostApproval, the extension
+        must invoke the native Allow action locally, track the actual part index
+        and state transition so repeated identical tools are each handled,
+        verify that the pending state advances, and fail boundedly with an
+        actionable diagnostic when Allow is a no-op. The bridge and adapter must
+        not make an approval round trip or emit approval.raised. Native
+        OS/authentication/enterprise blocks with no Allow action remain outside
+        this guarantee. The adapter must serialize requests, advertise no
+        durable resume or thinking support, report live Copilot models, and
+        declare all canonical policy mappings null.
+      reason: >
+        The official native Agent must retain the full execution boundary while
+        Codor guarantees unattended native tool progress only in chats it
+        created itself.
+      depends_on:
+        - vscode-copilot-bridge-is-manual-local-and-credential-private
+        - adapters-own-their-model-catalog
+        - canonical-spawn-controls-enforced
+        - harness-declares-what-a-policy-becomes
+    - id: copilot-vscode-revive-requires-exact-live-cache
+      title: Only the exact live copilot-vscode cache can revive an ephemeral member
+      statement: >
+        A copilot-vscode member may revive only when its exact non-stale session
+        object remains cached by the same daemon and the authenticated bridge
+        still has the same live generation recorded by that session. Revive
+        restores the persisted cwd, policy, model, and thinking level before
+        marking the member idle and draining held work. Resumable adapters must
+        continue attaching their exact persisted native session; ACP and every
+        other non-resumable adapter must reject revive rather than replacing the
+        lost conversational context. A missing cache, stale session, changed
+        bridge generation, or a daemon restart therefore fails closed.
+      reason: >
+        The VS Code native chat has no durable Codor attach token; silently
+        spawning a replacement would discard the native conversation.
+      depends_on:
+        - adapter-process-lifecycle-supervised
+        - one-inflight-turn-per-member
+  reviewed:
+    - id: adapter-registry-sole-harness-source
+      outcome: unchanged
+      reason: >
+        copilot-vscode is added as one validated built-in registry entry; the
+        existing copilot CLI and configured adapter path remain unchanged.
+    - id: adapter-catalog-distinguishes-installed-and-configurable
+      outcome: unchanged
+      reason: >
+        Bridge presence is an additive local availability probe; PATH and ACP
+        detection retain their current semantics.
+    - id: adapter-refresh-is-authorized-and-incremental
+      outcome: unchanged
+      reason: >
+        Refresh still rechecks presence and discovers models only on an
+        unavailable-to-available transition.
+    - id: adapters-own-their-model-catalog
+      outcome: unchanged
+      reason: >
+        The new adapter obtains model ids from the live VS Code bridge and the
+        web remains free of a hardcoded provider list.
+    - id: adapter-wrappers-preserve-the-whole-contract
+      outcome: unchanged
+      reason: >
+        The production registry wrapper carries availability and the
+        copilot-vscode live-session predicate in addition to existing optional
+        adapter members.
+    - id: canonical-spawn-controls-enforced
+      outcome: unchanged
+      reason: >
+        The new adapter uses the existing registry validation and rejects
+        unsupported thinking and invalid policy values without changing other
+        harness controls.
+    - id: harness-declares-what-a-policy-becomes
+      outcome: unchanged
+      reason: >
+        copilot-vscode truthfully declares all canonical policy mappings null;
+        existing policy validation remains unchanged.
+    - id: harness-declares-supported-thinking-levels
+      outcome: unchanged
+      reason: >
+        The capability matrix gains one no-thinking row while every existing
+        adapter's accepted levels remain unchanged.
+    - id: live-inbox-capability-is-evidence-backed-v2
+      outcome: unchanged
+      reason: >
+        copilot-vscode declares live_inbox false and does not alter existing
+        active-turn input support.
+    - id: adapter-process-lifecycle-supervised
+      outcome: unchanged
+      reason: >
+        The bridge-backed adapter remains supervised by the daemon turn
+        lifecycle; no subprocess supervision contract is changed.
+    - id: one-inflight-turn-per-member
+      outcome: unchanged
+      reason: >
+        The daemon's existing admission gate still serializes member turns; the
+        extension separately serializes its active native chat.
+    - id: adoption-explicit-or-sessionend
+      outcome: unchanged
+      reason: >
+        Attach custody and explicit adoption remain unchanged for resumable
+        sessions; copilot-vscode is not admitted to mirrored attach.
+    - id: attach-custody-lease-tracks-child-pid
+      outcome: unchanged
+      reason: >
+        The exact live-cache branch is behind the same active attach-lease
+        refusal as the existing revive path.
+    - id: claude-agent-sdk-query-is-the-session-runtime
+      outcome: unchanged
+      reason: >
+        Claude's existing native session runtime and persisted attach behavior
+        remain unchanged.
+    - id: cli-member-recovery-is-actionable
+      outcome: unchanged
+      reason: >
+        Recovery messaging remains the existing operator contract; the new
+        copilot-vscode failure tells the operator to recreate the member.
+    - id: codex-app-server-is-the-member-runtime
+      outcome: unchanged
+      reason: >
+        Codex continues to use its exact persisted native session and does not
+        enter the copilot-vscode cache exception.
+    - id: dead-agent-surfaces-revive-in-its-action-area
+      outcome: unchanged
+      reason: |
+        The existing dead-agent Revive action remains the only UI entry point.
+    - id: member-task-projection-is-durable-and-session-scoped
+      outcome: unchanged
+      reason: >
+        Cached copilot-vscode revive reuses the same session identity and does
+        not alter task projection ownership.
+anchors:
+  vscode-copilot-bridge-is-manual-local-and-credential-private:
+    vscode-copilot-extension-manifest:
+      action: change
+      reason: Add the manually installed workspace-hosted extension manifest and
+        packaging metadata.
+    vscode-copilot-loopback-runtime:
+      action: change
+      reason: Add the bounded authenticated loopback server and private discovery
+        lifecycle.
+    vscode-copilot-discovery-client:
+      action: change
+      reason: Validate the private discovery record and use only its authenticated
+        loopback endpoint.
+    vscode-copilot-bridge-regression:
+      action: change
+      reason: Cover bearer authentication, availability, bounds, and credential-free
+        bridge shapes.
+    vscode-copilot-manual-install-doc:
+      action: change
+      reason: Document explicit manual VSIX/Marketplace installation and reload.
+  vscode-copilot-native-agent-auto-approves-and-streams-evidence:
+    vscode-copilot-native-chat-runtime:
+      action: change
+      reason: Open a fresh native Agent chat, enable /autoApprove, stream evidence,
+        and handle native Allow locally.
+    vscode-copilot-native-chat-regression:
+      action: change
+      reason: Cover ordinary, hard-blocked, repeated, pre/post confirmation, no-op
+        Allow, and cancellation lifecycles.
+    vscode-copilot-adapter-runtime:
+      action: change
+      reason: Add the ordinary adapter client and normalized stream without approval
+        cards or HTTP decisions.
+    vscode-copilot-adapter-regression:
+      action: change
+      reason: Cover live models, authenticated evidence, no approval.raised,
+        unavailable bridge, and interrupt.
+    vscode-copilot-model-catalog:
+      action: change
+      reason: Preserve live model discovery from the native bridge.
+  copilot-vscode-revive-requires-exact-live-cache:
+    revive-native-session:
+      action: change
+      reason: Gate the explicit copilot-vscode live-cache branch while retaining exact
+        resumable attach.
+    revive-session-regression:
+      action: change
+      reason: Prove exact live-generation reuse, cache/bridge loss failure, ACP
+        rejection, and resumable attach.
+  adapter-registry-sole-harness-source:
+    configured-adapter-registry:
+      action: change
+      reason: Register copilot-vscode as a separate built-in adapter.
+    hardcoded-list-guard:
+      action: change
+      reason: Account for two built-in adapter ids sharing the Copilot package import.
+  adapter-catalog-distinguishes-installed-and-configurable:
+    adapter-catalog-registry:
+      action: change
+      reason: Carry the bridge availability probe through the registry.
+    adapter-catalog-daemon:
+      action: change
+      reason: Derive installed state from validated live bridge presence.
+    adapter-catalog-regression:
+      action: change
+      reason: Cover unavailable and live bridge-backed catalog state.
+  adapter-refresh-is-authorized-and-incremental:
+    adapter-refresh-runtime:
+      action: change
+      reason: Recheck bridge availability and discover models on transition.
+  adapters-own-their-model-catalog:
+    adapter-model-discovery-regression:
+      action: change
+      reason: Prove the live bridge catalog reaches the ordinary adapter listing.
+  adapter-wrappers-preserve-the-whole-contract:
+    registry-wrapper-completeness:
+      action: change
+      reason: Preserve the bridge availability and exact live-session predicate
+        through the production wrapper.
+  live-inbox-capability-is-evidence-backed-v2:
+    builtin-live-inbox-matrix:
+      action: change
+      reason: Add the truthful false copilot-vscode capability row.
+  harness-declares-supported-thinking-levels:
+    registry-thinking-level-regression:
+      action: change
+      reason: Add the truthful no-thinking copilot-vscode row.
+  revive-via-session-ref:
+    revive-native-session:
+      action: remove
+      reason: Replace the universal attach-only wording with the explicit
+        adapter-id-gated rule.
+files:
+  - .harn/assumptions/vscode-copilot-bridge-is-manual-local-and-credential-private.yaml
+  - .harn/assumptions/vscode-copilot-native-agent-auto-approves-and-streams-evidence.yaml
+  - .harn/assumptions/copilot-vscode-revive-requires-exact-live-cache.yaml
+  - .harn/plans/copilot-vscode-p1.yaml
+  - packages/adapters/copilot/package.json
+  - packages/adapters/copilot/NOTES.md
+  - packages/adapters/copilot/src/index.ts
+  - packages/adapters/copilot/src/vscode-adapter.ts
+  - packages/adapters/copilot/src/vscode-adapter.spec.ts
+  - packages/adapters/copilot/vscode-extension/package.json
+  - packages/adapters/copilot/vscode-extension/.vscodeignore
+  - packages/adapters/copilot/vscode-extension/README.md
+  - packages/adapters/copilot/vscode-extension/tsconfig.json
+  - packages/adapters/copilot/vscode-extension/src/extension.ts
+  - packages/adapters/copilot/vscode-extension/src/native-chat.ts
+  - packages/adapters/copilot/vscode-extension/src/native-chat.spec.ts
+  - packages/switchboard/src/adapter-registry.ts
+  - packages/switchboard/src/adapter-registry.spec.ts
+  - packages/switchboard/src/hot-swap.integration.spec.ts
+  - packages/switchboard/src/daemon.ts
+  - packages/switchboard/src/daemon.spec.ts
+  - packages/web-next/src/room/harness-marks.tsx
+  - pnpm-lock.yaml
+verification: >
+  Run focused native-chat, adapter/bridge, registry, and daemon tests, including
+  all approval-state and exact-revive boundaries; build the Copilot adapter,
+  workspace extension, switchboard, and web-next; package a provisional VSIX and
+  inspect its contents without delivering it; run the full workspace build and
+  serialized test suite; run Harn check, lock, apply, and staged validation; run
+  git diff --check and leave the dedicated worktree clean. No authenticated VS
+  Code smoke, release artifact delivery, version bump, push, merge, or deploy is
+  part of this phase.
+applied:
+  applied_at: 2026-08-04T03:40:04.867Z

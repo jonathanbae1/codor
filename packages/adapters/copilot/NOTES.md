@@ -144,3 +144,24 @@ above; no Copilot binary is installed and no model call was made. That surface e
 first-party tool-boundary hook whose command stdout enters the running model turn. This
 adapter therefore declares `live_inbox:false`.
 <!-- harn:end live-inbox-capability-is-evidence-backed-v2 -->
+
+## VS Code Copilot companion
+
+`copilot-vscode` is a separate adapter from the CLI-backed `copilot` entry. A
+manually installed workspace extension invokes VS Code 1.129's native
+`workbench.action.chat.open` command with `mode: "agent"`, the selected model,
+and a chat-local `/autoApprove` directive. The official Copilot extension
+retains ownership of authentication, context, its agent loop, tools, and edits.
+
+The companion exports the active chat while it runs and streams normalized
+evidence over an authenticated loopback connection. It handles native Allow
+actions inside the bridge-created chat, including states that `/autoApprove`
+does not cover; no Codor approval card or approval HTTP round trip is involved.
+This first version serializes native turns, carries only bounded textual
+history, and does not claim durable resume, thinking, or canonical policy
+enforcement. Models are read live from
+`vscode.lm.selectChatModels({ vendor: "copilot" })` for catalog metadata only.
+
+The companion publishes a private local discovery record and never exposes
+Copilot credentials. Its installation and Marketplace publication are explicit
+human operations.

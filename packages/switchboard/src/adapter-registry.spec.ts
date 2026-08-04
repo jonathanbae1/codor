@@ -30,6 +30,17 @@ describe('built-in executable registry', () => {
     });
   });
 
+  it('registers the VS Code bridge as a separately discoverable built-in', async () => {
+    const adapter = (await loadAdapterRegistry()).find((candidate) => candidate.id === 'copilot-vscode');
+    expect(adapter).toMatchObject({
+      id: 'copilot-vscode',
+      capabilities: { resume: false, thinking: false, live_inbox: false },
+      available: expect.any(Function),
+      canReviveSession: expect.any(Function),
+    });
+    expect(BUILTIN_ADAPTER_EXECUTABLES).not.toHaveProperty('copilot-vscode');
+  });
+
   it('resolves executable presence without invoking the file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'codor-path-'));
     const executable = join(dir, 'codex');
@@ -62,6 +73,7 @@ describe('adapter registry spawn controls', () => {
         ['claude-code', true],
         ['codex', true],
         ['copilot', false],
+        ['copilot-vscode', false],
         ['cursor', false],
         ['gemini', false],
         ['grok', false],
@@ -83,6 +95,7 @@ describe('adapter registry spawn controls', () => {
       ['claude-code', true, ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode']],
       ['codex', true, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']],
       ['copilot', false, undefined],
+      ['copilot-vscode', false, undefined],
       ['cursor', false, undefined],
       ['gemini', false, undefined],
       ['grok', true, ['low', 'medium', 'high']],
@@ -103,7 +116,7 @@ describe('adapter registry spawn controls', () => {
 
   it('rejects thinking before delegating to unsupported adapters', async () => {
     const adapters = await loadAdapterRegistry();
-    for (const id of ['antigravity', 'copilot', 'gemini']) {
+    for (const id of ['antigravity', 'copilot', 'copilot-vscode', 'gemini']) {
       const adapter = adapters.find((candidate) => candidate.id === id)!;
       expect(() => adapter.spawn({ cwd: '/work', thinking: 'high' })).toThrow(
         `adapter '${id}' does not support thinking levels`,
@@ -146,7 +159,7 @@ describe('the registry wrapper preserves the whole adapter contract', () => {
     const adapters = await loadAdapterRegistry();
     const answering = adapters.filter((adapter) => adapter.listModels !== undefined);
     expect(answering.map((adapter) => adapter.id).sort()).toEqual(
-      ['antigravity', 'claude-code', 'codex', 'copilot', 'gemini', 'grok', 'opencode'],
+      ['antigravity', 'claude-code', 'codex', 'copilot', 'copilot-vscode', 'gemini', 'grok', 'opencode'],
     );
 
     const claude = adapters.find((adapter) => adapter.id === 'claude-code')!;

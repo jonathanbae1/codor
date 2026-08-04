@@ -6,7 +6,11 @@ import { AntigravityAdapter } from '@codor/adapter-antigravity';
 import { AcpAdapter } from '@codor/adapter-acp';
 import { ClaudeCodeAdapter } from '@codor/adapter-claude-code';
 import { CodexAdapter, CodexVoiceProvider, codexVoiceStatus } from '@codor/adapter-codex';
-import { CopilotAdapter } from '@codor/adapter-copilot';
+import {
+  CopilotAdapter,
+  CopilotVscodeAdapter,
+  vscodeCopilotBridgeAvailable,
+} from '@codor/adapter-copilot';
 import { CursorAdapter } from '@codor/adapter-cursor';
 import { GeminiAdapter } from '@codor/adapter-gemini';
 import { GrokAdapter } from '@codor/adapter-grok';
@@ -42,6 +46,10 @@ export interface RegisteredHarnessAdapter extends HarnessAdapter {
   executable?: string;
   /** A transport whose concrete provider executable is supplied per authorized spawn. */
   configurable?: boolean;
+  /** Registry-owned local presence probe for a non-PATH runtime. */
+  available?: () => boolean;
+  /** Narrow live-session predicate used only by an explicitly gated adapter branch. */
+  canReviveSession?: (session: import('@codor/protocol').Session) => boolean;
 }
 
 // harn:assume adapter-registry-sole-harness-source ref=configured-adapter-registry
@@ -50,12 +58,17 @@ const builtinDefinitions: Record<string, {
   create: AdapterFactory;
   executable?: string;
   configurable?: boolean;
+  available?: () => boolean;
 }> = {
   antigravity: { executable: 'agy', create: () => new AntigravityAdapter() },
   acp: { configurable: true, create: () => new AcpAdapter() },
   'claude-code': { executable: 'claude', create: () => new ClaudeCodeAdapter() },
   codex: { executable: 'codex', create: () => new CodexAdapter() },
   copilot: { executable: 'copilot', create: () => new CopilotAdapter() },
+  'copilot-vscode': {
+    available: vscodeCopilotBridgeAvailable,
+    create: () => new CopilotVscodeAdapter(),
+  },
   cursor: { executable: 'cursor-agent', create: () => new CursorAdapter() },
   gemini: { executable: 'gemini', create: () => new GeminiAdapter() },
   grok: { executable: 'grok', create: () => new GrokAdapter() },
@@ -204,6 +217,10 @@ function withSpawnValidation(adapter: RegisteredHarnessAdapter): RegisteredHarne
     ...(adapter.steer && {
       steer: (session, payload) => adapter.steer!(session, payload),
     }),
+    ...(adapter.available && { available: () => adapter.available!() }),
+    ...(adapter.canReviveSession && {
+      canReviveSession: (session) => adapter.canReviveSession!(session),
+    }),
     // harn:end adapter-wrappers-preserve-the-whole-contract
   };
 }
@@ -239,6 +256,7 @@ export async function loadAdapterRegistry(
       withSpawnValidation(Object.assign(definition.create(), {
         ...(definition.executable !== undefined && { executable: definition.executable }),
         ...(definition.configurable === true && { configurable: true }),
+        ...(definition.available !== undefined && { available: definition.available }),
       })),
     ]),
   );

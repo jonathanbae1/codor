@@ -81,6 +81,12 @@ const MARKS: Record<string, HarnessMark> = {
     // A neutral code-assistant identity avoids embedding an unlicensed logo.
     mark: (size: number) => <Cat width={size} height={size} aria-hidden="true" />,
   },
+  'copilot-vscode': {
+    label: 'VS Code Copilot',
+    // The companion uses the same neutral code-assistant identity as the CLI;
+    // the adapter id and label distinguish the native VS Code runtime.
+    mark: (size: number) => <Cat width={size} height={size} aria-hidden="true" />,
+  },
   'opencode': {
     label: 'OpenCode',
     mark: (size: number) => (

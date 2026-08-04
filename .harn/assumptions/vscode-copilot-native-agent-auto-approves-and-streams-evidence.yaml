@@ -1,0 +1,28 @@
+id: vscode-copilot-native-agent-auto-approves-and-streams-evidence
+hash: a-1e5ccba51f17
+title: The native VS Code Copilot Agent owns execution and native approval
+state: active
+statement: >
+  A copilot-vscode turn must invoke workbench.action.chat.open in native Agent
+  mode with the exact selected Copilot model, the per-chat /autoApprove
+  directive, and bounded prior text history, never vscode.lm for execution or a
+  Codor-owned tool loop. The companion must repeatedly export the active native
+  chat, diff only newly accumulated response parts into normalized Codor
+  evidence, treat the final export as authoritative, and stop on a populated
+  result, bounded failure, cancellation, or timeout. For every response part
+  whose native state enters WaitingForConfirmation or WaitingForPostApproval,
+  the extension must invoke the native Allow action locally, track the actual
+  part index and state transition so repeated identical tools are each handled,
+  verify that the pending state advances, and fail boundedly with an actionable
+  diagnostic when Allow is a no-op. The bridge and adapter must not make an
+  approval round trip or emit approval.raised. Native
+  OS/authentication/enterprise blocks with no Allow action remain outside this
+  guarantee. The adapter must serialize requests, advertise no durable resume or
+  thinking support, report live Copilot models, and declare all canonical policy
+  mappings null.
+depends_on:
+  - vscode-copilot-bridge-is-manual-local-and-credential-private
+  - adapters-own-their-model-catalog
+  - canonical-spawn-controls-enforced
+  - harness-declares-what-a-policy-becomes
+created_by: copilot-vscode-p1

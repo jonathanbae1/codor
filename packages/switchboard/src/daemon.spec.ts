@@ -879,6 +879,7 @@ describe('member management', () => {
     expect(fake.deliveries[0]!.payload).toContain('@alpha two');
   });
 
+  // harn:assume copilot-vscode-revive-requires-exact-live-cache ref=revive-session-regression
   it('kill leaves a revivable dead member and revive attaches the exact session ref', async () => {
     const persistedCwd = testCwd('persisted-work');
     const alpha = spawnAgent('alpha', persistedCwd);
@@ -903,6 +904,7 @@ describe('member management', () => {
     });
     expect(daemon.store.getMember('eng', alpha.id)!.state).toBe('idle');
   });
+  // harn:end copilot-vscode-revive-requires-exact-live-cache
 
   it('kill while blocked orphans the card and finalization preserves dead state', async () => {
     const alpha = spawnAgent('alpha');
@@ -921,6 +923,105 @@ describe('member management', () => {
     expect(daemon.store.getMember('eng', alpha.id)!.state).toBe('dead');
   });
 });
+
+// harn:assume copilot-vscode-revive-requires-exact-live-cache ref=revive-session-regression
+describe('copilot-vscode ephemeral revive', () => {
+  it('reuses only the exact live cached session and bridge generation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codor-copilot-vscode-revive-'));
+    let bridgeLive = true;
+    let generation = 'bridge-a';
+    const raw = new FakeAdapter('copilot-vscode', { resume: false });
+    const originalSpawn = raw.spawn.bind(raw);
+    vi.spyOn(raw, 'spawn').mockImplementation((opts) => {
+      const session = originalSpawn(opts) as Session & { bridge_generation?: string };
+      session.bridge_generation = generation;
+      return session;
+    });
+    const adapter = Object.assign(raw, {
+      available: () => bridgeLive,
+      canReviveSession: (session: Session) =>
+        bridgeLive && (session as Session & { bridge_generation?: string }).bridge_generation === generation,
+    });
+    const local = new Daemon({
+      dbPath: join(root, 'switchboard.sqlite'),
+      blobRoot: join(root, 'blobs'),
+      adapters: [adapter],
+      homeDir: root,
+      discoverModels: false,
+    });
+    try {
+      local.createRoom({ id: 'vscode', name: 'VS Code', owner: { handle: 'owner', display_name: 'Owner' } });
+      const member = local.spawnMember('vscode', {
+        harness: 'copilot-vscode', handle: 'copilot', cwd: root, model: 'gpt-5.6-luna',
+      });
+      raw.enqueue({ kind: 'complete', final_text: '@owner initialized' });
+      local.postHumanMessage('vscode', '@copilot initialize');
+      await local.settle();
+      const sessionRef = local.store.getMember('vscode', member.id)!.session_ref!;
+
+      local.killMember('vscode', member.id);
+      local.postHumanMessage('vscode', '@copilot continue');
+      raw.enqueue({ kind: 'complete', final_text: '@owner continued' });
+      local.reviveMember('vscode', member.id);
+      await local.settle();
+      expect(raw.wasAttached(sessionRef)).toBe(false);
+      expect(raw.deliveries.at(-1)).toMatchObject({
+        session_ref: sessionRef, cwd: root, model: 'gpt-5.6-luna', attached: false,
+      });
+
+      local.killMember('vscode', member.id);
+      bridgeLive = false;
+      expect(() => local.reviveMember('vscode', member.id)).toThrow(
+        "adapter 'copilot-vscode' cannot revive @copilot after its live session or bridge was lost",
+      );
+
+      bridgeLive = true;
+      generation = 'bridge-a';
+      local.configureMember('vscode', member.id, { model: 'gpt-5.6-next' });
+      expect(() => local.reviveMember('vscode', member.id)).toThrow(
+        "adapter 'copilot-vscode' cannot revive @copilot after its live session or bridge was lost",
+      );
+      expect(local.store.getMember('vscode', member.id)?.state).toBe('dead');
+
+      bridgeLive = true;
+      generation = 'bridge-b';
+      expect(() => local.reviveMember('vscode', member.id)).toThrow(
+        "adapter 'copilot-vscode' cannot revive @copilot after its live session or bridge was lost",
+      );
+    } finally {
+      await local.close({ force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps ACP and other non-resumable adapters on the fail-closed boundary', async () => {
+    const make = (id: string) => new FakeAdapter(id, { resume: false });
+    for (const adapter of [make('acp'), make('other-ephemeral')]) {
+      const root = mkdtempSync(join(tmpdir(), `codor-${adapter.id}-revive-`));
+      const local = new Daemon({
+        dbPath: join(root, 'switchboard.sqlite'),
+        blobRoot: join(root, 'blobs'),
+        adapters: [adapter],
+        homeDir: root,
+        discoverModels: false,
+      });
+      local.createRoom({ id: adapter.id, name: adapter.id, owner: { handle: 'owner', display_name: 'Owner' } });
+      const member = local.spawnMember(adapter.id, {
+        harness: adapter.id, handle: 'ephemeral', cwd: root,
+        ...(adapter.id === 'acp' && {
+          acp_launch: { executable: process.execPath, argv: [] },
+        }),
+      });
+      local.killMember(adapter.id, member.id);
+      expect(() => local.reviveMember(adapter.id, member.id)).toThrow(
+        `adapter '${adapter.id}' does not support resume`,
+      );
+      await local.close({ force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+// harn:end copilot-vscode-revive-requires-exact-live-cache
 
 describe('room bridges', () => {
   it('creates a post-only non-addressable bridge and routes retry-safe ingress', async () => {
@@ -3209,6 +3310,45 @@ describe('adapter model discovery', () => {
     await settle();
     expect(listModels).toHaveBeenCalledTimes(1);
     await daemon.close();
+  });
+
+  it('uses the bridge availability hook before discovering live Copilot models', async () => {
+    let live = false;
+    const listModels = vi.fn(() => Promise.resolve({
+      models: ['gpt-5.6-luna'], source: 'discovered' as const,
+    }));
+    const bridge = Object.assign(adapterWith('copilot-vscode', listModels), {
+      available: () => live,
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'codor-copilot-models-'));
+    const daemon = new Daemon({
+      dbPath: join(dir, 'switchboard.sqlite'),
+      blobRoot: join(dir, 'blobs'),
+      adapters: [bridge],
+      homeDir: dir,
+    });
+    expect(daemon.registeredAdapters()).toMatchObject([
+      expect.objectContaining({ id: 'copilot-vscode', installed: false }),
+    ]);
+    expect(listModels).not.toHaveBeenCalled();
+
+    live = true;
+    daemon.refreshAdapterAvailability();
+    await settle();
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(daemon.registeredAdapters()).toMatchObject([
+      expect.objectContaining({
+        id: 'copilot-vscode', installed: true, models: ['gpt-5.6-luna'],
+      }),
+    ]);
+
+    live = false;
+    daemon.refreshAdapterAvailability();
+    expect(daemon.registeredAdapters()).toMatchObject([
+      expect.objectContaining({ id: 'copilot-vscode', installed: false }),
+    ]);
+    await daemon.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('persists a configurable ACP session privately and resumes it after restart', async () => {

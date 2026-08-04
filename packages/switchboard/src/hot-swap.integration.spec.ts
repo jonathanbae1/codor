@@ -158,7 +158,12 @@ it('keeps every built-in adapter package import inside the sole registry', () =>
     const matches = readFileSync(file, 'utf8').match(importPattern) ?? [];
     return matches.map((match) => ({ file: relative(repoRoot, file).replaceAll('\\', '/'), match }));
   });
-  expect(hits).toHaveLength(BUILTIN_ADAPTER_IDS.length);
+  // copilot-vscode deliberately shares the Copilot package import with the
+  // existing CLI adapter; one package import can therefore serve two ids.
+  const expectedPackages = new Set(BUILTIN_ADAPTER_IDS.map((id) =>
+    id === 'copilot-vscode' ? '@codor/adapter-copilot' : `@codor/adapter-${id}`));
+  expect(new Set(hits.map((hit) => hit.match.slice(1, -1)))).toEqual(expectedPackages);
+  expect(hits).toHaveLength(expectedPackages.size);
   expect(new Set(hits.map((hit) => hit.file))).toEqual(
     new Set(['packages/switchboard/src/adapter-registry.ts']),
   );

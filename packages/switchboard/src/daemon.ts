@@ -1155,6 +1155,9 @@ export class Daemon {
 
   private detectAdapterAvailability(adapter: HarnessAdapter): boolean {
     const registered = adapter as RegisteredHarnessAdapter;
+    // harn:assume adapter-catalog-distinguishes-installed-and-configurable ref=adapter-catalog-daemon
+    if (registered.available !== undefined) return registered.available();
+    // harn:end adapter-catalog-distinguishes-installed-and-configurable
     if (registered.configurable === true) return false;
     const executable = registered.executable;
     return executable === undefined || this.executableOnPath(executable);
@@ -1634,7 +1637,7 @@ export class Daemon {
     return session;
   }
 
-  // harn:assume revive-via-session-ref ref=revive-native-session
+  // harn:assume copilot-vscode-revive-requires-exact-live-cache ref=revive-native-session
   reviveMember(room: string, memberId: string): Member {
     const existing = this.store.getMember(room, memberId);
     if (!existing || existing.kind !== 'agent') throw new Error(`no such agent member: ${memberId}`);
@@ -1642,14 +1645,40 @@ export class Daemon {
     if (this.store.getAttachLeaseForMember(memberId) || this.pendingAttach.has(memberId)) {
       throw new Error(`member @${existing.handle} has an active interactive attach lease`);
     }
-    const session = this.attachedSession(existing);
+    const adapter = this.requireAdapter(existing.harness!);
+    const session = adapter.capabilities.resume
+      ? this.attachedSession(existing)
+      : (() => {
+          if (existing.harness !== 'copilot-vscode') {
+            throw new Error(`adapter '${adapter.id}' does not support resume`);
+          }
+          const registered = adapter as RegisteredHarnessAdapter;
+          const cached = this.staleSessions.has(memberId)
+            ? undefined
+            : this.sessions.get(memberId);
+          if (
+            cached === undefined
+            || cached.harness !== 'copilot-vscode'
+            || registered.canReviveSession?.(cached) !== true
+          ) {
+            throw new Error(
+              `adapter '${adapter.id}' cannot revive @${existing.handle} after its live session or bridge was lost`,
+            );
+          }
+          cached.cwd = existing.cwd ?? cached.cwd;
+          cached.policy = existing.policy;
+          cached.model = existing.model;
+          cached.thinking = existing.thinking;
+          this.issueMemberCredential(room, existing, cached);
+          return cached;
+        })();
     this.sessions.set(memberId, session);
     const member = this.store.updateMember(room, memberId, { state: 'idle', custody: 'owned' });
     this.emitMember(room, member);
     this.track(this.maybeStartTurn(room, memberId));
     return member;
   }
-  // harn:end revive-via-session-ref
+  // harn:end copilot-vscode-revive-requires-exact-live-cache
 
   // harn:assume adoption-explicit-or-sessionend ref=mirrored-adoption-transition
   joinMember(

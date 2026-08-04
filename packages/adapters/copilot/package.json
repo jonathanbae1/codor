@@ -14,13 +14,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vscode:build": "tsc -p vscode-extension/tsconfig.json",
+    "vscode:package": "pnpm vscode:build && cd vscode-extension && vsce package --no-dependencies"
   },
   "dependencies": {
     "@codor/protocol": "workspace:*",
     "cross-spawn": "^7.0.6"
   },
   "devDependencies": {
-    "@types/cross-spawn": "^6.0.6"
+    "@types/cross-spawn": "^6.0.6",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.6.2"
   }
 }

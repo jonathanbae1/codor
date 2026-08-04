@@ -1,0 +1,18 @@
+id: copilot-vscode-revive-requires-exact-live-cache
+hash: a-42d220d36e15
+title: Only the exact live copilot-vscode cache can revive an ephemeral member
+state: active
+statement: >
+  A copilot-vscode member may revive only when its exact non-stale session
+  object remains cached by the same daemon and the authenticated bridge still
+  has the same live generation recorded by that session. Revive restores the
+  persisted cwd, policy, model, and thinking level before marking the member
+  idle and draining held work. Resumable adapters must continue attaching their
+  exact persisted native session; ACP and every other non-resumable adapter must
+  reject revive rather than replacing the lost conversational context. A missing
+  cache, stale session, changed bridge generation, or a daemon restart therefore
+  fails closed.
+depends_on:
+  - adapter-process-lifecycle-supervised
+  - one-inflight-turn-per-member
+created_by: copilot-vscode-p1
