@@ -1,0 +1,27 @@
+id: mock-relay-host-close-is-generation-safe
+title: Ignore stale mock-relay host close callbacks after replacement
+notes: >
+  Make the faithful browser-test relay generation-safe when a host is stopped
+  and immediately restarted. A delayed close callback from the replaced host
+  must not send host-disconnected to clients attached to the new host. This is
+  test-harness lifecycle correctness only; production relay or application
+  behavior is unchanged.
+assumptions:
+  reviewed:
+    - id: playwright-spec-files-use-isolated-daemons
+      outcome: unchanged
+      reason: >
+        The shared Playwright harness keeps its isolated daemon and relay state;
+        stale callbacks can no longer mutate a replacement relay generation.
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        CI still requires one strict pass of the complete browser suite before
+        production deployment.
+files:
+  - .harn/plans/mock-relay-host-close-is-generation-safe.yaml
+  - packages/web-next/tests/mock-relay.mjs
+verification: >
+  Lock from a clean main baseline. Run the real Chromium relay drop/recovery
+  journey repeatedly without Playwright retries, run Harn and Git diff checks,
+  push main, and observe complete GitHub verification and production deploy.
