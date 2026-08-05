@@ -48,9 +48,10 @@ quota, or subscription failure.
 For the public-package candidate, retain the final `pnpm release:check` result, Harn result, tarball
 filename, npm integrity, unpacked package identity, and exact reviewed commit. The packed proof must
 start from a clean clone, install only the tarball, execute install without network or inherited
-`CODOR_*` variables, and boot the packaged daemon and browser runtime. Richard performs the final
-`npm publish <verified-tarball> --access public` handoff. Do not record tokens, pairing URLs, device
-identities, session references, private keys, or temporary data paths.
+`CODOR_*` variables, and boot the packaged daemon and browser runtime. The protected `release.yml`
+workflow performs the final npm OIDC publish and GitHub Release handoff; no local npm token is used.
+Do not record tokens, pairing URLs, device identities, session references, private keys, or temporary
+data paths.
 
 ### Historical source-linked candidate
 
@@ -108,12 +109,72 @@ byte size, and SHA-256 digest together for each artifact. Once that version is p
 installed, its filename and payload bytes are immutable: if either artifact changes, advance the
 release version before rebuilding or sending it.
 
+The exception is the CI-only commit installer: its full-SHA artifact name and 14-day retention make
+it an ephemeral verification output, not a release identity. It may be discarded with no npm or
+GitHub Release consequence, but its checksum must still be verified before an operator installs it.
+
 An operator may explicitly withdraw and replace a candidate at the same version only after
 confirming it was not published or installed. Treat every previously transferred copy as invalid,
 resend the corrected artifacts, and record the replacement byte sizes and SHA-256 digests before
 installation. This is a pre-install recovery path, not permission to overwrite a version whose
 payload has entered use or publication.
 <!-- harn:end installed-or-published-release-artifacts-are-version-immutable -->
+
+<!-- harn:assume verified-commit-installers-are-sha-addressed-and-ephemeral ref=commit-installer-runbook -->
+## Temporary verified commit installers
+
+Every green branch push, pull request, and `main` push produces a temporary GitHub Actions artifact
+named `codor-installers-<full commit SHA>`. It contains the exact `richhardry-codor-<version>.tgz`,
+`codor-copilot-bridge-<version>.vsix`, and `SHA256SUMS` built from that commit. The artifact is
+retained for 14 days and is not an npm publication, GitHub Release, production deployment, or
+automatic extension installation.
+
+From a reviewed run, download only that artifact and verify it before use:
+
+```bash
+gh run download <run-id> -n codor-installers-<full-commit-sha> -D "$HOME/Downloads/codor-installers"
+cd "$HOME/Downloads/codor-installers"
+sha256sum -c SHA256SUMS
+npx --yes --package="$PWD/richhardry-codor-<version>.tgz" codor install --dry-run
+```
+
+The full commit SHA in the artifact name prevents two mutable same-version checkouts from being
+mistaken for one another. Treat the downloaded files as disposable verification outputs; use a
+tagged GitHub Release for a permanent operator installation.
+<!-- harn:end verified-commit-installers-are-sha-addressed-and-ephemeral -->
+
+<!-- harn:assume github-tags-publish-one-immutable-alpha-or-stable-release ref=github-release-runbook -->
+## Tagged alpha and stable releases
+
+Only a pushed `vX.Y.Z` tag can enter `.github/workflows/release.yml`. The tag text must equal every
+release manifest version, and the version must not already exist on npm or as a GitHub Release. A
+tagged commit contained in `main` publishes `@richhardry/codor` with npm `latest` and creates a
+normal GitHub Release. A commit not in `main` but contained in the curated `alpha` branch publishes
+the same unique three-part version with npm `alpha` and creates a prerelease. Other branches,
+pull requests, and tag shapes fail closed. Each version and each release asset is immutable; if a
+candidate has been published or installed, advance the version before rebuilding it.
+
+The release runner uses Node 22.22.0, npm CLI 11.5.1 or newer, the protected `release` environment,
+and npm trusted publishing through OIDC (`id-token: write`). It does not read `NPM_TOKEN`, and the
+release job has only `contents: write` and `id-token: write`. The complete release gate, artifact
+inspection, and checksum verification run before publication. The permanent assets are the TGZ,
+the manually installed VSIX, and `SHA256SUMS`; the workflow does not publish to the VS Code
+Marketplace or install on another computer.
+
+Before the first workflow run, configure npm Trusted Publisher with:
+
+- Organization/user: `rjx18`
+- Repository: `codor`
+- Workflow filename: `release.yml`
+- Environment name: `release`
+- Allow npm publish: checked
+- Allow npm stage publish: unchecked
+
+For recovery, first check npm version metadata and `gh release view <tag>`. If either already exists,
+stop and do not overwrite it. If npm succeeded but GitHub Release creation failed, retain the exact
+TGZ, VSIX, and `SHA256SUMS` from the run and create the missing release only after confirming the
+tag and checksums; never rerun publication for an existing npm version.
+<!-- harn:end github-tags-publish-one-immutable-alpha-or-stable-release -->
 
 ## Launch-sweep live acceptance record
 

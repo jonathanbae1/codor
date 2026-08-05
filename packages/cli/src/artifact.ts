@@ -221,6 +221,9 @@ export function buildArtifact(options: BuildArtifactOptions): BuildArtifactResul
     files: ['bin', 'README.md', 'LICENSE'],
     engines: { node: '>=22.12.0' },
     publishConfig: { access: 'public' },
+    // harn:assume github-tags-publish-one-immutable-alpha-or-stable-release ref=public-package-repository-identity
+    repository: { type: 'git', url: 'https://github.com/rjx18/codor' },
+    // harn:end github-tags-publish-one-immutable-alpha-or-stable-release
     dependencies: {
       ...Object.fromEntries(closure.map((name) => [name, versions.get(name) ?? ''])),
       ...hoistThirdPartyDependencies(workspace, closure),

@@ -145,6 +145,13 @@ const setupGuide = await readFile(new URL('../docs/SETUP.md', import.meta.url), 
 const rootManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const switchboardManifest = JSON.parse(await readFile(new URL('../packages/switchboard/package.json', import.meta.url), 'utf8'));
 const workspaceManifest = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
+const ciWorkflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const releaseWorkflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+const releaseArtifactBuilder = await readFile(new URL('../scripts/package-release-artifacts.sh', import.meta.url), 'utf8');
+const copilotBridgeReadme = await readFile(
+  new URL('../packages/adapters/copilot/vscode-extension/README.md', import.meta.url),
+  'utf8',
+);
 
 // harn:assume installed-or-published-release-artifacts-are-version-immutable ref=replaceable-preinstall-release-audit
 assert.match(manual, /Versioned release artifact immutability/);
@@ -230,5 +237,49 @@ assert.match(packedProof, /PACKAGED_WARM_DRY_RUN=.*npx --yes --package="\$TARBAL
 assert.doesNotMatch(packedProof, /npm_config_audit|--no-audit/);
 // harn:end packed-local-tgz-npx-proof-runs-fresh-default-audit
 // harn:end packed-release-proof-runs-install-runtime
+
+// harn:assume verified-commit-installers-are-sha-addressed-and-ephemeral ref=commit-installer-release-audit
+const commitInstallerJobStart = ciWorkflow.indexOf('commit-installers:');
+const commitInstallerJobEnd = ciWorkflow.indexOf('deploy-production:', commitInstallerJobStart);
+assert.ok(commitInstallerJobStart >= 0 && commitInstallerJobEnd > commitInstallerJobStart);
+const commitInstallerJob = ciWorkflow.slice(commitInstallerJobStart, commitInstallerJobEnd);
+assert.match(commitInstallerJob, /needs:\s+verify/);
+assert.match(commitInstallerJob, /permissions:\s+contents:\s+read/);
+assert.match(commitInstallerJob, /scripts\/package-release-artifacts\.sh/);
+assert.match(commitInstallerJob, /actions\/upload-artifact@v4/);
+assert.match(commitInstallerJob, /name: codor-installers-\$\{\{\s*github\.sha\s*\}\}/);
+assert.match(commitInstallerJob, /retention-days:\s*14/);
+assert.doesNotMatch(commitInstallerJob, /npm\s+publish|gh\s+release|CLOUDFLARE_|deploy:app/);
+assert.match(releaseArtifactBuilder, /pnpm build:artifact/);
+assert.match(releaseArtifactBuilder, /@vscode\/vsce@3\.6\.0/);
+assert.match(releaseArtifactBuilder, /SHA256SUMS/);
+assert.match(manual, /codor-installers-<full commit SHA>/);
+// harn:end verified-commit-installers-are-sha-addressed-and-ephemeral
+
+// harn:assume github-tags-publish-one-immutable-alpha-or-stable-release ref=github-release-policy-audit
+assert.match(releaseWorkflow, /tags:\s*\n\s+- ['"]v\*\.\*\.\*['"]/);
+assert.match(releaseWorkflow, /permissions:\s*\{\}/);
+assert.match(releaseWorkflow, /contents:\s+write/);
+assert.match(releaseWorkflow, /id-token:\s+write/);
+assert.match(releaseWorkflow, /environment:\s*\n\s+name:\s+release/);
+assert.match(releaseWorkflow, /npm install --global npm@11\.5\.1/);
+assert.match(releaseWorkflow, /pnpm release:check/);
+assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/main/);
+assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/alpha/);
+assert.match(releaseWorkflow, /NPM_TAG=latest/);
+assert.match(releaseWorkflow, /NPM_TAG=alpha/);
+assert.match(releaseWorkflow, /npm view[\s\S]*@richhardry\/codor/);
+assert.match(releaseWorkflow, /gh release view/);
+assert.match(releaseWorkflow, /npm publish[\s\S]*--access public[\s\S]*--tag/);
+assert.match(releaseWorkflow, /--provenance/);
+assert.match(releaseWorkflow, /gh release create/);
+assert.match(releaseWorkflow, /--verify-tag/);
+assert.match(releaseWorkflow, /--prerelease/);
+assert.match(releaseWorkflow, /SHA256SUMS/);
+assert.doesNotMatch(releaseWorkflow, /pull_request/);
+assert.doesNotMatch(releaseWorkflow, /NPM_TOKEN/);
+assert.match(copilotBridgeReadme, /matching Codor GitHub\s+Release/);
+assert.doesNotMatch(copilotBridgeReadme, /Install this extension from its Marketplace page/i);
+// harn:end github-tags-publish-one-immutable-alpha-or-stable-release
 
 process.stdout.write('release audit passed: pre-tag gates, rename, relay disclosure, and acceptance provenance\n');

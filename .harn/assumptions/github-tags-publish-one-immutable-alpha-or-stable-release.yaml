@@ -1,0 +1,27 @@
+id: github-tags-publish-one-immutable-alpha-or-stable-release
+hash: a-953ee50d8132
+title: Eligible GitHub tags publish one immutable alpha or stable release
+state: active
+statement: >
+  A pushed vX.Y.Z tag may publish only after its text exactly matches the common
+  release manifest version, the version is absent from npm and GitHub Releases,
+  and the complete release gate and exact artifact checksums pass on a
+  GitHub-hosted runner in the release environment. A tag commit contained in
+  main publishes the public TGZ through npm OIDC with dist-tag latest and
+  creates a normal GitHub Release; a commit not in main but contained in the
+  explicitly curated alpha branch publishes with dist-tag alpha and creates a
+  prerelease; all other refs fail closed. Each alpha and stable publication
+  consumes a unique major.minor.patch version, carries the TGZ, manually
+  installed VSIX, and SHA256SUMS as permanent release assets, never overwrites
+  an existing version or asset, and grants only contents write plus OIDC
+  id-token write to the release job. The staged npm manifest must identify
+  https://github.com/rjx18/codor exactly, and neither workflow nor Codor runtime
+  stores an npm token or automatically installs or Marketplace- publishes the
+  companion extension; because published bytes and their provenance must be
+  attributable to one eligible reviewed commit.
+depends_on:
+  - verified-commit-installers-are-sha-addressed-and-ephemeral
+  - installed-or-published-release-artifacts-are-version-immutable
+  - release-candidate-requires-publishable-install-tarball
+  - packed-release-proof-runs-install-runtime
+created_by: github-release-publishing

@@ -1,0 +1,20 @@
+id: verified-commit-installers-are-sha-addressed-and-ephemeral
+hash: a-9e4aeccd53cf
+title: Green CI exports temporary commit-addressed installers
+state: active
+statement: >
+  After every branch push, pull request, and main push passes the existing clean
+  frozen install, recursive build, serialized workspace tests, complete
+  Playwright suite, and audits, that same read-only checkout must build the
+  public Codor TGZ, manually installed Copilot bridge VSIX, and SHA256SUMS and
+  upload them as a GitHub Actions artifact named with the full source commit SHA
+  for 14 days. Packaging failure fails CI, while the artifact job receives no
+  npm, release, or production authority and cannot publish, deploy, install, or
+  mutate a remote system; because a working commit must be directly installable
+  without conflating mutable same-version local TGZ paths.
+depends_on:
+  - github-ci-gates-changes-before-main-cloudflare-deploy
+  - artifact-build-runs-from-clean-source
+  - public-package-bundles-complete-codor-runtime
+  - vscode-copilot-bridge-is-manual-local-and-credential-private
+created_by: github-release-publishing

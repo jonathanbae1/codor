@@ -10,9 +10,10 @@ approval setting is changed.
 ## Install manually
 
 1. Verify Copilot Chat works normally in the target VS Code or WSL window.
-2. Install this extension from its Marketplace page, or build the VSIX with
-   `pnpm --filter @codor/adapter-copilot vscode:package` and choose
-   **Extensions: Install from VSIX…** in that window.
+2. Download `codor-copilot-bridge-<version>.vsix` from the matching Codor GitHub
+   Release, then install it with `code --install-extension
+   codor-copilot-bridge-<version>.vsix --force`. For local development, use
+   `scripts/package-release-artifacts.sh` and install the VSIX it produces.
 3. Reload the window. Run **Codor: Show Copilot Bridge Status** to confirm it is
    listening.
 4. In Codor, refresh the agent list and select **VS Code Copilot**.
@@ -29,4 +30,8 @@ changes.
 Codor never installs, updates, or publishes this extension automatically. The
 bridge listens only on `127.0.0.1`, uses a random local bearer token, and never
 reads or exports GitHub/VS Code credentials.
+<!-- harn:assume github-tags-publish-one-immutable-alpha-or-stable-release ref=copilot-release-asset-install-doc -->
+The VSIX attached to a GitHub Release is the manually installed companion for
+that exact Codor version; it is not published to the VS Code Marketplace.
+<!-- harn:end github-tags-publish-one-immutable-alpha-or-stable-release -->
 <!-- harn:end vscode-copilot-bridge-is-manual-local-and-credential-private -->

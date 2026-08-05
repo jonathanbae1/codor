@@ -1,0 +1,268 @@
+id: github-release-publishing
+title: Export verified commit installers and publish tagged alpha or stable releases
+notes: >
+  Add one shared release-artifact builder, extend green branch/PR/main CI with
+  temporary full-SHA-addressed TGZ, VSIX, and checksum downloads, and add a
+  tag-only release workflow that reruns the complete release gate before using
+  npm trusted publishing and GitHub Releases. Stable tags must belong to main
+  and publish npm latest; alpha tags must belong to the explicitly curated alpha
+  integration branch but not main and publish npm alpha. Alpha and stable both
+  consume a unique major.minor.patch version so the manually installed VSIX
+  keeps its supported three-part version. Add exact repository metadata to the
+  staged public npm manifest. Preserve Cloudflare deployment, runtime, adapter,
+  pairing, credential, and manual extension-install behavior. No
+  implementation-phase push, release, publication, deployment, or remote install
+  is in scope; those occur only after investigator review.
+assumptions:
+  create:
+    - id: verified-commit-installers-are-sha-addressed-and-ephemeral
+      title: Green CI exports temporary commit-addressed installers
+      statement: >
+        After every branch push, pull request, and main push passes the existing
+        clean frozen install, recursive build, serialized workspace tests,
+        complete Playwright suite, and audits, that same read-only checkout must
+        build the public Codor TGZ, manually installed Copilot bridge VSIX, and
+        SHA256SUMS and upload them as a GitHub Actions artifact named with the
+        full source commit SHA for 14 days. Packaging failure fails CI, while
+        the artifact job receives no npm, release, or production authority and
+        cannot publish, deploy, install, or mutate a remote system; because a
+        working commit must be directly installable without conflating mutable
+        same-version local TGZ paths.
+      reason: >
+        Richard needs a verified TGZ and VSIX for any working commit without
+        Taildrop or a formal version release.
+      depends_on:
+        - github-ci-gates-changes-before-main-cloudflare-deploy
+        - artifact-build-runs-from-clean-source
+        - public-package-bundles-complete-codor-runtime
+        - vscode-copilot-bridge-is-manual-local-and-credential-private
+      anchors:
+        - ref: ci-commit-installer-artifacts
+          file: .github/workflows/ci.yml
+        - ref: shared-release-artifact-builder
+          file: scripts/package-release-artifacts.sh
+        - ref: commit-installer-runbook
+          file: MANUAL-VERIFY.md
+        - ref: commit-installer-release-audit
+          file: scripts/release-audit.mjs
+    - id: github-tags-publish-one-immutable-alpha-or-stable-release
+      title: Eligible GitHub tags publish one immutable alpha or stable release
+      statement: >
+        A pushed vX.Y.Z tag may publish only after its text exactly matches the
+        common release manifest version, the version is absent from npm and
+        GitHub Releases, and the complete release gate and exact artifact
+        checksums pass on a GitHub-hosted runner in the release environment. A
+        tag commit contained in main publishes the public TGZ through npm OIDC
+        with dist-tag latest and creates a normal GitHub Release; a commit not
+        in main but contained in the explicitly curated alpha branch publishes
+        with dist-tag alpha and creates a prerelease; all other refs fail
+        closed. Each alpha and stable publication consumes a unique
+        major.minor.patch version, carries the TGZ, manually installed VSIX, and
+        SHA256SUMS as permanent release assets, never overwrites an existing
+        version or asset, and grants only contents write plus OIDC id-token
+        write to the release job. The staged npm manifest must identify
+        https://github.com/rjx18/codor exactly, and neither workflow nor Codor
+        runtime stores an npm token or automatically installs or Marketplace-
+        publishes the companion extension; because published bytes and their
+        provenance must be attributable to one eligible reviewed commit.
+      reason: >
+        Alpha integration and stable publication need one narrow, auditable,
+        token-free path with immutable artifacts and no branch or PR publishing
+        authority.
+      depends_on:
+        - verified-commit-installers-are-sha-addressed-and-ephemeral
+        - installed-or-published-release-artifacts-are-version-immutable
+        - release-candidate-requires-publishable-install-tarball
+        - packed-release-proof-runs-install-runtime
+      anchors:
+        - ref: github-tag-release-workflow
+          file: .github/workflows/release.yml
+        - ref: public-package-repository-identity
+          file: packages/cli/src/artifact.ts
+        - ref: public-package-repository-regression
+          file: packages/cli/src/artifact.spec.ts
+        - ref: github-release-runbook
+          file: MANUAL-VERIFY.md
+        - ref: github-release-policy-audit
+          file: scripts/release-audit.mjs
+        - ref: copilot-release-asset-install-doc
+          file: packages/adapters/copilot/vscode-extension/README.md
+  reviewed:
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        The same mandatory verify job still gates the existing serialized
+        main-only Cloudflare deployment; packaging is appended after
+        verification without credentials, and branch/PR jobs still cannot
+        deploy.
+    - id: workspace-gates-cover-all-buildable-projects
+      outcome: unchanged
+      reason: >
+        Both workflows consume the existing recursive build and serialized test
+        coverage rather than narrowing workspace discovery.
+    - id: artifact-build-runs-from-clean-source
+      outcome: unchanged
+      reason: >
+        The shared artifact step uses the existing clean compiled artifact path;
+        CI and release gates build all inputs before staging.
+    - id: public-package-bundles-complete-codor-runtime
+      outcome: unchanged
+      reason: >
+        Exact public repository metadata is added without changing the bundled
+        runtime closure, dependency rewriting, web bundle, or native resources.
+    - id: release-gate-runs-unit-and-browser
+      outcome: unchanged
+      reason: >
+        The release workflow invokes the existing complete release gate and
+        installs Chromium rather than weakening or duplicating test semantics.
+    - id: packed-release-proof-runs-install-runtime
+      outcome: unchanged
+      reason: >
+        Tagged releases must pass the existing pinned-container packed runtime
+        proof before npm publication.
+    - id: release-candidate-requires-publishable-install-tarball
+      outcome: unchanged
+      reason: >
+        The exact reviewed tarball, matching version tag, full gates, and
+        non-secret release record remain required; the automated trusted
+        publisher performs the final handoff.
+    - id: installed-or-published-release-artifacts-are-version-immutable
+      outcome: unchanged
+      reason: >
+        CI commit artifacts are explicitly temporary and SHA-addressed, while
+        npm versions and GitHub Release assets remain non-overwritable after
+        publication or installation.
+    - id: public-npx-install-is-primary-install
+      outcome: unchanged
+      reason: >
+        Stable and alpha dist-tags retain npx as the primary install mechanism;
+        per-commit local TGZ paths are an explicit development convenience.
+    - id: vscode-copilot-bridge-is-manual-local-and-credential-private
+      outcome: unchanged
+      reason: >
+        CI may package and attach the credential-free VSIX, but installation
+        remains an explicit operator action and Codor setup/runtime never
+        installs, updates, or Marketplace-publishes it.
+anchors:
+  github-ci-gates-changes-before-main-cloudflare-deploy:
+    github-actions-verify-and-deploy:
+      action: change
+      reason: >
+        Append credential-free artifact packaging after the existing verify
+        gates without changing the main-only deployment job.
+  public-package-bundles-complete-codor-runtime:
+    artifact-runtime-builder:
+      action: change
+      reason: >
+        Add the exact public GitHub repository identity required by npm trusted
+        publishing without altering runtime contents.
+    artifact-runtime-regression:
+      action: change
+      reason: >
+        Prove the staged public manifest carries exact repository metadata in
+        addition to the unchanged closure.
+  release-candidate-requires-publishable-install-tarball:
+    final-release-verification-record:
+      action: change
+      reason: >
+        Replace the manual token handoff with the exact tag-gated OIDC workflow
+        and record alpha, stable, and recovery steps.
+  installed-or-published-release-artifacts-are-version-immutable:
+    replaceable-preinstall-release-record:
+      action: change
+      reason: >
+        Distinguish ephemeral full-SHA commit artifacts from permanent npm and
+        GitHub Release identities while retaining the no-overwrite rule.
+    replaceable-preinstall-release-audit:
+      action: change
+      reason: >
+        Assert the documented workflow preserves published version and asset
+        immutability.
+  vscode-copilot-bridge-is-manual-local-and-credential-private:
+    vscode-copilot-manual-install-doc:
+      action: change
+      reason: >
+        Document manual installation from a GitHub Release VSIX while keeping
+        local authentication and no automatic install/update/Marketplace
+        publish.
+  verified-commit-installers-are-sha-addressed-and-ephemeral:
+    ci-commit-installer-artifacts:
+      action: change
+      reason: >
+        Package and upload exact-SHA TGZ, VSIX, and checksum files only after
+        all existing CI gates pass.
+    shared-release-artifact-builder:
+      action: change
+      reason: >
+        Build and inspect the two versioned installers and their checksum file
+        through one reusable shell entrypoint.
+    commit-installer-runbook:
+      action: change
+      reason: |
+        Document SHA-specific gh download and local-TGZ install commands.
+    commit-installer-release-audit:
+      action: change
+      reason: >
+        Assert artifact name, retention, verification dependency, and lack of
+        publish authority remain explicit.
+  github-tags-publish-one-immutable-alpha-or-stable-release:
+    github-tag-release-workflow:
+      action: change
+      reason: >
+        Define tag/version/ancestry checks, release gates, OIDC npm publication,
+        and permanent GitHub Release assets.
+    public-package-repository-identity:
+      action: change
+      reason: >
+        Stage the exact public GitHub repository URL npm uses to match trusted
+        publishing provenance.
+    public-package-repository-regression:
+      action: change
+      reason: |
+        Lock the staged repository identity to rjx18/codor.
+    github-release-runbook:
+      action: change
+      reason: >
+        Document unique alpha/stable versions, tag ancestry, environment, form,
+        publish, verification, and partial-failure recovery.
+    github-release-policy-audit:
+      action: change
+      reason: >
+        Assert tag-only events, permissions, environment, gates, ancestry,
+        trusted npm CLI, dist-tags, and non-overwrite behavior.
+    copilot-release-asset-install-doc:
+      action: change
+      reason: >
+        Point manual installation at the versioned GitHub Release VSIX without
+        adding Marketplace or automatic installation behavior.
+files:
+  - .github/workflows/ci.yml
+  - .github/workflows/release.yml
+  - .harn/assumptions/github-tags-publish-one-immutable-alpha-or-stable-release.yaml
+  - .harn/assumptions/verified-commit-installers-are-sha-addressed-and-ephemeral.yaml
+  - .harn/plans/github-release-publishing.yaml
+  - MANUAL-VERIFY.md
+  - packages/adapters/copilot/vscode-extension/README.md
+  - packages/cli/src/artifact.spec.ts
+  - packages/cli/src/artifact.ts
+  - scripts/package-release-artifacts.sh
+  - scripts/release-audit.mjs
+verification: >
+  Lock on clean 15f3efc. Parse both workflow YAML files and inspect exact event,
+  permission, environment, concurrency, ancestry, existing-version, dist-tag,
+  and main/alpha boundaries. Run the complete workspace build, serialized tests,
+  full Playwright suite, release/license audits, fresh-install proof, and pinned
+  packed-install proof. Build TGZ, VSIX, and SHA256SUMS locally; verify
+  checksums, versions, repository metadata, expected contents, no
+  source/spec/credential files, and fresh plus warm-cache local-TGZ npx dry
+  runs. Run Harn check/apply, staged checks, and git diff checks and commit once
+  without external actions. After independent investigator review, push the
+  feature branch and require its real CI artifact to download and verify,
+  merge/push main and require CI plus Cloudflare smoke, create release
+  environment and alpha branch, have Richard register release.yml as the npm
+  trusted publisher, then push signed v0.10.10 at the reviewed main commit.
+  Require the real release workflow, npm latest metadata/provenance, permanent
+  GitHub assets/checksums, and clean npx/VSIX inspection to pass before
+  declaring deployment complete.
+applied:
+  applied_at: 2026-08-05T06:56:09.859Z

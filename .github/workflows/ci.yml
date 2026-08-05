@@ -53,10 +53,49 @@ jobs:
           pnpm audit:license
           pnpm audit:release
 
+  # harn:assume verified-commit-installers-are-sha-addressed-and-ephemeral ref=ci-commit-installer-artifacts
+  commit-installers:
+    name: Package verified commit installers
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the verified commit
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build commit installers
+        run: scripts/package-release-artifacts.sh "$RUNNER_TEMP/codor-installers-${GITHUB_SHA}"
+
+      - name: Upload temporary commit installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: codor-installers-${{ github.sha }}
+          path: ${{ runner.temp }}/codor-installers-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+  # harn:end verified-commit-installers-are-sha-addressed-and-ephemeral
+
   deploy-production:
     name: Deploy relay and codor.app
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: verify
+    needs: [verify, commit-installers]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment:

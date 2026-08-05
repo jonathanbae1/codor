@@ -1,0 +1,189 @@
+# harn:assume github-tags-publish-one-immutable-alpha-or-stable-release ref=github-tag-release-workflow
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish tagged release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+    environment:
+      name: release
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install trusted-publishing npm CLI
+        run: npm install --global npm@11.5.1
+
+      - name: Validate tag, version, ancestry, and uniqueness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'release tags must be exactly vX.Y.Z: %s\n' "$TAG" >&2
+            exit 1
+          fi
+          RELEASE_VERSION="${TAG#v}"
+          node --input-type=module - "$RELEASE_VERSION" <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+
+          const expected = process.argv[2];
+          const legacy = new Set([
+            'packages/adapters/grok/package.json',
+            'packages/tunnel/package.json',
+            'relay-worker/package.json',
+          ]);
+          const tracked = execFileSync('git', ['ls-files', '-z', '--', '*package.json'], { encoding: 'utf8' })
+            .split('\0').filter(Boolean);
+          for (const path of tracked) {
+            if (legacy.has(path)) continue;
+            const manifest = JSON.parse(readFileSync(path, 'utf8'));
+            if (typeof manifest.version === 'string' && manifest.version !== expected) {
+              throw new Error(`${path} is ${manifest.version}, expected ${expected}`);
+            }
+          }
+          const root = JSON.parse(readFileSync('package.json', 'utf8'));
+          if (root.version !== expected) throw new Error(`root package is ${root.version}, expected ${expected}`);
+          NODE
+
+          git fetch --quiet origin main
+          git fetch --quiet origin alpha || true
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            RELEASE_KIND=stable
+            NPM_TAG=latest
+          elif git show-ref --verify --quiet refs/remotes/origin/alpha && \
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/alpha; then
+            RELEASE_KIND=alpha
+            NPM_TAG=alpha
+          else
+            printf 'tag commit is not contained in main or the curated alpha branch\n' >&2
+            exit 1
+          fi
+
+          NPM_ERROR="$(mktemp)"
+          if npm view "@richhardry/codor@$RELEASE_VERSION" version --json >"$NPM_ERROR" 2>&1; then
+            printf 'npm version already exists: %s\n' "$RELEASE_VERSION" >&2
+            cat "$NPM_ERROR" >&2
+            rm -f "$NPM_ERROR"
+            exit 1
+          elif ! grep -Eiq 'E404|not found|no match' "$NPM_ERROR"; then
+            cat "$NPM_ERROR" >&2
+            rm -f "$NPM_ERROR"
+            exit 1
+          fi
+          rm -f "$NPM_ERROR"
+
+          GH_ERROR="$(mktemp)"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >"$GH_ERROR" 2>&1; then
+            printf 'GitHub Release already exists: %s\n' "$TAG" >&2
+            cat "$GH_ERROR" >&2
+            rm -f "$GH_ERROR"
+            exit 1
+          elif ! grep -Eiq 'not found|could not find' "$GH_ERROR"; then
+            cat "$GH_ERROR" >&2
+            rm -f "$GH_ERROR"
+            exit 1
+          fi
+          rm -f "$GH_ERROR"
+
+          {
+            printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
+            printf 'RELEASE_KIND=%s\n' "$RELEASE_KIND"
+            printf 'NPM_TAG=%s\n' "$NPM_TAG"
+          } >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @codor/web-next exec playwright install --with-deps chromium
+
+      - name: Run the complete release gate
+        run: pnpm release:check
+
+      - name: Build and inspect immutable release artifacts
+        run: scripts/package-release-artifacts.sh "$RUNNER_TEMP/codor-release-artifacts"
+
+      - name: Verify checksums and exact artifact identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT_DIR="$RUNNER_TEMP/codor-release-artifacts"
+          TGZ="$OUT_DIR/richhardry-codor-${RELEASE_VERSION}.tgz"
+          VSIX="$OUT_DIR/codor-copilot-bridge-${RELEASE_VERSION}.vsix"
+          test -s "$TGZ"
+          test -s "$VSIX"
+          (cd "$OUT_DIR" && sha256sum -c SHA256SUMS)
+          tar -xOzf "$TGZ" package/package.json > "$RUNNER_TEMP/tgz-package.json"
+          node --input-type=module - "$RUNNER_TEMP/tgz-package.json" "$RELEASE_VERSION" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [manifestPath, expectedVersion] = process.argv.slice(2);
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          if (manifest.name !== '@richhardry/codor' ||
+              manifest.version !== expectedVersion ||
+              manifest.repository?.url !== 'https://github.com/rjx18/codor') {
+            throw new Error('release TGZ manifest identity check failed');
+          }
+          NODE
+          unzip -p "$VSIX" extension/package.json > "$RUNNER_TEMP/vsix-package.json"
+          node --input-type=module - "$RUNNER_TEMP/vsix-package.json" "$RELEASE_VERSION" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [manifestPath, expectedVersion] = process.argv.slice(2);
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          if (manifest.name !== 'codor-copilot-bridge' || manifest.version !== expectedVersion) {
+            throw new Error('release VSIX manifest identity check failed');
+          }
+          NODE
+
+      - name: Publish the exact public TGZ through npm OIDC
+        run: npm publish "$RUNNER_TEMP/codor-release-artifacts/richhardry-codor-${RELEASE_VERSION}.tgz" --access public --tag "$NPM_TAG" --provenance
+
+      - name: Create the permanent GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          OUT_DIR="$RUNNER_TEMP/codor-release-artifacts"
+          ASSETS=(
+            "$OUT_DIR/richhardry-codor-${RELEASE_VERSION}.tgz"
+            "$OUT_DIR/codor-copilot-bridge-${RELEASE_VERSION}.vsix"
+            "$OUT_DIR/SHA256SUMS"
+          )
+          ARGS=(--repo "$GITHUB_REPOSITORY" --verify-tag "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes)
+          if [[ "$RELEASE_KIND" == alpha ]]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" "${ARGS[@]}"
+# harn:end github-tags-publish-one-immutable-alpha-or-stable-release
