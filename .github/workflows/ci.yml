@@ -93,7 +93,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy the blind relay Worker
-        run: pnpm --filter @codor/relay-worker deploy
+        run: pnpm --filter @codor/relay-worker run deploy
 
       - name: Build, verify, and deploy codor.app
         run: pnpm deploy:app

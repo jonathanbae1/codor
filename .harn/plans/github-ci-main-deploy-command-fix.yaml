@@ -1,0 +1,35 @@
+id: github-ci-main-deploy-command-fix
+title: Invoke the relay package deploy script explicitly in GitHub CI
+notes: >
+  The first live main run passed every verification gate but pnpm parsed the
+  bare filtered `deploy` token as its workspace deployment command, which
+  requires a target directory, instead of the relay package.json script. Add the
+  explicit `run` disambiguator. Keep event, secret, permission, test, deployment
+  order, Wrangler configuration, Pages guard, and application code unchanged.
+assumptions:
+  reviewed:
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        The production job still deploys the configured relay only after green
+        main verification; the correction makes its intended package script
+        reachable instead of invoking pnpm's unrelated built-in command.
+    - id: relay-worker-stays-blind
+      outcome: unchanged
+      reason: |
+        The same existing Wrangler configuration and Worker source are deployed.
+anchors:
+  github-ci-gates-changes-before-main-cloudflare-deploy:
+    github-actions-verify-and-deploy:
+      action: change
+      reason: Add pnpm's explicit package-script disambiguator.
+files:
+  - .github/workflows/ci.yml
+  - .harn/plans/github-ci-main-deploy-command-fix.yaml
+verification: >
+  Lock from clean 8b60f2c, prove the filtered package command resolves the relay
+  deploy script without performing a remote deployment, validate workflow YAML
+  and Harn, commit, push main, and observe the complete verification plus relay,
+  guarded Pages, and production endpoint smoke jobs succeed.
+applied:
+  applied_at: 2026-08-05T04:24:39.259Z
