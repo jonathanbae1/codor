@@ -111,7 +111,11 @@ function handleSession(sid, role, ws, sessions) {
       s.clients.get(data.readUInt32BE(0))?.send(data.subarray(4), { binary: true });
     });
     ws.on('close', () => {
-      if (s.host === ws) s.host = undefined;
+      // A stopped host can finish closing after its replacement has already
+      // accepted a new client. That stale generation must not disconnect the
+      // replacement's clients.
+      if (s.host !== ws) return;
+      s.host = undefined;
       for (const client of s.clients.values()) client.send(JSON.stringify({ type: 'host-disconnected' }));
     });
   } else {

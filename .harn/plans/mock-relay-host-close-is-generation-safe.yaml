@@ -25,3 +25,5 @@ verification: >
   Lock from a clean main baseline. Run the real Chromium relay drop/recovery
   journey repeatedly without Playwright retries, run Harn and Git diff checks,
   push main, and observe complete GitHub verification and production deploy.
+applied:
+  applied_at: 2026-08-05T05:02:56.276Z
