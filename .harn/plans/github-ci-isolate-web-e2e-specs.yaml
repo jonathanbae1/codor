@@ -2,20 +2,20 @@ id: github-ci-isolate-web-e2e-specs
 title: Restore one fresh web-next harness per Playwright spec file
 notes: >
   Three GitHub CI attempts failed the same room32 relay recovery while focused
-  runs passed repeatedly. The complete gate currently launches plain
-  `playwright test`, which boots one harness daemon for all 36 spec files; by
-  room32, earlier serial narratives have mutated the relay, devices, rooms, and
-  daemon state. This contradicts the active
-  playwright-spec-files-use-isolated-daemons and
-  e2e-gate-covers-every-spec-file assumptions: their runner was removed during
-  the standalone web-next cutover while their behavior was incorrectly reviewed
-  as unchanged. Restore the existing proven mechanism for web-next: build once,
-  discover every matching spec, select a currently free contiguous port range,
-  run each spec in its own Playwright invocation/fresh harness on four derived
-  ports (API, control, separate SPA, computer B), aggregate JSON report counts,
-  and fail for missing reports, empty discovery, or any failed file. Keep one
-  worker and every test/assertion unchanged. No application, protocol, server,
-  relay, release-policy, deployment, or timeout change is in scope.
+  runs passed repeatedly. The complete gate currently launches plain `playwright
+  test`, which boots one harness daemon for all 36 spec files; by room32,
+  earlier serial narratives have mutated the relay, devices, rooms, and daemon
+  state. This contradicts the active playwright-spec-files-use-isolated-daemons
+  and e2e-gate-covers-every-spec-file assumptions: their runner was removed
+  during the standalone web-next cutover while their behavior was incorrectly
+  reviewed as unchanged. Restore the existing proven mechanism for web-next:
+  build once, discover every matching spec, select a currently free contiguous
+  port range, run each spec in its own Playwright invocation/fresh harness on
+  four derived ports (API, control, separate SPA, computer B), aggregate JSON
+  report counts, and fail for missing reports, empty discovery, or any failed
+  file. Keep one worker and every test/assertion unchanged. No application,
+  protocol, server, relay, release-policy, deployment, or timeout change is in
+  scope.
 assumptions:
   reviewed:
     - id: playwright-spec-files-use-isolated-daemons
@@ -27,8 +27,8 @@ assumptions:
       outcome: unchanged
       reason: >
         The runner discovers the same *.e2e.spec.ts pattern, invokes each file
-        exactly once, validates each JSON report, totals all observed tests,
-        and exits nonzero for any failure or empty discovery.
+        exactly once, validates each JSON report, totals all observed tests, and
+        exits nonzero for any failure or empty discovery.
     - id: concurrent-browser-suites-do-not-collide
       outcome: unchanged
       reason: >
@@ -75,3 +75,5 @@ verification: >
   room32 in a fresh harness despite the pre-existing orphan on the default port.
   Run Harn and diff checks, commit once, push main, and require GitHub CI,
   installer packaging, and production deployment to pass before release.
+applied:
+  applied_at: 2026-08-05T08:41:41.723Z

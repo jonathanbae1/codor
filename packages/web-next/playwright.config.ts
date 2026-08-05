@@ -11,6 +11,7 @@ function readPort(name: string, fallback: number): number {
   return value;
 }
 
+// harn:assume playwright-spec-files-use-isolated-daemons ref=isolated-e2e-playwright-config
 const apiPort = readPort('CODOR_NEXT_E2E_API_PORT', 28_137);
 
 export default defineConfig({
@@ -28,10 +29,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    // The harness imports built workspace packages and serves web-next/dist.
-    // Build them in the same command so a source checkout can never run its
-    // current tests against a stale client or switchboard artifact.
-    command: 'pnpm -r build && node tests/harness.mjs',
+    // The suite runner builds the workspace once, then every spec invocation
+    // starts and stops its own harness against its own derived port range.
+    command: 'node tests/harness.mjs',
     url: `http://127.0.0.1:${String(apiPort)}/`,
     // Every run owns a fresh fixture database. Reusing an orphaned harness
     // silently couples runs through mutated messages, cursors, and adapter
@@ -41,3 +41,4 @@ export default defineConfig({
     stderr: 'pipe',
   },
 });
+// harn:end playwright-spec-files-use-isolated-daemons
