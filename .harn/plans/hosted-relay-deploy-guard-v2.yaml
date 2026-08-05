@@ -1,0 +1,64 @@
+id: hosted-relay-deploy-guard-v2
+title: Make codor.app relay configuration mandatory at deploy time
+notes: >
+  Restore production pairing after the e129c37 Pages deployment was built
+  without either VITE_CODOR_RELAY_URL or VITE_CODOR_RELAY_ALIAS. Add one
+  supported deployment command that injects the canonical/alias dial pair,
+  verifies both literal endpoints are present in the built JavaScript before
+  upload, and records the outage lesson in the operator runbook. Keep pairing
+  protocol, host minting, relay Worker, and install artifacts unchanged.
+assumptions:
+  reviewed:
+    - id: relay-pairing-host-universal-mint
+      outcome: unchanged
+      reason: Hosts already reserve and dial through the reachable canonical/alias member correctly.
+    - id: pairing-code-enrollment-surfaces
+      outcome: unchanged
+      reason: The browser code-entry surface remains correct once the hosted relay build variables exist.
+    - id: relay-store-caches-reachable-dial-url
+      outcome: unchanged
+      reason: Switchboard-side endpoint fallback and winner caching are not changing.
+  create:
+    - id: codor-app-deploy-bakes-and-verifies-relay-dial-pair
+      title: codor.app deployment bakes and verifies both relay dial endpoints
+      reason: Prevent an ordinary environment-free web build from silently disabling every hosted pairing code.
+      statement: >
+        The supported codor.app Pages deployment command must build web-next
+        with VITE_CODOR_RELAY_URL set to https://relay.codor.app and
+        VITE_CODOR_RELAY_ALIAS set to
+        https://codor-relay.junweixiong.workers.dev, scan the resulting
+        JavaScript and refuse deployment unless both exact endpoints are
+        present, then deploy that verified directory to the codor-app project;
+        the operator runbook must name this command as the only supported path
+        and explain that a bare build/deploy makes valid pairing codes fail.
+      depends_on:
+        - relay-pairing-host-universal-mint
+        - pairing-code-enrollment-surfaces
+        - relay-store-caches-reachable-dial-url
+      anchors:
+        - ref: hosted-relay-build-and-verify
+          file: scripts/deploy-codor-app.mjs
+        - ref: hosted-relay-deploy-runbook
+          file: MANUAL-VERIFY.md
+anchors:
+  codor-app-deploy-bakes-and-verifies-relay-dial-pair:
+    hosted-relay-build-and-verify:
+      action: change
+      reason: Inject, verify, and deploy the canonical/alias relay pair atomically.
+    hosted-relay-deploy-runbook:
+      action: change
+      reason: Record the production outage and forbid environment-free Pages deployments.
+files:
+  - .harn/assumptions/codor-app-deploy-bakes-and-verifies-relay-dial-pair.yaml
+  - .harn/plans/hosted-relay-deploy-guard-v2.yaml
+  - MANUAL-VERIFY.md
+  - package.json
+  - scripts/deploy-codor-app.mjs
+verification: >
+  Check and lock Harn from a clean baseline. Install frozen dependencies, prove
+  the verifier rejects an environment-free web build, run the deploy command
+  in build-only mode and prove the configured bundle contains both exact relay
+  URLs, run web units/build plus release audit and focused relay pairing tests,
+  deploy through pnpm deploy:app, inspect the production Pages bundle for both
+  exact URLs, and complete one fresh real pairing code through codor.app. Do
+  not change or republish the TGZ or VSIX.
