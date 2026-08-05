@@ -1,0 +1,89 @@
+id: github-ci-relay-recovery-readiness
+title: Publish relay recovery readiness only after the server answers
+notes: >
+  Two independent GitHub CI runs exposed the same relay-recovery race in the
+  complete browser suite. The tunnel app socket reports OPEN optimistically as
+  soon as its mux stream is created, before the host-side loopback WebSocket has
+  answered. The connector immediately publishes ClientState.connected=true,
+  which enables the composer; a first post in that window can be lost even
+  though the connection pill reads Connected. Keep the existing socket,
+  subscription, cursor, retry, probe, and host buffering mechanisms, but treat
+  OPEN as internal transport progress only and publish UI readiness after the
+  current socket receives its first non-upgrade server frame. Remove the E2E's
+  fixed one-second sleep and make the visible Connected state itself the
+  deterministic readiness gate. No protocol, relay, server, persistence,
+  deployment, release, or product-surface change is in scope.
+assumptions:
+  create:
+    - id: relay-app-socket-readiness-requires-server-evidence
+      title: Relay app-socket readiness requires current-generation server evidence
+      statement: >
+        The room connector must publish ClientState.connected=true only after
+        the current WebSocket generation receives a non-upgrade server frame,
+        not merely when the WebSocket OPEN event fires, because relay app
+        streams open optimistically before their host-side loopback is proven
+        usable and the composer uses connected as its send-admission gate.
+      reason: >
+        A Connected UI must not accept and silently lose the first post after a
+        relay host recovers.
+      depends_on:
+        - client-syncs-by-seq
+        - tunnel-stream-mux
+      anchors:
+        - ref: relay-app-socket-readiness
+          file: packages/web-next/src/app/connector.ts
+        - ref: relay-app-socket-readiness-unit-regression
+          file: packages/web-next/src/app/connector.spec.ts
+        - ref: relay-app-socket-readiness-browser-regression
+          file: packages/web-next/tests/room32-relay-journey.e2e.spec.ts
+  reviewed:
+    - id: client-syncs-by-seq
+      outcome: unchanged
+      reason: >
+        The connector still subscribes immediately on OPEN with every room's
+        committed cursor and applies every received frame in the same order;
+        only the UI readiness publication moves to the first accepted frame.
+    - id: sync-cursor-commits-after-hydration
+      outcome: unchanged
+      reason: >
+        Hydration staging and sync_complete cursor commitment are untouched;
+        cold composer admission remains additionally gated by hydrated=true.
+    - id: hosted-computer-sessions-keep-state-isolated
+      outcome: unchanged
+      reason: >
+        Readiness continues to be written only to the connector's injected
+        per-computer store and current socket generation.
+    - id: release-gate-runs-unit-and-browser
+      outcome: unchanged
+      reason: >
+        The complete browser gate remains mandatory and is repaired rather than
+        weakened, skipped, retried in workflow code, or given a larger timeout.
+anchors:
+  relay-app-socket-readiness-requires-server-evidence:
+    relay-app-socket-readiness:
+      action: change
+      reason: >
+        Separate internal socket-open state from the store boolean that admits
+        UI sends, publishing that boolean only on current-generation server
+        evidence and never for upgrade_required.
+    relay-app-socket-readiness-unit-regression:
+      action: change
+      reason: >
+        Prove OPEN alone leaves the injected store disconnected and the first
+        server frame makes only that store ready.
+    relay-app-socket-readiness-browser-regression:
+      action: change
+      reason: >
+        Use the visible Connected state, without a timing sleep, as the gate for
+        the first real post after the relay host restarts.
+files:
+  - .harn/plans/github-ci-relay-recovery-readiness.yaml
+  - packages/web-next/src/app/connector.ts
+  - packages/web-next/src/app/connector.spec.ts
+  - packages/web-next/tests/room32-relay-journey.e2e.spec.ts
+verification: >
+  Lock from clean main e649757. Run the focused connector unit suite, the real
+  room32 relay journey repeatedly, all web-next units and production build, Harn
+  checks, and diff checks. Commit once and require the real main GitHub CI to
+  pass its full build, serialized workspace tests, all 258 browser tests,
+  audits, installer upload, and production deployment before releasing.
