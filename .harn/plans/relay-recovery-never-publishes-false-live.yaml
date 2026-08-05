@@ -1,0 +1,41 @@
+id: relay-recovery-never-publishes-false-live
+title: Keep an unavailable relay stream from publishing a false live edge
+notes: >
+  Fix the actual recovery race exposed by GitHub CI instead of retrying the
+  browser test. When the encrypted tunnel has no live mux yet, its WebSocket
+  fallback must close asynchronously without first firing an optimistic open.
+  The room connector can then keep retrying without briefly enabling the
+  composer on a no-op stream and silently dropping the operator's first post.
+  Keep the complete GitHub browser gate strict with zero retries.
+assumptions:
+  reviewed:
+    - id: hosted-computer-sessions-keep-state-isolated
+      outcome: unchanged
+      reason: >
+        Each computer still owns its existing tunnel, connector, token, and
+        isolated store; only the unavailable-tunnel fallback signal is fixed.
+    - id: hosted-offline-recovery-offers-other-computers
+      outcome: unchanged
+      reason: >
+        Recovery choices and session switching are unchanged; an active
+        reconnect no longer reports a transient false-positive live state.
+    - id: client-syncs-by-seq
+      outcome: unchanged
+      reason: >
+        Live app sockets keep the same subscribe cursor and frame application; a
+        socket created before the tunnel is ready never reaches that path.
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        CI continues to require one strict pass of the complete browser suite
+        before a main deployment.
+files:
+  - .harn/plans/relay-recovery-never-publishes-false-live.yaml
+  - packages/web-next/src/runtime/relay.ts
+  - packages/web-next/src/runtime/relay.spec.ts
+verification: >
+  Lock from a clean main baseline. Add a unit regression proving a socket
+  requested before the tunnel handshake closes without ever opening. Run the
+  relay runtime unit suite and the real Chromium relay drop/recovery journey,
+  then Harn checks and Git diff checks. Push main and observe the complete
+  GitHub verification, Cloudflare deployments, and endpoint smoke tests.
