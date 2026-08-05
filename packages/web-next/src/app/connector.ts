@@ -218,10 +218,15 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
     }, interval);
   };
 
+  // harn:assume relay-app-socket-readiness-requires-server-evidence ref=relay-app-socket-readiness
   const open = (): void => {
     if (state === 'disposed') return;
     clearRetry();
     clearProbes();
+    // Starting a replacement generation withdraws send admission immediately.
+    // In relay mode the next WebSocket OPEN is optimistic: it proves only that
+    // the mux stream exists, not that the host loopback can carry app frames.
+    clientStore.getState().setConnected(false);
     const mine = ++generation;
     retire(socket);
     subscribed = new Set();
@@ -233,7 +238,6 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
       if (!live()) return;
       retryMs = 500;
       state = 'connected';
-      clientStore.getState().setConnected(true);
       // The selected room hydrates first; the rooms listing then fans the same
       // socket out to every other authorized room, each from its own cursor.
       subscribe(currentRoom);
@@ -254,6 +258,10 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         socket = undefined;
         return;
       }
+      // A frame from the current generation is the first bidirectional evidence
+      // that the server-side app socket is usable. Only now may the composer
+      // trust `connected` and admit a post.
+      clientStore.getState().setConnected(true);
       clientStore.getState().applyFrame(frame, currentRoom);
       if (frame.type === 'rooms') {
         awaitingProbe = false;
@@ -266,6 +274,7 @@ export function createConnector(options: ConnectorOptions): RoomConnector {
         reconcile(frame.room_seqs, priorSubscribed);
       }
     };
+  // harn:end relay-app-socket-readiness-requires-server-evidence
     socket.onclose = (event) => {
       if (!live()) return;
       clearProbes();

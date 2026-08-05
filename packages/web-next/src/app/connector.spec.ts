@@ -70,6 +70,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// harn:assume relay-app-socket-readiness-requires-server-evidence ref=relay-app-socket-readiness-unit-regression
 describe('connector resume', () => {
   it('writes only the injected computer store and token sink', () => {
     const isolated = createClientStore();
@@ -82,6 +83,8 @@ describe('connector resume', () => {
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
     latest().accept();
+    expect(isolated.getState().connected).toBe(false);
+    latest().deliver({ type: 'rooms', rooms: [] });
     expect(isolated.getState().connected).toBe(true);
     expect(useClientStore.getState().connected).toBe(false);
     latest().drop(4403);
@@ -94,6 +97,8 @@ describe('connector resume', () => {
     const connector = build();
     const first = latest();
     first.accept();
+    expect(useClientStore.getState().connected).toBe(false);
+    first.deliver({ type: 'rooms', rooms: [] });
     expect(useClientStore.getState().connected).toBe(true);
 
     fireVisible();
@@ -106,9 +111,12 @@ describe('connector resume', () => {
     // Late events from the retired socket cannot touch the store.
     first.drop(1006);
     latest().accept();
+    expect(useClientStore.getState().connected).toBe(false);
+    latest().deliver({ type: 'rooms', rooms: [] });
     expect(useClientStore.getState().connected).toBe(true);
     connector.dispose();
   });
+// harn:end relay-app-socket-readiness-requires-server-evidence
 
   it('coalesces several signals describing one transition into ONE replacement', async () => {
     const connector = build();

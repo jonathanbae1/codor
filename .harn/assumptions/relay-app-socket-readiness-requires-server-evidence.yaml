@@ -1,0 +1,14 @@
+id: relay-app-socket-readiness-requires-server-evidence
+hash: a-e2ff26d19728
+title: Relay app-socket readiness requires current-generation server evidence
+state: active
+statement: >
+  The room connector must publish ClientState.connected=true only after the
+  current WebSocket generation receives a non-upgrade server frame, not merely
+  when the WebSocket OPEN event fires, because relay app streams open
+  optimistically before their host-side loopback is proven usable and the
+  composer uses connected as its send-admission gate.
+depends_on:
+  - client-syncs-by-seq
+  - tunnel-stream-mux
+created_by: github-ci-relay-recovery-readiness

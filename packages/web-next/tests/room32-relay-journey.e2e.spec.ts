@@ -139,19 +139,20 @@ test.describe('relay tunnel journey', () => {
     await control('/relay-down');
     await expect(page.getByTestId('connection')).toHaveClass(/is-error/, { timeout: 30_000 });
 
+    // harn:assume relay-app-socket-readiness-requires-server-evidence ref=relay-app-socket-readiness-browser-regression
     // Restart the host → the reconnect layering re-opens on the new session.
     await control('/relay-up');
+    // Connected is published only after the replacement app socket receives a
+    // server frame, so it is also the deterministic send-admission gate. No
+    // fixed sleep may stand in for that bidirectional evidence.
     await expect(page.getByTestId('connection')).toHaveClass(/is-live/, { timeout: 40_000 });
-    // The connection pill flips on the app-socket open edge; allow its resumed
-    // subscription to settle before testing the first post on the new session.
-    await page.waitForTimeout(1_000);
-    await expect(page.getByTestId('connection')).toHaveClass(/is-live/);
 
     // Still functional after recovery — a fresh app-WS stream on the NEW session.
     await input.fill('@viewer back after recovery');
     await expect(page.getByTestId('composer-send')).toBeEnabled({ timeout: 30_000 });
     await input.press('Enter');
     await expect(page.getByTestId('timeline')).toContainText('back after recovery', { timeout: 20_000 });
+    // harn:end relay-app-socket-readiness-requires-server-evidence
 
     // The relay-mode data path — channel list, summary, compatibility, message
     // history, posts — all went over the tunnel; nothing leaked to a direct /api

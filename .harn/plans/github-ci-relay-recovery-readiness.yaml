@@ -87,3 +87,5 @@ verification: >
   checks, and diff checks. Commit once and require the real main GitHub CI to
   pass its full build, serialized workspace tests, all 258 browser tests,
   audits, installer upload, and production deployment before releasing.
+applied:
+  applied_at: 2026-08-05T08:11:42.173Z
