@@ -1,0 +1,77 @@
+id: github-ci-isolate-web-e2e-specs
+title: Restore one fresh web-next harness per Playwright spec file
+notes: >
+  Three GitHub CI attempts failed the same room32 relay recovery while focused
+  runs passed repeatedly. The complete gate currently launches plain
+  `playwright test`, which boots one harness daemon for all 36 spec files; by
+  room32, earlier serial narratives have mutated the relay, devices, rooms, and
+  daemon state. This contradicts the active
+  playwright-spec-files-use-isolated-daemons and
+  e2e-gate-covers-every-spec-file assumptions: their runner was removed during
+  the standalone web-next cutover while their behavior was incorrectly reviewed
+  as unchanged. Restore the existing proven mechanism for web-next: build once,
+  discover every matching spec, select a currently free contiguous port range,
+  run each spec in its own Playwright invocation/fresh harness on four derived
+  ports (API, control, separate SPA, computer B), aggregate JSON report counts,
+  and fail for missing reports, empty discovery, or any failed file. Keep one
+  worker and every test/assertion unchanged. No application, protocol, server,
+  relay, release-policy, deployment, or timeout change is in scope.
+assumptions:
+  reviewed:
+    - id: playwright-spec-files-use-isolated-daemons
+      outcome: unchanged
+      reason: >
+        Restore the already-declared per-spec process, data, crypto, relay, and
+        port isolation contract in the surviving web-next test entrypoint.
+    - id: e2e-gate-covers-every-spec-file
+      outcome: unchanged
+      reason: >
+        The runner discovers the same *.e2e.spec.ts pattern, invokes each file
+        exactly once, validates each JSON report, totals all observed tests,
+        and exits nonzero for any failure or empty discovery.
+    - id: concurrent-browser-suites-do-not-collide
+      outcome: unchanged
+      reason: >
+        The runner probes for one currently free contiguous four-port-per-spec
+        range, honors an explicit base override, and logs the selected range.
+    - id: release-gate-runs-unit-and-browser
+      outcome: unchanged
+      reason: >
+        CI and release continue invoking the package e2e script after build and
+        unit tests; isolation changes process ownership, not coverage or policy.
+anchors:
+  playwright-spec-files-use-isolated-daemons:
+    isolated-e2e-playwright-config:
+      action: change
+      reason: >
+        Let each per-spec Playwright process own one freshly started harness,
+        using the runner-provided API port and the already-built web bundle.
+    isolated-e2e-spec-ports:
+      action: change
+      reason: >
+        Derive and pass API, control, SPA, and computer-B ports from the
+        selected suite base for every individual spec invocation.
+  e2e-gate-covers-every-spec-file:
+    isolated-e2e-spec-runner:
+      action: change
+      reason: >
+        Discover all browser specs, validate per-file reports, aggregate exact
+        counts, and fail closed without shrinking the suite.
+  concurrent-browser-suites-do-not-collide:
+    e2e-runner-port-selection:
+      action: change
+      reason: >
+        Probe a free contiguous range large enough for four ports per spec and
+        honor the explicit base override.
+files:
+  - .harn/plans/github-ci-isolate-web-e2e-specs.yaml
+  - packages/web-next/package.json
+  - packages/web-next/playwright.config.ts
+  - packages/web-next/tests/run-e2e.mjs
+verification: >
+  Commit the draft plan checkpoint, lock from a clean 49b05b8 base, then run
+  web-next build and units plus the complete package e2e entrypoint. Require its
+  summary to report every discovered spec and all 258 tests passing, including
+  room32 in a fresh harness despite the pre-existing orphan on the default port.
+  Run Harn and diff checks, commit once, push main, and require GitHub CI,
+  installer packaging, and production deployment to pass before release.
