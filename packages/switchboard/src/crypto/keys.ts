@@ -181,7 +181,18 @@ export class DeviceKeyStore {
   }
 
   private detectExternalRevokes(): void {
-    const current = new Set(this.readPeers().map((peer) => peer.device_id));
+    let peers: PeerRecord[];
+    try {
+      peers = this.readPeers();
+    } catch (error) {
+      // fs.watchFile may already have queued this callback when close() or an
+      // owning test/process removes the data directory. A missing path at that
+      // edge is not an authoritative revoke-all event; ignore it. Malformed or
+      // unreadable peer files still fail loudly.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    const current = new Set(peers.map((peer) => peer.device_id));
     for (const deviceId of this.knownPeerIds) {
       if (!current.has(deviceId)) {
         for (const listener of this.revokeListeners) listener(deviceId);

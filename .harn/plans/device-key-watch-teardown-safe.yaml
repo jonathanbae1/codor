@@ -1,0 +1,48 @@
+id: device-key-watch-teardown-safe
+title: Ignore a missing peer file in queued key-watch callbacks
+notes: >
+  Make DeviceKeyStore's asynchronous external-revocation watcher safe when a
+  shutdown or test teardown removes its data directory after a callback has
+  already been queued. Ignore ENOENT only in that watcher path; ordinary peer
+  reads and malformed files continue to fail loudly. This is a narrow lifecycle
+  correction exposed by the clean GitHub runner.
+assumptions:
+  reviewed:
+    - id: single-crypto-suite-libsodium
+      outcome: unchanged
+      reason: >
+        Key algorithms, encodings, persistence, and validation are unchanged;
+        only a queued watcher callback tolerates a removed file.
+    - id: ed25519-identity-x25519-encryption
+      outcome: unchanged
+      reason: |
+        Identity and peer keypair contracts remain unchanged.
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        CI continues to require the full serialized workspace suite before
+        browser verification and deployment.
+anchors:
+  single-crypto-suite-libsodium:
+    node-libsodium-suite:
+      action: change
+      reason: >
+        Add lifecycle-safe handling around the peer-file watcher within the
+        anchored DeviceKeyStore implementation.
+  ed25519-identity-x25519-encryption:
+    dual-device-identity:
+      action: change
+      reason: >
+        The outer identity-store anchor contains the watcher lifecycle change;
+        the identity contract itself remains unchanged.
+files:
+  - .harn/plans/device-key-watch-teardown-safe.yaml
+  - packages/switchboard/src/crypto/keys.ts
+  - packages/switchboard/src/crypto/crypto.spec.ts
+verification: >
+  Lock from a clean main baseline. Add a deterministic regression for a missing
+  peer file in the watcher callback, run the switchboard crypto tests and full
+  serialized workspace suite, run Harn and Git diff checks, push main, and
+  observe complete GitHub verification and production deploy.
+applied:
+  applied_at: 2026-08-05T05:07:53.335Z

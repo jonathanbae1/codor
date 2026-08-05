@@ -33,6 +33,17 @@ afterEach(() => {
 });
 
 describe('device identity, pairing, challenge auth, and room keys', () => {
+  it('ignores a peer file removed before a queued watcher callback settles', () => {
+    const home = vault('watcher-teardown');
+    rmSync(join(home.dataDir, 'crypto', 'peers.json'), { force: true });
+
+    expect(() => (
+      home.keys as unknown as { detectExternalRevokes(): void }
+    ).detectExternalRevokes()).not.toThrow();
+
+    home.close();
+  });
+
   it('persists separate Ed25519 and X25519 identities across first-run restarts', () => {
     const first = vault('identity');
     const root = first.dataDir;
