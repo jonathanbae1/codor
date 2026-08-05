@@ -7,8 +7,13 @@ OUT_DIR="${1:-$ROOT/release-artifacts}"
 if [[ "$OUT_DIR" != /* ]]; then
   OUT_DIR="$ROOT/$OUT_DIR"
 fi
+if [[ -L "$OUT_DIR" ]]; then
+  printf 'refusing symlink release artifact directory: %s\n' "$OUT_DIR" >&2
+  exit 2
+fi
+OUT_DIR="$(realpath -m -- "$OUT_DIR")"
 case "$OUT_DIR" in
-  "$ROOT"|"$ROOT/"|"/"|"/tmp"|"/var/tmp")
+  "$ROOT"|"/"|"/tmp"|"/var/tmp"|"${HOME:-/nonexistent}")
     printf 'refusing unsafe release artifact directory: %s\n' "$OUT_DIR" >&2
     exit 2
     ;;
@@ -28,8 +33,25 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
-rm -rf -- "$OUT_DIR"
 mkdir -p "$OUT_DIR"
+for entry in "$OUT_DIR"/* "$OUT_DIR"/.[!.]* "$OUT_DIR"/..?*; do
+  if [[ ! -e "$entry" && ! -L "$entry" ]]; then
+    continue
+  fi
+  case "$(basename -- "$entry")" in
+    "$TGZ_NAME"|"$VSIX_NAME"|SHA256SUMS)
+      if [[ ! -f "$entry" || -L "$entry" ]]; then
+        printf 'refusing non-file release artifact target: %s\n' "$entry" >&2
+        exit 2
+      fi
+      ;;
+    *)
+      printf 'refusing non-empty release artifact directory: %s\n' "$OUT_DIR" >&2
+      exit 2
+      ;;
+  esac
+done
+rm -f -- "$OUT_DIR/$TGZ_NAME" "$OUT_DIR/$VSIX_NAME" "$OUT_DIR/SHA256SUMS"
 
 cd "$ROOT"
 pnpm build:artifact
@@ -41,7 +63,7 @@ if [[ "$PACKED_NAME" != "$TGZ_NAME" || ! -s "$OUT_DIR/$TGZ_NAME" ]]; then
 fi
 
 pnpm --dir "$EXTENSION_DIR" build
-(cd "$EXTENSION_DIR" && pnpm dlx @vscode/vsce@3.6.0 package \
+(cd "$EXTENSION_DIR" && "$ROOT/packages/adapters/copilot/node_modules/.bin/vsce" package \
   --no-dependencies \
   --allow-missing-repository \
   --skip-license \

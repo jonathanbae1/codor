@@ -1,0 +1,64 @@
+id: github-release-publishing-review-fixes-v2
+title: Make release packaging deletion-safe and fully lockfile/OIDC pinned
+notes: >
+  Correct three pre-push review findings without changing release behavior or
+  scope. The shared artifact builder must never recursively delete a
+  caller-selected output directory and must use the frozen-workspace VSCE
+  dependency instead of a second pnpm dlx download. The release runner must use
+  npm's explicit registry setup, disable package-manager caching for release,
+  and pin the current supported npm 11 CLI. Keep events, ancestry, permissions,
+  environment, gates, artifact identities, dist-tags, Cloudflare behavior, and
+  manual VSIX installation unchanged. Do not push, publish, tag, deploy, or
+  mutate remote state in this fix commit.
+assumptions:
+  reviewed:
+    - id: verified-commit-installers-are-sha-addressed-and-ephemeral
+      outcome: unchanged
+      reason: >
+        The same TGZ, VSIX, and checksum outputs remain attached to the exact
+        verified SHA; cleanup is narrowed to those exact files and VSCE comes
+        from the already frozen dependency graph.
+    - id: github-tags-publish-one-immutable-alpha-or-stable-release
+      outcome: unchanged
+      reason: >
+        Tag/version/ancestry gates, OIDC publication, permissions, environment,
+        dist-tags, and permanent release assets remain identical while npm's
+        recommended runner setup is made explicit.
+anchors:
+  verified-commit-installers-are-sha-addressed-and-ephemeral:
+    shared-release-artifact-builder:
+      action: change
+      reason: >
+        Refuse unexpected output-directory contents, delete only the three exact
+        generated filenames, and execute the lockfile-installed VSCE binary.
+    commit-installer-release-audit:
+      action: change
+      reason: >
+        Assert the artifact builder no longer downloads VSCE or recursively
+        deletes its caller-selected output directory.
+  github-tags-publish-one-immutable-alpha-or-stable-release:
+    github-tag-release-workflow:
+      action: change
+      reason: >
+        Configure the npm registry, disable release dependency caching, and pin
+        the current npm 11 trusted-publishing CLI.
+    github-release-policy-audit:
+      action: change
+      reason: |
+        Assert the hardened npm setup and frozen VSCE boundary.
+files:
+  - .github/workflows/release.yml
+  - .harn/plans/github-release-publishing-review-fixes-v2.yaml
+  - scripts/package-release-artifacts.sh
+  - scripts/release-audit.mjs
+verification: >
+  Lock from clean 30e6f52. Validate workflow YAML and Harn. Prove the artifact
+  builder refuses the repository root, a symlink output, a directory containing
+  an unexpected file, and an exact-name directory while preserving unrelated
+  data; prove a normal empty output creates the exact TGZ, VSIX, and checksums
+  using the installed VSCE version with no pnpm dlx. Run release/license audits,
+  the focused artifact unit suite, fresh and warm local-TGZ npx dry runs,
+  inspect TGZ and VSIX contents, run Harn check/apply and staged checks, and
+  commit once with no external action.
+applied:
+  applied_at: 2026-08-05T07:11:00.149Z

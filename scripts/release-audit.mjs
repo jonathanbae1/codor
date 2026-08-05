@@ -251,7 +251,8 @@ assert.match(commitInstallerJob, /name: codor-installers-\$\{\{\s*github\.sha\s*
 assert.match(commitInstallerJob, /retention-days:\s*14/);
 assert.doesNotMatch(commitInstallerJob, /npm\s+publish|gh\s+release|CLOUDFLARE_|deploy:app/);
 assert.match(releaseArtifactBuilder, /pnpm build:artifact/);
-assert.match(releaseArtifactBuilder, /@vscode\/vsce@3\.6\.0/);
+assert.match(releaseArtifactBuilder, /\$ROOT\/packages\/adapters\/copilot\/node_modules\/\.bin\/vsce" package/);
+assert.doesNotMatch(releaseArtifactBuilder, /pnpm dlx|rm -rf -- "\$OUT_DIR"/);
 assert.match(releaseArtifactBuilder, /SHA256SUMS/);
 assert.match(manual, /codor-installers-<full commit SHA>/);
 // harn:end verified-commit-installers-are-sha-addressed-and-ephemeral
@@ -262,7 +263,10 @@ assert.match(releaseWorkflow, /permissions:\s*\{\}/);
 assert.match(releaseWorkflow, /contents:\s+write/);
 assert.match(releaseWorkflow, /id-token:\s+write/);
 assert.match(releaseWorkflow, /environment:\s*\n\s+name:\s+release/);
-assert.match(releaseWorkflow, /npm install --global npm@11\.5\.1/);
+assert.match(releaseWorkflow, /registry-url:\s*https:\/\/registry\.npmjs\.org/);
+assert.match(releaseWorkflow, /package-manager-cache:\s*false/);
+assert.doesNotMatch(releaseWorkflow, /cache:\s*pnpm/);
+assert.match(releaseWorkflow, /npm install --global npm@11\.19\.0/);
 assert.match(releaseWorkflow, /pnpm release:check/);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/main/);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/alpha/);

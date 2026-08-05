@@ -36,14 +36,14 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.0
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Install trusted-publishing npm CLI
-        run: npm install --global npm@11.5.1
+        run: npm install --global npm@11.19.0
 
       - name: Validate tag, version, ancestry, and uniqueness
         shell: bash
