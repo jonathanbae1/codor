@@ -1,0 +1,49 @@
+id: github-release-publishing-upload-action-v7
+title: Use the current Node 24 GitHub artifact uploader
+notes: >
+  The first real branch CI passed every gate and uploaded the intended artifact,
+  but GitHub warned that upload-artifact v4 still targets deprecated Node 20 and
+  is only being force-run on Node 24. Advance that one official action to v7,
+  whose default runtime is Node 24. Keep artifact name, files, retention,
+  permissions, gates, jobs, deployment, release workflow, and all product code
+  unchanged. Do not publish, tag, deploy, or otherwise mutate external release
+  state in this commit.
+assumptions:
+  reviewed:
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      outcome: unchanged
+      reason: >
+        The same verify and packaging jobs still gate the unchanged main-only
+        production deployment.
+    - id: verified-commit-installers-are-sha-addressed-and-ephemeral
+      outcome: unchanged
+      reason: >
+        The current official uploader receives the same exact-SHA artifact
+        directory, name, and 14-day retention with read-only permissions.
+anchors:
+  github-ci-gates-changes-before-main-cloudflare-deploy:
+    github-actions-verify-and-deploy:
+      action: change
+      reason: |
+        Advance only the nested official upload action version in the CI file.
+  verified-commit-installers-are-sha-addressed-and-ephemeral:
+    ci-commit-installer-artifacts:
+      action: change
+      reason: |
+        Select upload-artifact v7 so the artifact job runs natively on Node 24.
+    commit-installer-release-audit:
+      action: change
+      reason: |
+        Assert the current uploader major rather than the deprecated runtime.
+files:
+  - .github/workflows/ci.yml
+  - .harn/plans/github-release-publishing-upload-action-v7.yaml
+  - scripts/release-audit.mjs
+verification: >
+  Lock from clean 567051e. Validate workflow YAML, release audit, Harn, and diff
+  checks. Commit once, push the feature branch, and require the real GitHub CI
+  verify and packaging jobs to pass again, upload the exact full-SHA artifact
+  through actions/upload-artifact v7 with no Node 20 deprecation annotation, and
+  keep production deployment skipped on the feature branch.
+applied:
+  applied_at: 2026-08-05T07:23:30.072Z

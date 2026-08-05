@@ -246,7 +246,7 @@ const commitInstallerJob = ciWorkflow.slice(commitInstallerJobStart, commitInsta
 assert.match(commitInstallerJob, /needs:\s+verify/);
 assert.match(commitInstallerJob, /permissions:\s+contents:\s+read/);
 assert.match(commitInstallerJob, /scripts\/package-release-artifacts\.sh/);
-assert.match(commitInstallerJob, /actions\/upload-artifact@v4/);
+assert.match(commitInstallerJob, /actions\/upload-artifact@v7/);
 assert.match(commitInstallerJob, /name: codor-installers-\$\{\{\s*github\.sha\s*\}\}/);
 assert.match(commitInstallerJob, /retention-days:\s*14/);
 assert.doesNotMatch(commitInstallerJob, /npm\s+publish|gh\s+release|CLOUDFLARE_|deploy:app/);
