@@ -1,0 +1,11 @@
+id: composer-enter-uses-live-draft-state
+hash: a-71235b732eae
+title: Composer Enter decisions use the live textarea state
+state: active
+statement: >
+  On desktop, the composer must decide whether Enter selects a mention or
+  submits from the textarea value and caret present at that keydown; stale
+  scheduled mention state must never replace or discard a completed draft.
+depends_on:
+  - hosted-computer-switching-reuses-warm-session
+created_by: composer-enter-live-mention

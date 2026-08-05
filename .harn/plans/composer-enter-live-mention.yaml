@@ -39,7 +39,8 @@ anchors:
       reason: Prove a stale visible picker cannot consume a completed draft.
     composer-live-mention-switch-regression:
       action: change
-      reason: Prove the same action posts to the newly active computer after a warm switch.
+      reason: Prove the same action posts to the newly active computer after a warm
+        switch.
 files:
   - .harn/plans/composer-enter-live-mention.yaml
   - .harn/assumptions/composer-enter-uses-live-draft-state.yaml
@@ -51,3 +52,5 @@ verification: >
   repeatedly, all web-next units, the workspace build and serialized workspace
   tests, then the complete isolated 258-test browser entrypoint. Apply and
   commit only after every gate is green; do not push or publish before review.
+applied:
+  applied_at: 2026-08-05T09:28:49.625Z

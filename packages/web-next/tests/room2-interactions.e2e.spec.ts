@@ -98,6 +98,38 @@ test.describe('composer addressing', () => {
     await expect(page.locator('.nx-prose', { hasText: 'On it — summarizing now.' })).toBeVisible();
   });
 
+  // harn:assume composer-enter-uses-live-draft-state ref=composer-live-mention-direct-regression
+  test('Enter submits the live completed draft even when the mention picker is one frame stale', async ({ page }) => {
+    await openRoom(page);
+    const input = page.getByTestId('composer-input');
+    await input.fill('@mu');
+    await expect(page.getByTestId('mention-popover')).toBeVisible();
+
+    // Reproduce the real action edge deterministically: React has committed the
+    // @mu picker, then the complete draft input and Enter arrive in one browser
+    // task before requestAnimationFrame can refresh that picker.
+    await input.evaluate((node) => {
+      const body = '@viewer completed draft survives';
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(node, body);
+      node.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: body,
+      }));
+      node.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Enter',
+        code: 'Enter',
+      }));
+    });
+
+    await expect(page.getByTestId('timeline')).toContainText('completed draft survives');
+    await expect(input).not.toHaveValue('@muse ');
+  });
+  // harn:end composer-enter-uses-live-draft-state
+
   test('quote inserts the line addressed to its author', async ({ page }) => {
     await openRoom(page, FIXTURES);
     const input = page.getByTestId('composer-input');

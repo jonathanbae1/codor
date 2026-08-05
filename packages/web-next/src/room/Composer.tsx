@@ -638,24 +638,46 @@ export function Composer(props: { room: string; token: () => string; connection:
           }}
           onClick={refreshMention}
           onKeyDown={(event) => {
+            // harn:assume composer-enter-uses-live-draft-state ref=composer-live-mention-keydown
             // On a phone keyboard, Enter is the newline key. Nothing here may
             // consume it: not sending, and not selecting a mention — a caret
             // sitting after "@ri" must still be able to start a new line.
             // Sending is the explicit button, which is also the only control
             // that can be aimed at reliably with a thumb.
             if (isMobile && event.key === 'Enter') return;
-            if (mention && mentionables.length > 0) {
+            // Input updates schedule the popover refresh on the next animation
+            // frame. Enter can land first (notably just after a warm computer
+            // switch), so React's `mention`/`mentionables` state may describe an
+            // earlier draft. Re-read the action edge before deciding whether
+            // Enter selects a name or submits the completed message.
+            const liveMention = mentionQuery(
+              event.currentTarget.value,
+              event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+            );
+            const liveMentionables = liveMention === undefined
+              ? []
+              : roster
+                .filter((member) => member.handle.toLowerCase().startsWith(liveMention.query.toLowerCase()))
+                .slice(0, 6);
+            if (liveMention && liveMentionables.length > 0) {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
                 setHighlighted((prior) => {
                   const delta = event.key === 'ArrowDown' ? 1 : -1;
-                  return (prior + delta + mentionables.length) % mentionables.length;
+                  return (prior + delta + liveMentionables.length) % liveMentionables.length;
                 });
                 return;
               }
               if (event.key === 'Enter' || event.key === 'Tab') {
                 event.preventDefault();
-                insertMention(mentionables[highlighted] ?? mentionables[0]!);
+                const member = liveMentionables[highlighted] ?? liveMentionables[0]!;
+                const value = event.currentTarget.value;
+                const caret = event.currentTarget.selectionStart ?? value.length;
+                const next = `${value.slice(0, liveMention.start)}@${member.handle} ${value.slice(caret)}`;
+                seededRef.current = true;
+                setDraft(next);
+                setMention(undefined);
+                pendingCaretRef.current = liveMention.start + member.handle.length + 2;
                 return;
               }
               if (event.key === 'Escape') {
@@ -667,6 +689,7 @@ export function Composer(props: { room: string; token: () => string; connection:
               event.preventDefault();
               send();
             }
+            // harn:end composer-enter-uses-live-draft-state
           }}
           onBlur={() => setMention(undefined)}
           onPaste={(event) => {

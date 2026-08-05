@@ -32,6 +32,28 @@ async function post(page: Page, text: string): Promise<void> {
   await expect(page.getByTestId('timeline')).toContainText(text, { timeout: 20_000 });
 }
 
+async function postWhileMentionRefreshIsPending(page: Page, text: string): Promise<void> {
+  const input = page.getByTestId('composer-input');
+  await input.fill('@vi');
+  await expect(page.getByTestId('mention-popover')).toBeVisible();
+  await input.evaluate((node, body) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(node, body);
+    node.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: body,
+    }));
+    node.dispatchEvent(new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'Enter',
+      code: 'Enter',
+    }));
+  }, text);
+  await expect(page.getByTestId('timeline')).toContainText(text, { timeout: 20_000 });
+}
+
 const menuItem = (page: Page, label: string) => page.locator('.nx-computer-menu li', { hasText: label });
 
 /** All per-computer archive room keys in IndexedDB (computer:<id>:<gen>:room:*). */
@@ -179,7 +201,11 @@ test.describe('multi-computer pairing', () => {
     }))).toEqual(initialDials); // switching reused both warm relay sessions
     await expect(page.getByTestId('timeline')).not.toContainText('hi from computer two');
     // Post round-trips over computer A's tunnel.
-    await post(page, '@viewer hi from computer one');
+    // harn:assume composer-enter-uses-live-draft-state ref=composer-live-mention-switch-regression
+    // Enter arriving in the same frame as the completed input must not trust a
+    // stale picker left over from activation and erase the operator's words.
+    await postWhileMentionRefreshIsPending(page, '@viewer hi from computer one');
+    // harn:end composer-enter-uses-live-draft-state
 
     // Inactive B continues consuming its socket into its own store and exposes
     // only aggregate badges in the switcher.
