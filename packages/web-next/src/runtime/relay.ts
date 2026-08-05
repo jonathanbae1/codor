@@ -71,17 +71,24 @@ class TunnelSocket implements WebSocketLike {
   onDetach?: () => void;
   private readonly reassembler = new MessageReassembler();
 
-  constructor(private readonly stream: MuxStream) {
+  constructor(private readonly stream: MuxStream, optimisticOpen = true) {
     stream.onData = (chunk) => {
       for (const message of this.reassembler.push(chunk)) this.onmessage?.({ data: fromUtf8(message) });
       stream.consume(chunk.length);
     };
     stream.onEnd = () => this.fireClose(1000, '');
     stream.onReset = (reason) => this.fireClose(4000, reason);
-    // The host buffers app-WS writes until the loopback /ws opens, so opening
-    // optimistically is safe; an auth failure arrives later as a RESET → close.
+    // The host buffers app-WS writes until the loopback /ws opens, so a stream
+    // on a LIVE tunnel may open optimistically; an auth failure arrives later
+    // as a RESET → close. The no-tunnel fallback must instead close without an
+    // open edge: publishing OPEN for its no-op stream briefly enables the
+    // composer and silently drops the first post during relay recovery.
     queueMicrotask(() => {
       if (this.readyState !== 0) return;
+      if (!optimisticOpen) {
+        this.fireClose(4000, 'tunnel-not-connected');
+        return;
+      }
       this.readyState = OPEN;
       this.onopen?.();
     });
@@ -309,11 +316,10 @@ export class TunnelClient {
   socketFactory = (url: string): WebSocket => {
     const token = new URL(url).searchParams.get('token') ?? '';
     if (!this.mux) {
-      // Not yet connected: hand back a socket that closes immediately so the
-      // connector retries; connect() is driven separately.
-      const dead = new TunnelSocket(new NullStream() as unknown as MuxStream);
-      queueMicrotask(() => dead.close());
-      return dead as unknown as WebSocket;
+      // Not yet connected: hand back a socket that closes asynchronously so
+      // the connector has installed its handlers and retries. It MUST NOT emit
+      // an optimistic open edge for this no-op stream.
+      return new TunnelSocket(new NullStream() as unknown as MuxStream, false) as unknown as WebSocket;
     }
     const socket = new TunnelSocket(this.mux.openStream(StreamKind.APP_WS, { token: utf8(token) }));
     socket.onDetach = () => this.liveSockets.delete(socket);

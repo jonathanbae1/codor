@@ -71,6 +71,26 @@ afterEach(() => {
 });
 
 describe('TunnelClient resilience', () => {
+  it('never reports an app socket open before the tunnel session exists', async () => {
+    const client = new TunnelClient(record);
+    const socket = client.socketFactory('wss://relay.test/ws?token=t');
+    let opened = false;
+    let closed = false;
+    socket.onopen = () => {
+      opened = true;
+    };
+    socket.onclose = () => {
+      closed = true;
+    };
+
+    await Promise.resolve();
+
+    expect(opened).toBe(false);
+    expect(closed).toBe(true);
+    expect(socket.readyState).toBe(3);
+    client.dispose();
+  });
+
   it('abandons and reconnects when the handshake never completes (#1)', () => {
     const { dialed, socketFactory } = tracker();
     const client = new TunnelClient(record, { handshakeMs: 10_000, socketFactory });

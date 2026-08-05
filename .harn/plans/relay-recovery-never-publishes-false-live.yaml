@@ -39,3 +39,5 @@ verification: >
   relay runtime unit suite and the real Chromium relay drop/recovery journey,
   then Harn checks and Git diff checks. Push main and observe the complete
   GitHub verification, Cloudflare deployments, and endpoint smoke tests.
+applied:
+  applied_at: 2026-08-05T04:46:12.516Z
