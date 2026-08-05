@@ -1,0 +1,40 @@
+id: tagged-packed-install-uses-immutable-ref
+title: Run every clone-based release proof from the tagged commit
+notes: >
+  The detached release checkout now supplies its tag to the fresh-install proof,
+  which passed in the tag run, but the following packed-install proof has the
+  same explicit-ref contract under CODOR_PACKED_REF. Bind both clone-based
+  proofs to the checked-out tag and audit both names together. A repository-wide
+  search confirms these are the only detached-ref requirements in release
+  scripts.
+assumptions:
+  reviewed:
+    - id: github-tags-publish-one-immutable-alpha-or-stable-release
+      outcome: unchanged
+      reason: >
+        The complete gate still proves both clean-source and packed-artifact
+        installs from the exact eligible tag before publication; the packed
+        proof now receives the same local tag already supplied to the fresh
+        proof.
+anchors:
+  github-tags-publish-one-immutable-alpha-or-stable-release:
+    github-tag-release-workflow:
+      action: change
+      reason: |
+        Bind CODOR_PACKED_REF alongside CODOR_FRESH_REF to github.ref_name.
+    github-release-policy-audit:
+      action: change
+      reason: >
+        Assert both detached clone-based proof variables are present on the
+        complete release-gate step.
+files:
+  - .github/workflows/release.yml
+  - .harn/plans/tagged-packed-install-uses-immutable-ref.yaml
+  - scripts/release-audit.mjs
+verification: >
+  Check and lock on clean main; parse workflow YAML, run the policy audit in a
+  clean clone, run both fresh and packed proofs with v0.10.10 as their explicit
+  ref, and pass Harn validation. Push, require green main CI, then replace the
+  still-unpublished tag and verify npm plus GitHub Release publication.
+applied:
+  applied_at: 2026-08-05T11:54:39.278Z

@@ -272,6 +272,10 @@ assert.match(
   releaseWorkflow,
   /name:\s*Run the complete release gate[\s\S]*?CODOR_FRESH_REF:\s*\$\{\{\s*github\.ref_name\s*\}\}/,
 );
+assert.match(
+  releaseWorkflow,
+  /name:\s*Run the complete release gate[\s\S]*?CODOR_PACKED_REF:\s*\$\{\{\s*github\.ref_name\s*\}\}/,
+);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/main/);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/alpha/);
 assert.match(releaseWorkflow, /NPM_TAG=latest/);
