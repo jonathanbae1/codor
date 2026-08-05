@@ -317,6 +317,23 @@ test.describe('member card responsive presentation', () => {
       await expect(card.getByTestId('member-fable-compact')).toHaveAccessibleName("Compact @fable's context");
       await expect(card.getByTestId('member-fable-clear-context')).toHaveAccessibleName("Clear @fable's context");
 
+      const menuButton = card.getByTestId('member-fable-menu');
+      await menuButton.click();
+      const menu = card.getByRole('menu', { name: '@fable actions' });
+      const rename = menu.getByRole('menuitem', { name: 'Rename…' });
+      await expect(menu).toBeVisible();
+      await expect(rename).toBeVisible();
+      expect(await rename.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      })).toBe(true);
+      await menuButton.click();
+      await expect(menu).toHaveCount(0);
+
       const usageMetrics = card.getByTestId('member-fable-usage').locator('.nx-member-metric');
       await expect(usageMetrics).toHaveCount(3);
       await expect(usageMetrics.nth(0)).toHaveText(/^\d+(?:\.\d+)?[KMB]?$/);

@@ -1,0 +1,106 @@
+id: github-ci-main-deploy-menu-fix
+title: Gate every branch and PR, deploy green main, and restore the member
+  overflow menu
+notes: >
+  Add one GitHub Actions workflow that verifies every branch push and pull
+  request from a frozen install, then deploys the blind relay Worker and the
+  verified codor.app Pages bundle only for a green push to main. Production
+  credentials remain unavailable to PR and feature-branch jobs. Document the
+  exact least-privilege Cloudflare token and GitHub secret names. In the same
+  small change, repair the member-card overflow menu regression introduced by
+  the two-row layout: metadata keeps its bounded clipping/scrolling, while the
+  trailing menu can paint outside the row. Add a real browser regression for the
+  visible, hit-testable desktop and phone menu. Do not alter pairing, relay,
+  member-action, release-artifact, or runtime behavior.
+assumptions:
+  create:
+    - id: github-ci-gates-changes-before-main-cloudflare-deploy
+      title: GitHub CI gates changes before a serialized main Cloudflare deployment
+      statement: >
+        Every push to every branch and every pull request must run in a clean
+        GitHub-hosted checkout with the repository's pinned pnpm version and a
+        frozen lockfile, then pass the recursive workspace build, serialized
+        workspace tests, the complete web-next Playwright suite, and both
+        release and license audits. Only a push to refs/heads/main whose
+        verification job passed may enter the serialized production job; that
+        job has read-only repository permissions, receives CLOUDFLARE_API_TOKEN
+        and CLOUDFLARE_ACCOUNT_ID through GitHub secrets, deploys the configured
+        blind relay Worker, and invokes the guarded pnpm deploy:app path for
+        Pages. Pull requests and non-main branches must never receive production
+        secrets or run a deployment.
+      reason: >
+        A pushed commit should not bypass the same full gates used locally, and
+        the relay endpoints required by hosted pairing must never again depend
+        on an ad-hoc environment-free Pages upload.
+      depends_on:
+        - workspace-gates-cover-all-buildable-projects
+        - codor-app-deploy-bakes-and-verifies-relay-dial-pair
+        - relay-worker-stays-blind
+      anchors:
+        - ref: github-actions-verify-and-deploy
+          file: .github/workflows/ci.yml
+        - ref: github-actions-cloudflare-runbook
+          file: MANUAL-VERIFY.md
+  reviewed:
+    - id: agent-member-card-composes-two-compact-rows
+      outcome: unchanged
+      reason: >
+        The same authorized trailing overflow action remains in Row 2; only the
+        unintended clipping introduced by the row presentation is removed.
+    - id: controls-fit-the-surface-they-sit-on
+      outcome: unchanged
+      reason: >
+        Metadata remains locally clipped or scrollable and the fixed action
+        targets remain inside the card; the menu surface is allowed to overlay.
+    - id: web-room-targets-meet-minimum-hit-size
+      outcome: unchanged
+      reason: >
+        The existing desktop and phone target sizes are unchanged, with added
+        proof that the opened menu is visible and hit-testable.
+    - id: workspace-gates-cover-all-buildable-projects
+      outcome: unchanged
+      reason: >
+        CI consumes the existing recursive workspace and Vitest coverage rather
+        than changing package discovery.
+    - id: codor-app-deploy-bakes-and-verifies-relay-dial-pair
+      outcome: unchanged
+      reason: >
+        Main CI invokes the existing guarded pnpm deploy:app command; it does
+        not reproduce or bypass its relay endpoint injection and bundle scan.
+    - id: relay-worker-stays-blind
+      outcome: unchanged
+      reason: >
+        CI deploys the existing Wrangler configuration without changing Worker
+        source, bindings, logging, retention, or dependency behavior.
+anchors:
+  github-ci-gates-changes-before-main-cloudflare-deploy:
+    github-actions-verify-and-deploy:
+      action: change
+      reason: >
+        Define branch/PR verification and the green-main-only serialized
+        Cloudflare deployment boundary.
+    github-actions-cloudflare-runbook:
+      action: change
+      reason: >
+        Record exact secret names, least-privilege token permissions/resources,
+        and the main-only deployment behavior.
+files:
+  - .github/workflows/ci.yml
+  - .harn/assumptions/github-ci-gates-changes-before-main-cloudflare-deploy.yaml
+  - .harn/plans/github-ci-main-deploy-menu-fix.yaml
+  - MANUAL-VERIFY.md
+  - packages/web-next/src/styles/room.css
+  - packages/web-next/tests/room3-context.e2e.spec.ts
+verification: >
+  Lock from a clean main baseline. Validate workflow YAML and inspect its event,
+  permission, secret, main-ref, needs, and concurrency gates. Run the complete
+  recursive build and serialized workspace test suite, both audits, and the
+  complete Playwright suite. In focused browser coverage open every member menu
+  on desktop and phone, prove its menu items are painted and hit-testable, and
+  exercise Rename or Configure plus Kill confirmation. Run Harn check/apply and
+  git diff checks. After the Cloudflare secrets exist, push the commit to main,
+  use gh to observe the real Actions run through verification and production
+  deploy, and smoke relay /healthz plus the codor.app hosted bundle and pairing
+  entry surface without logging any secret.
+applied:
+  applied_at: 2026-08-05T04:12:16.928Z

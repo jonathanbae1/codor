@@ -1,0 +1,105 @@
+# harn:assume github-ci-gates-changes-before-main-cloudflare-deploy ref=github-actions-verify-and-deploy
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, test, and audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build every workspace project
+        run: pnpm -r build
+
+      - name: Run workspace tests serially
+        run: pnpm -r --workspace-concurrency=1 test
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @codor/web-next exec playwright install --with-deps chromium
+
+      - name: Run the complete browser suite
+        run: pnpm --filter @codor/web-next e2e
+
+      - name: Run release and license audits
+        run: |
+          pnpm audit:license
+          pnpm audit:release
+
+  deploy-production:
+    name: Deploy relay and codor.app
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://codor.app
+    concurrency:
+      group: codor-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out the verified commit
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Require production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy the blind relay Worker
+        run: pnpm --filter @codor/relay-worker deploy
+
+      - name: Build, verify, and deploy codor.app
+        run: pnpm deploy:app
+
+      - name: Smoke production endpoints
+        run: |
+          curl --fail --silent --show-error --retry 8 --retry-all-errors https://relay.codor.app/healthz >/dev/null
+          curl --fail --silent --show-error --retry 8 --retry-all-errors https://codor.app/ >/dev/null
+# harn:end github-ci-gates-changes-before-main-cloudflare-deploy

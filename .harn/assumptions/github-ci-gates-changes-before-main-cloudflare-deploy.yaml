@@ -1,0 +1,20 @@
+id: github-ci-gates-changes-before-main-cloudflare-deploy
+hash: a-69cde9c8ff80
+title: GitHub CI gates changes before a serialized main Cloudflare deployment
+state: active
+statement: >
+  Every push to every branch and every pull request must run in a clean
+  GitHub-hosted checkout with the repository's pinned pnpm version and a frozen
+  lockfile, then pass the recursive workspace build, serialized workspace tests,
+  the complete web-next Playwright suite, and both release and license audits.
+  Only a push to refs/heads/main whose verification job passed may enter the
+  serialized production job; that job has read-only repository permissions,
+  receives CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID through GitHub
+  secrets, deploys the configured blind relay Worker, and invokes the guarded
+  pnpm deploy:app path for Pages. Pull requests and non-main branches must never
+  receive production secrets or run a deployment.
+depends_on:
+  - workspace-gates-cover-all-buildable-projects
+  - codor-app-deploy-bakes-and-verifies-relay-dial-pair
+  - relay-worker-stays-blind
+created_by: github-ci-main-deploy-menu-fix

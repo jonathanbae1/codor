@@ -1368,7 +1368,9 @@
 }
 .nx-member-metric svg { color: var(--c-faded); }
 .nx-member-row-secondary {
-  overflow: hidden;
+  /* The metadata rail owns truncation/scrolling. Clipping the whole row also
+     clips the absolutely positioned overflow menu below its trigger. */
+  overflow: visible;
 }
 .nx-member-meta-rail {
   flex: 1 1 auto;
