@@ -72,6 +72,15 @@ test.describe('computer switcher UI', () => {
     await expect(modal.getByTestId('pairing-code-0')).toBeVisible();
     await expect(modal.getByTestId('computer-add-next')).toHaveCount(0);
     await expect(modal.getByTestId('computer-add-back')).toHaveCount(0);
+    const sampledEntrance = await modal.evaluate((node) => {
+      const animation = node.getAnimations()[0];
+      const duration = animation?.effect?.getComputedTiming().duration;
+      if (!animation || typeof duration !== 'number') return false;
+      animation.pause();
+      animation.currentTime = duration / 2;
+      return true;
+    });
+    expect(sampledEntrance).toBe(true);
     const modalA11y = await new AxeBuilder({ page }).include('[data-testid="computer-add-modal"]').analyze();
     expect(modalA11y.violations).toEqual([]);
 

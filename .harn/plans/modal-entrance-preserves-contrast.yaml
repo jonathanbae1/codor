@@ -1,0 +1,35 @@
+id: modal-entrance-preserves-contrast
+title: Keep dialog contents opaque throughout entrance motion
+notes: >
+  The v0.10.10 tag gate sampled the Add Computer dialog during its shared
+  opacity-and-transform entrance and correctly reported transient 4.18:1
+  contrast for its primary action. Keep the existing short dialog translation
+  but make modal contents fully opaque at every frame, and make the browser
+  regression pause at the animation midpoint before running Axe so release
+  results do not depend on runner timing.
+assumptions:
+  reviewed:
+    - id: web-theme-accessible-modes
+      outcome: unchanged
+      reason: >
+        Modal text and controls continue using the semantic theme roles, while
+        the modal-specific entrance no longer composites those roles through
+        partial opacity and therefore preserves their AA contrast continuously.
+    - id: web-motion-is-purposeful-and-reduced-motion-safe-v5
+      outcome: unchanged
+      reason: >
+        Dialog entrance still uses the shared duration and easing tokens and
+        animates only transform; the existing reduced-motion override continues
+        to collapse its duration to an effectively instant transition.
+anchors: {}
+files:
+  - .harn/plans/modal-entrance-preserves-contrast.yaml
+  - packages/web-next/src/styles/primitives.css
+  - packages/web-next/tests/room36-computer-ui.e2e.spec.ts
+verification: >
+  Check and lock on the clean tagged baseline; run the Room 36 browser test
+  repeatedly with its animation held at midpoint, the web build and units, and
+  Harn validation; commit and push main, require green main CI, then recreate
+  the still-unpublished v0.10.10 tag and verify npm plus GitHub Release output.
+applied:
+  applied_at: 2026-08-05T10:37:04.649Z
