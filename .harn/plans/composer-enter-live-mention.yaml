@@ -1,0 +1,53 @@
+id: composer-enter-live-mention
+title: Never let stale mention state consume a completed message
+notes: >
+  Browser diagnostics and the operator's production report show the same loss:
+  after hydration or a warm computer switch, the mention popover can retain a
+  prior query until its scheduled refresh runs. If Enter lands in that window,
+  the handler trusts stale React mention state, replaces the complete draft with
+  only the selected @handle, and never posts. Recompute the mention query and
+  candidates from the textarea's live value/caret at the keydown action edge.
+  Preserve intentional Enter/Tab mention selection when a live query exists,
+  mobile newline behavior, addressing checks, transports, and switching.
+assumptions:
+  create:
+    - id: composer-enter-uses-live-draft-state
+      title: Composer Enter decisions use the live textarea state
+      statement: >
+        On desktop, the composer must decide whether Enter selects a mention or
+        submits from the textarea value and caret present at that keydown; stale
+        scheduled mention state must never replace or discard a completed draft.
+      depends_on:
+        - hosted-computer-switching-reuses-warm-session
+      reason: >
+        A warm computer activation can make input and scheduled mention state
+        land in the same frame, so this action boundary needs a durable review
+        obligation against operator text loss.
+  reviewed:
+    - id: hosted-computer-switching-reuses-warm-session
+      outcome: unchanged
+      reason: >
+        Session ownership, activation, isolated stores, and warm tunnels do not
+        change; the regression exercises the existing switch boundary.
+anchors:
+  composer-enter-uses-live-draft-state:
+    composer-live-mention-keydown:
+      action: change
+      reason: Recompute mention state from the live DOM value before Enter acts.
+    composer-live-mention-direct-regression:
+      action: change
+      reason: Prove a stale visible picker cannot consume a completed draft.
+    composer-live-mention-switch-regression:
+      action: change
+      reason: Prove the same action posts to the newly active computer after a warm switch.
+files:
+  - .harn/plans/composer-enter-live-mention.yaml
+  - .harn/assumptions/composer-enter-uses-live-draft-state.yaml
+  - packages/web-next/src/room/Composer.tsx
+  - packages/web-next/tests/room2-interactions.e2e.spec.ts
+  - packages/web-next/tests/room34-multi-computer.e2e.spec.ts
+verification: >
+  Commit and lock cleanly. Run focused room2, room32, and room34 browser tests
+  repeatedly, all web-next units, the workspace build and serialized workspace
+  tests, then the complete isolated 258-test browser entrypoint. Apply and
+  commit only after every gate is green; do not push or publish before review.
