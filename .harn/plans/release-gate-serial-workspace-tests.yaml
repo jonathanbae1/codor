@@ -1,0 +1,37 @@
+id: release-gate-serial-workspace-tests
+title: Keep tagged release tests isolated from workspace load flakes
+notes: >
+  The main CI gate already runs workspace tests serially and passed the exact
+  release commit, but the root test:all script still used pnpm's parallel
+  recursive default. The signed v0.10.10 release rerun consequently timed out
+  the unchanged ACP cancellation regression at its five-second ceiling under
+  shared runner load. Make the root full gate use the same one-package-at-a-time
+  execution while preserving the recursive build, every package test, complete
+  browser suite, audits, install proofs, and all product behavior.
+assumptions:
+  reviewed:
+    - id: release-gate-runs-unit-and-browser
+      outcome: unchanged
+      reason: >
+        The gate still builds every workspace package, runs every package's
+        Vitest suite, and runs the complete web Playwright suite; serialization
+        changes only scheduling so package-level timeout tests do not compete
+        for a loaded shared runner.
+anchors:
+  release-gate-runs-unit-and-browser:
+    root-release-test-script:
+      action: change
+      reason: >
+        Update the manifest-contract regression to require the same serialized
+        recursive test command already proven by the main CI workflow.
+files:
+  - .harn/plans/release-gate-serial-workspace-tests.yaml
+  - package.json
+  - packages/protocol/src/index.spec.ts
+verification: >
+  Check and lock the plan on a clean baseline; run the focused protocol manifest
+  regression and pnpm release:check; apply and commit through Harn; then require
+  green main CI before recreating the still-unpublished v0.10.10 tag and
+  verifying npm plus GitHub Release publication.
+applied:
+  applied_at: 2026-08-05T10:02:26.977Z

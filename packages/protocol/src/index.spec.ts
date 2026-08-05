@@ -101,7 +101,7 @@ it('keeps the fast test loop separate from the full browser release gate', () =>
   ) as { scripts: Record<string, string> };
   expect(rootPackage.scripts.test).toBe('pnpm -r test');
   expect(rootPackage.scripts['test:all']).toBe(
-    'pnpm -r build && pnpm -r test && pnpm --filter @codor/web-next e2e',
+    'pnpm -r build && pnpm -r --workspace-concurrency=1 test && pnpm --filter @codor/web-next e2e',
   );
 });
 // harn:end release-gate-runs-unit-and-browser
