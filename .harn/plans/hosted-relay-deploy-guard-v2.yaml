@@ -11,17 +11,20 @@ assumptions:
   reviewed:
     - id: relay-pairing-host-universal-mint
       outcome: unchanged
-      reason: Hosts already reserve and dial through the reachable canonical/alias member correctly.
+      reason: Hosts already reserve and dial through the reachable canonical/alias
+        member correctly.
     - id: pairing-code-enrollment-surfaces
       outcome: unchanged
-      reason: The browser code-entry surface remains correct once the hosted relay build variables exist.
+      reason: The browser code-entry surface remains correct once the hosted relay
+        build variables exist.
     - id: relay-store-caches-reachable-dial-url
       outcome: unchanged
       reason: Switchboard-side endpoint fallback and winner caching are not changing.
   create:
     - id: codor-app-deploy-bakes-and-verifies-relay-dial-pair
       title: codor.app deployment bakes and verifies both relay dial endpoints
-      reason: Prevent an ordinary environment-free web build from silently disabling every hosted pairing code.
+      reason: Prevent an ordinary environment-free web build from silently disabling
+        every hosted pairing code.
       statement: >
         The supported codor.app Pages deployment command must build web-next
         with VITE_CODOR_RELAY_URL set to https://relay.codor.app and
@@ -47,7 +50,8 @@ anchors:
       reason: Inject, verify, and deploy the canonical/alias relay pair atomically.
     hosted-relay-deploy-runbook:
       action: change
-      reason: Record the production outage and forbid environment-free Pages deployments.
+      reason: Record the production outage and forbid environment-free Pages
+        deployments.
 files:
   - .harn/assumptions/codor-app-deploy-bakes-and-verifies-relay-dial-pair.yaml
   - .harn/plans/hosted-relay-deploy-guard-v2.yaml
@@ -56,9 +60,11 @@ files:
   - scripts/deploy-codor-app.mjs
 verification: >
   Check and lock Harn from a clean baseline. Install frozen dependencies, prove
-  the verifier rejects an environment-free web build, run the deploy command
-  in build-only mode and prove the configured bundle contains both exact relay
+  the verifier rejects an environment-free web build, run the deploy command in
+  build-only mode and prove the configured bundle contains both exact relay
   URLs, run web units/build plus release audit and focused relay pairing tests,
   deploy through pnpm deploy:app, inspect the production Pages bundle for both
-  exact URLs, and complete one fresh real pairing code through codor.app. Do
-  not change or republish the TGZ or VSIX.
+  exact URLs, and complete one fresh real pairing code through codor.app. Do not
+  change or republish the TGZ or VSIX.
+applied:
+  applied_at: 2026-08-05T00:58:58.602Z

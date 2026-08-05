@@ -1,0 +1,17 @@
+id: codor-app-deploy-bakes-and-verifies-relay-dial-pair
+hash: a-f24fedbd105f
+title: codor.app deployment bakes and verifies both relay dial endpoints
+state: active
+statement: >
+  The supported codor.app Pages deployment command must build web-next with
+  VITE_CODOR_RELAY_URL set to https://relay.codor.app and VITE_CODOR_RELAY_ALIAS
+  set to https://codor-relay.junweixiong.workers.dev, scan the resulting
+  JavaScript and refuse deployment unless both exact endpoints are present, then
+  deploy that verified directory to the codor-app project; the operator runbook
+  must name this command as the only supported path and explain that a bare
+  build/deploy makes valid pairing codes fail.
+depends_on:
+  - relay-pairing-host-universal-mint
+  - pairing-code-enrollment-surfaces
+  - relay-store-caches-reachable-dial-url
+created_by: hosted-relay-deploy-guard-v2

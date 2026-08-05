@@ -313,23 +313,31 @@ Screen install, APNs-backed Web Push, cold delivery, and notification navigation
 
 ## Blind tunnel relay (codor.app hosted access)
 
-Status: **not run — blocked on the Cloudflare account** (Phase 7 Track B: an account, the `codor.app`
-zone on Cloudflare nameservers, and `wrangler login`). This is the production smoke for the blind
-*tunnel* relay that lets the hosted browser at codor.app reach a NAT'd self-hosted switchboard. It is
+Status: **live on Cloudflare Pages + Workers**. This is the production smoke for the blind *tunnel*
+relay that lets the hosted browser at codor.app reach a NAT'd self-hosted switchboard. It is
 distinct from the [Public Web Push relay](#public-web-push-relay) below: the tunnel relay is the
 Cloudflare Worker in `relay-worker/`, configured with `CODOR_TUNNEL_URL` / `codor relay …`, whereas
 the push relay is the sealed Web Push forwarder configured with `CODOR_RELAY_URL`.
+
+<!-- harn:assume codor-app-deploy-bakes-and-verifies-relay-dial-pair ref=hosted-relay-deploy-runbook -->
+**Pages deployment invariant — learned from the 2026-08-05 pairing outage.** Deploy codor.app only
+from a clean commit with `pnpm deploy:app`. That command builds web-next with the canonical relay as
+`VITE_CODOR_RELAY_URL` and the Workers alias as `VITE_CODOR_RELAY_ALIAS`, then refuses to upload
+unless both exact endpoints are present in the emitted JavaScript. Do not run a bare
+`pnpm --filter @codor/web-next build` followed by `wrangler pages deploy`: an environment-free Vite
+build makes `relayUrlConfigured()` return undefined, so the hosted landing page incorrectly tries
+its nonexistent self-hosted `/api/pairing/exchange` path and every otherwise-valid short code fails.
+<!-- harn:end codor-app-deploy-bakes-and-verifies-relay-dial-pair -->
 
 **Canonical hostname — a correction learned in deployment.** A *page load* to
 `https://relay.codor.app` uses Encrypted Client Hello, so its SNI is hidden and `/healthz` loads even
 from an SNI-filtering network. A browser **WebSocket upgrade does NOT get ECH**, so
 `wss://relay.codor.app` is reset mid-handshake on those same networks *despite* `/healthz` working —
-the failure is invisible to a plain reachability check. The shipping relay URL is therefore the
-workers.dev alias (`wss://codor-relay.<subdomain>.workers.dev`), which is not SNI-filtered; it is what
-codor.app bakes in (`VITE_CODOR_RELAY_URL`) and what the switchboard host uses (`CODOR_TUNNEL_URL`),
-and `"workers_dev": true` is pinned in `wrangler.jsonc` so a deploy cannot silently disable it. Both
-hostnames terminate at the same Worker and Durable Objects, so a host on the alias and a browser on
-either name meet in the same rooms/sessions.
+the failure is invisible to a plain reachability check. The browser and switchboard therefore bake
+the canonical hostname and the workers.dev alias (`wss://codor-relay.<subdomain>.workers.dev`) as a
+dial pair and fall back symmetrically; `"workers_dev": true` is pinned in `wrangler.jsonc` so a Worker
+deploy cannot silently disable the alias. Both hostnames terminate at the same Worker and Durable
+Objects, so a host on the alias and a browser on either name meet in the same rooms/sessions.
 
 Pre-launch check: **browser WS upgrade on the canonical hostname verified from an unfiltered
 network** — confirm a real browser (not curl/Node, which expose SNI and get reset) completes the
