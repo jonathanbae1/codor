@@ -131,6 +131,8 @@ jobs:
 
       - name: Run the complete release gate
         run: pnpm release:check
+        env:
+          CODOR_FRESH_REF: ${{ github.ref_name }}
 
       - name: Build and inspect immutable release artifacts
         run: scripts/package-release-artifacts.sh "$RUNNER_TEMP/codor-release-artifacts"

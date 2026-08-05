@@ -1,0 +1,39 @@
+id: tagged-fresh-install-uses-immutable-ref
+title: Run the fresh-install proof from the tagged commit
+notes: >
+  The release gate runs from the intentionally detached tag checkout, while the
+  fresh-install proof requires an explicit ref when no branch is checked out.
+  Pass the checked-out release tag to that proof and audit the workflow contract
+  so future tag releases cannot reach this late failure. The local tag resolves
+  to the exact commit already validated by the workflow.
+assumptions:
+  reviewed:
+    - id: github-tags-publish-one-immutable-alpha-or-stable-release
+      outcome: unchanged
+      reason: >
+        Stable and alpha releases still publish only the exact eligible tagged
+        commit after every existing gate; the fresh-clone gate now receives that
+        same checked-out tag explicitly when Actions checks it out detached.
+anchors:
+  github-tags-publish-one-immutable-alpha-or-stable-release:
+    github-tag-release-workflow:
+      action: change
+      reason: |
+        Bind CODOR_FRESH_REF to github.ref_name for the complete release-gate
+        step so the fresh clone can select the local tag.
+    github-release-policy-audit:
+      action: change
+      reason: >
+        Assert tagged release verification always passes the checked-out tag to
+        the fresh-install proof.
+files:
+  - .github/workflows/release.yml
+  - .harn/plans/tagged-fresh-install-uses-immutable-ref.yaml
+  - scripts/release-audit.mjs
+verification: >
+  Check and lock on clean main; parse the workflow YAML, run the release audit,
+  simulate fresh-install from detached HEAD with CODOR_FRESH_REF set to HEAD,
+  and run Harn validation. Push only after commit, require green main CI, then
+  replace the still-unpublished v0.10.10 tag and verify npm plus GitHub Release.
+applied:
+  applied_at: 2026-08-05T11:09:18.068Z

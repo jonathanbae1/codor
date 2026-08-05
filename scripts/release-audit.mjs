@@ -268,6 +268,10 @@ assert.match(releaseWorkflow, /package-manager-cache:\s*false/);
 assert.doesNotMatch(releaseWorkflow, /cache:\s*pnpm/);
 assert.match(releaseWorkflow, /npm install --global npm@11\.19\.0/);
 assert.match(releaseWorkflow, /pnpm release:check/);
+assert.match(
+  releaseWorkflow,
+  /name:\s*Run the complete release gate[\s\S]*?CODOR_FRESH_REF:\s*\$\{\{\s*github\.ref_name\s*\}\}/,
+);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/main/);
 assert.match(releaseWorkflow, /git merge-base[\s\S]*origin\/alpha/);
 assert.match(releaseWorkflow, /NPM_TAG=latest/);
