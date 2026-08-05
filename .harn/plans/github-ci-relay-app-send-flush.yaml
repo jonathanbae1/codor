@@ -1,0 +1,65 @@
+id: github-ci-relay-app-send-flush
+title: Flush accepted relay app-socket messages before recovery can replace the session
+notes: >
+  The isolated 258-test gate proved room32 is the sole remaining failure, while
+  fifteen immediate focused reruns passed. The browser tunnel's virtual
+  WebSocket currently accepts a logical message into StreamMux but leaves its
+  OPEN/DATA frames solely in the generic 16 ms packet coalescer. A relay session
+  replacement inside that window disposes the coalescer and silently loses a
+  composer action which already returned from WebSocket.send; this narrow race
+  is amplified on loaded CI. Preserve the shared mux and packet format, but
+  flush the current mux immediately after each complete app-WebSocket message
+  is framed. Add a unit regression proving send reaches the underlying encrypted
+  transport synchronously. No retry, duplicate-delivery, protocol, server,
+  timeout, UI, relay-worker, or release-policy change is in scope.
+assumptions:
+  create:
+    - id: relay-app-socket-send-flushes-logical-message
+      title: Relay app sockets flush accepted logical messages to the session transport
+      statement: >
+        A browser TunnelSocket backed by a live relay mux must flush the mux
+        immediately after framing each complete WebSocket message, so returning
+        from send means its OPEN and DATA frames have reached the current
+        encrypted session transport rather than remaining solely in the 16 ms
+        coalescer where a recovery replacement can silently discard them.
+      depends_on:
+        - tunnel-stream-mux
+        - relay-app-socket-readiness-requires-server-evidence
+      reason: >
+        Record the app-WebSocket semantic boundary separately from the generic
+        shared coalescer policy so future transport work reviews silent-send risk.
+  reviewed:
+    - id: tunnel-stream-mux
+      outcome: unchanged
+      reason: >
+        App messages still use the same shared StreamMux, frame codec, stream
+        ids, flow control, and coalescer; the app-WebSocket boundary invokes its
+        existing public flush after one complete logical message.
+    - id: tunnel-mux-frame-wire-format
+      outcome: unchanged
+      reason: >
+        No frame bytes, packet limits, or default 16 ms/64 KiB coalescer policy
+        change; an explicit semantic-boundary flush is already supported.
+    - id: relay-app-socket-readiness-requires-server-evidence
+      outcome: unchanged
+      reason: >
+        Current-generation server evidence remains the composer admission gate;
+        this closes the smaller post-admission buffering window.
+anchors:
+  relay-app-socket-send-flushes-logical-message:
+    relay-app-socket-send-flush:
+      action: change
+      reason: Flush the exact mux which owns the app stream after each accepted message.
+    relay-app-socket-send-flush-regression:
+      action: change
+      reason: Prove an app send synchronously emits to the underlying session socket.
+files:
+  - .harn/plans/github-ci-relay-app-send-flush.yaml
+  - .harn/assumptions/relay-app-socket-send-flushes-logical-message.yaml
+  - packages/web-next/src/runtime/relay.ts
+  - packages/web-next/src/runtime/relay.spec.ts
+verification: >
+  Commit the draft plan checkpoint and lock cleanly. Run the focused relay unit
+  suite, web-next units/build, repeated room32 recovery journeys, and then the
+  complete isolated e2e entrypoint. Require all 258 browser tests to pass before
+  applying the plan, committing, or pushing main.
