@@ -2,12 +2,13 @@
 set -Eeuo pipefail
 
 # harn:assume packed-release-proof-runs-install-runtime ref=packed-install-script
+SOURCE_ROOT="${CODOR_PACKED_SOURCE:-$(git rev-parse --show-toplevel)}"
+SOURCE_REF="${CODOR_PACKED_REF:-$(git -C "$SOURCE_ROOT" branch --show-current)}"
+
 while IFS= read -r name; do
   unset "$name"
 done < <(compgen -A variable | grep '^CODOR_' || true)
 
-SOURCE_ROOT="${CODOR_PACKED_SOURCE:-$(git rev-parse --show-toplevel)}"
-SOURCE_REF="${CODOR_PACKED_REF:-$(git -C "$SOURCE_ROOT" branch --show-current)}"
 if [[ -z "$SOURCE_REF" ]]; then
   printf 'CODOR_PACKED_REF is required when the source checkout has detached HEAD\n' >&2
   exit 2

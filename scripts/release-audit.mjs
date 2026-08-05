@@ -226,6 +226,11 @@ assert.match(rootManifest.scripts?.['release:check'] ?? '', /scripts\/fresh-inst
 
 // harn:assume packed-release-proof-runs-install-runtime ref=release-proof-audit
 const packedProof = await readFile(new URL('../scripts/packed-install-test.sh', import.meta.url), 'utf8');
+const packedSourceCapture = packedProof.indexOf('SOURCE_ROOT="${CODOR_PACKED_SOURCE');
+const packedRefCapture = packedProof.indexOf('SOURCE_REF="${CODOR_PACKED_REF');
+const packedRuntimeScrub = packedProof.indexOf("compgen -A variable | grep '^CODOR_'");
+assert.ok(packedSourceCapture >= 0 && packedSourceCapture < packedRuntimeScrub);
+assert.ok(packedRefCapture >= 0 && packedRefCapture < packedRuntimeScrub);
 assert.match(packedProof, /--network none/);
 assert.match(packedProof, /--package="\$TARBALL" codor install --dry-run/);
 assert.match(packedProof, /\/sw\.js/);

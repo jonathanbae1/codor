@@ -1,0 +1,40 @@
+id: tagged-packed-proof-preserves-selector
+title: Preserve the selected tag while scrubbing packed-proof runtime state
+notes: >
+  The packed-install proof currently clears every CODOR_* variable before it
+  reads CODOR_PACKED_REF. That is invisible on a branch checkout, but a tagged
+  release runs detached and therefore loses its only clone selector. Capture the
+  proof source and ref first, then keep the existing blanket runtime-state scrub
+  before cloning or executing any packaged Codor process.
+assumptions:
+  reviewed:
+    - id: packed-release-proof-runs-install-runtime
+      outcome: unchanged
+      reason: >
+        The proof still clones one explicitly selected clean ref and prevents
+        inherited Codor runtime identity from reaching the packaged install;
+        this correction makes those two existing requirements compatible.
+anchors:
+  packed-release-proof-runs-install-runtime:
+    packed-install-script:
+      action: change
+      reason: >
+        Resolve CODOR_PACKED_SOURCE and CODOR_PACKED_REF before clearing all
+        CODOR_* runtime variables, while retaining the same fail-closed detached
+        checkout guard.
+    release-proof-audit:
+      action: change
+      reason: >
+        Assert that the selected source and ref are captured before the blanket
+        CODOR_* scrub so a future reorder cannot break tagged releases again.
+files:
+  - .harn/plans/tagged-packed-proof-preserves-selector.yaml
+  - scripts/packed-install-test.sh
+  - scripts/release-audit.mjs
+verification: >
+  Check and lock on clean main; run the release audit; reproduce the detached
+  tag path with CODOR_PACKED_REF=v0.10.10; pass Harn checks and the packed
+  proof; then require green main CI before replacing the unpublished tag and
+  rerunning the release workflow through npm and GitHub artifact verification.
+applied:
+  applied_at: 2026-08-05T12:29:43.288Z
