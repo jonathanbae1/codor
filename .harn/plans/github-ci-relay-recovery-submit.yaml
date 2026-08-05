@@ -1,0 +1,32 @@
+id: github-ci-relay-recovery-submit
+title: Exercise relay recovery through the explicit composer send action
+notes: >
+  Packet counters at the failure edge proved that the browser sent no relay
+  packet: Enter was intermittently consumed by the mention autocomplete after
+  the test filled an exact @viewer mention, leaving the draft as "@viewer ".
+  The relay journey is meant to verify the recovered client-to-server-to-client
+  path, not keyboard mention selection. Use the explicit enabled Send button
+  for both posts so the test has one unambiguous submission action. No product,
+  protocol, relay, retry, timeout, or release behavior changes.
+assumptions:
+  reviewed:
+    - id: relay-app-socket-readiness-requires-server-evidence
+      outcome: unchanged
+      reason: >
+        Current-generation server evidence remains the connection and composer
+        admission gate; only the browser regression's submission gesture changes.
+anchors:
+  relay-app-socket-readiness-requires-server-evidence:
+    relay-app-socket-readiness-browser-regression:
+      action: change
+      reason: >
+        Submit through the explicit Send button so mention autocomplete cannot
+        consume Enter before the recovery round trip is exercised.
+files:
+  - .harn/plans/github-ci-relay-recovery-submit.yaml
+  - packages/web-next/tests/room32-relay-journey.e2e.spec.ts
+verification: >
+  Commit and lock this replacement plan on a clean baseline. Run the room32
+  relay journey repeatedly, then run web-next units/build and the complete
+  isolated browser entrypoint. Require all 258 browser tests to pass before
+  applying the plan, committing implementation, or pushing main.
