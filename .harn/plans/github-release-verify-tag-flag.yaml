@@ -1,0 +1,39 @@
+id: github-release-verify-tag-flag
+title: Pass GitHub release tag verification as a boolean flag
+notes: >
+  The release job published the exact TGZ successfully, then passed the tag name
+  as a value to gh release create's boolean --verify-tag option. gh treated that
+  extra value as an asset glob and rejected it. Keep the already supplied
+  positional tag and pass --verify-tag without a value, with an audit regression
+  for the exact command shape.
+assumptions:
+  reviewed:
+    - id: github-tags-publish-one-immutable-alpha-or-stable-release
+      outcome: unchanged
+      reason: >
+        A verified eligible tag still publishes one immutable npm package and
+        matching GitHub Release; the GitHub CLI invocation now expresses the
+        existing verification requirement with its actual boolean syntax.
+anchors:
+  github-tags-publish-one-immutable-alpha-or-stable-release:
+    github-tag-release-workflow:
+      action: change
+      reason: >
+        Remove the spurious value following --verify-tag while retaining the
+        positional GITHUB_REF_NAME and every existing release option.
+    github-release-policy-audit:
+      action: change
+      reason: |
+        Assert --verify-tag is boolean and is not followed by the tag name.
+files:
+  - .github/workflows/release.yml
+  - .harn/plans/github-release-verify-tag-flag.yaml
+  - scripts/release-audit.mjs
+verification: >
+  Check and lock on clean main; parse the workflow YAML; pass the clean-worktree
+  release audit and Harn checks; verify gh release create help confirms boolean
+  syntax; then commit and push. Recover v0.10.10 from its immutable tag using
+  the public npm TGZ and rebuilt inspected VSIX, verify checksums/manifests, and
+  smoke the registry install.
+applied:
+  applied_at: 2026-08-05T13:06:07.580Z

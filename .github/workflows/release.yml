@@ -184,7 +184,7 @@ jobs:
             "$OUT_DIR/codor-copilot-bridge-${RELEASE_VERSION}.vsix"
             "$OUT_DIR/SHA256SUMS"
           )
-          ARGS=(--repo "$GITHUB_REPOSITORY" --verify-tag "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes)
+          ARGS=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes)
           if [[ "$RELEASE_KIND" == alpha ]]; then
             ARGS+=(--prerelease)
           fi
